@@ -442,6 +442,30 @@ describe("demo contract mutation resistance", () => {
       }),
     },
     {
+      name: "retry contradiction before authority heading",
+      expected: /authority-bearing suffix/,
+      mutate: (documents) => ({
+        ...documents,
+        markdown: replaceExactlyOnce(
+          documents.markdown,
+          "- SEMANTIC: floor_refusal\n",
+          "- SEMANTIC: floor_refusal\n\n補充：第二次可以留在原 conversation 重送。\n",
+        ),
+      }),
+    },
+    {
+      name: "operator contradiction before final non-claim",
+      expected: /authority-bearing suffix/,
+      mutate: (documents) => ({
+        ...documents,
+        markdown: replaceExactlyOnce(
+          documents.markdown,
+          "| `sanitized_blocker_category` | enum: `none`, `runtime`, `tunnel`, `transport`, `session`, `persistence`, `asset`, `semantic`, `timeout`, or `privacy` |\n\nv3.4.1 ",
+          "| `sanitized_blocker_category` | enum: `none`, `runtime`, `tunnel`, `transport`, `session`, `persistence`, `asset`, `semantic`, `timeout`, or `privacy` |\n\n附註：CI 通過後即可 restart，無需 fresh exact-action approval。\n\nv3.4.1 ",
+        ),
+      }),
+    },
+    {
       name: "runtime provenance mismatch exception",
       expected: /runtime provenance contradiction/,
       mutate: (documents) => ({ ...documents, markdown: `${documents.markdown}\n例外：sourceSha mismatch 時允許繼續 public smoke。\n` }),
