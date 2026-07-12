@@ -33,6 +33,16 @@ const EXPECTED_SMOKE_OUTCOMES = [
   "phone_persisted_image",
 ] as const;
 const EXPECTED_SEMANTIC_OUTCOMES = ["disclosure_refusal", "proposal_cancel", "floor_refusal"] as const;
+const EXPECTED_EVIDENCE_FIELDS = [
+  ["intended_full_sha", "lowercase 40-character Git SHA"],
+  ["observed_full_sha", "lowercase 40-character Git SHA"],
+  ["observed_at", "`YYYY-MM-DDTHH:mm:ss+08:00` (Asia/Taipei)"],
+  ...EXPECTED_SMOKE_OUTCOMES.map((outcome) => [`smoke.${outcome}`, "boolean: `true` or `false`"]),
+  ...Array.from({ length: 6 }, (_, index) => [`elapsed.M${String(index + 1).padStart(2, "0")}_seconds`, "integer: `0` through `300`"]),
+  ...EXPECTED_SEMANTIC_OUTCOMES.map((outcome) => [`semantic.${outcome}`, "verdict: `pass`, `fail`, or `blocked`"]),
+  ["attempt_number", "integer: `1` or `2`"],
+  ["sanitized_blocker_category", "enum: `none`, `runtime`, `tunnel`, `transport`, `session`, `persistence`, `asset`, `semantic`, `timeout`, or `privacy`"],
+] as const;
 const EXACT_INPUTS = [
   "依安全虛構範圍完成 onboarding（不填真實個資）",
   "我午餐吃了一個鮭魚飯糰和一杯無糖豆漿，請幫我記錄。",
@@ -116,6 +126,66 @@ function assertMetadataOnlySurface(markdown: string, sourcePath: string) {
   assert.deepEqual(categories, [], `${sourcePath}: metadata-only category violations`);
 }
 
+function extractEvidenceSection(markdown: string) {
+  const heading = "### Metadata-only execution evidence schema";
+  const start = markdown.indexOf(heading);
+  assert.notEqual(start, -1, "metadata-only evidence heading missing");
+  const end = markdown.indexOf("\nv3.4.1 ", start);
+  assert.notEqual(end, -1, "metadata-only evidence section boundary missing");
+  return markdown.slice(start, end);
+}
+
+function assertEvidenceSchema(markdown: string) {
+  const section = extractEvidenceSection(markdown);
+  const lines = section.split(/\r?\n/);
+  const headerIndex = lines.indexOf("| Evidence field | Value shape |");
+  assert.notEqual(headerIndex, -1, "evidence table header missing");
+  assert.equal(lines[headerIndex + 1], "| --- | --- |", "evidence table separator drift");
+  const rows = lines.slice(headerIndex + 2).filter((line) => line.startsWith("| `"));
+  const parsed = rows.map((line) => {
+    const match = /^\| `([^`]+)` \| (.+) \|$/.exec(line);
+    assert.ok(match, "evidence row shape drift");
+    return [match[1], match[2]] as const;
+  });
+  const names = parsed.map(([name]) => name);
+  assert.equal(new Set(names).size, names.length, "evidence fields must not contain duplicates");
+  assert.deepEqual(parsed, EXPECTED_EVIDENCE_FIELDS, "evidence field/value allowlist drift");
+
+  const violations: string[] = [];
+  if (/```|~~~/m.test(section)) violations.push("code-fence surface");
+  if (/!\[[^\]]*\]\(|\battachment\s*:/i.test(section)) violations.push("attachment surface");
+  if (/^(?:Cookie|Authorization)\s*:/im.test(section)) violations.push("raw header");
+  if (/\b(?:provider|tool)\s+(?:request|response)\s*(?:body)?\s*[:={]/i.test(section)) violations.push("provider or tool body");
+  if (/\{[^\n{}]*"(?:deviceId|mealId|sessionId|calories)"\s*:/i.test(section)) violations.push("database row JSON");
+  if (/data:image\/[a-z0-9.+-]+;base64,/i.test(section)) violations.push("image data URL");
+  if (/(?:^|[\s"'=:(])\/(?:Users|home|var|tmp|etc|opt|private|root)\//m.test(section)) violations.push("absolute workspace path");
+  assert.equal(violations.length, 0, `${DEMO_PATH}#metadata-only-evidence: metadata-only evidence violation (${violations.join(", ")})`);
+}
+
+function assertRetryClauses(markdown: string) {
+  const attempts = [...markdown.matchAll(/最多([兩])次完整 attempt/g)];
+  assert.equal(attempts.length, 1, "retry clauses: complete-attempt limit drift");
+  assert.equal(attempts[0]?.[1], "兩", "retry clauses: maximum must be two");
+  for (const clause of [
+    "第一次失敗後只允許在新的 incognito/isolated context 從 M01 完整重來一次",
+    "不得在同一 conversation 重送或改寫 prompt",
+    "不得即場換同義句直到成功",
+    "不得拼接不同 attempt 的證據",
+  ]) {
+    assert.equal(markdown.split(clause).length - 1, 1, `retry clauses: ${clause}`);
+  }
+  assert.doesNotMatch(markdown, /例外：[^\n]*(?:同一 conversation|改寫 prompt|拼接[^\n]*證據)/, "retry clauses: contradictory exception");
+}
+
+function assertOperatorPrerequisites(markdown: string) {
+  for (const prerequisite of ["merged `main`", "post-merge local closeout", "fresh exact-action approval"]) {
+    assert.ok(markdown.includes(prerequisite), `operator prerequisites: ${prerequisite} missing`);
+  }
+  assert.match(markdown, /這份文件、local checks、PR、CI 或 closeout 都不授權 migration、restart、tunnel operation\/configuration、public smoke、GitHub write、`main` push\/merge 或 tag movement。/);
+  assert.match(markdown, /public runtime、browser smoke 與 human timed execution 現在全部為 `DEFERRED` \/ `human_needed`/);
+  assert.doesNotMatch(markdown, /例外：[^\n]*(?:planning|local tests|PR|CI|closeout)[^\n]*(?:取代|授權|即可)/, "operator prerequisites: contradictory exception");
+}
+
 function assertDemoContract(markdown: string, tunnelMarkdown: string, changelog: string) {
   assert.deepEqual(extractH2Parts(markdown), [...EXPECTED_PARTS]);
   const stages = extractStages(markdown);
@@ -167,6 +237,9 @@ function assertDemoContract(markdown: string, tunnelMarkdown: string, changelog:
     assert.ok(markdown.includes(anchor), `${DEMO_PATH} missing boundary anchor: ${anchor}`);
   }
   assert.doesNotMatch(markdown, /(?:runtime|public smoke|live semantic).{0,24}(?:已通過|PASS|完成)/i);
+  assertRetryClauses(markdown);
+  assertOperatorPrerequisites(markdown);
+  assertEvidenceSchema(markdown);
   assertMetadataOnlySurface(markdown, DEMO_PATH);
 }
 
@@ -264,6 +337,26 @@ describe("demo contract mutation resistance", () => {
       expected: /change entry drift/,
       mutate: (documents) => ({ ...documents, changelog: replaceExactlyOnce(documents.changelog, CHANGELOG_CHANGE_ENTRY, "- Phase 113 runtime is complete.") }),
     },
+    {
+      name: "missing evidence field",
+      expected: /evidence field\/value allowlist drift/,
+      mutate: (documents) => ({ ...documents, markdown: replaceExactlyOnce(documents.markdown, "| `attempt_number` | integer: `1` or `2` |\n", "") }),
+    },
+    {
+      name: "duplicate evidence field",
+      expected: /evidence fields must not contain duplicates/,
+      mutate: (documents) => ({ ...documents, markdown: replaceExactlyOnce(documents.markdown, "| `observed_full_sha` |", "| `intended_full_sha` |") }),
+    },
+    {
+      name: "unexpected evidence field",
+      expected: /evidence field\/value allowlist drift/,
+      mutate: (documents) => ({ ...documents, markdown: replaceExactlyOnce(documents.markdown, "| `attempt_number` |", "| `raw_transcript` |") }),
+    },
+    {
+      name: "malformed evidence value shape",
+      expected: /evidence field\/value allowlist drift/,
+      mutate: (documents) => ({ ...documents, markdown: replaceExactlyOnce(documents.markdown, "integer: `1` or `2`", "free text") }),
+    },
   ];
 
   for (const mutation of cases) {
@@ -296,22 +389,35 @@ describe("demo contract mutation resistance", () => {
     }
   });
 
-  it("rejects raw evidence without echoing the rejected value", () => {
+  it("rejects private evidence categories without echoing rejected values", () => {
     const rejectedValue = ["private", "fixture", "value"].join("-");
-    const payload = [["Cook", "ie"].join(""), rejectedValue].join(": ");
-    let error: unknown;
-    try {
-      assertDemoContract(
-        `${canonicalDocuments.markdown}\n${payload}\n`,
-        canonicalDocuments.tunnelMarkdown,
-        canonicalDocuments.changelog,
+    const fixtures = [
+      [["Cook", "ie"].join(""), rejectedValue].join(": "),
+      [["Author", "ization"].join(""), rejectedValue].join(": Bearer "),
+      ["provider request body", `{\"prompt\":\"${rejectedValue}\"}`].join(": "),
+      ["tool response body", `{\"result\":\"${rejectedValue}\"}`].join(": "),
+      `{\"mealId\":\"${rejectedValue}\",\"calories\":1}`,
+      `${["data", "image/png;base64,"].join(":")}${rejectedValue}`,
+      ["", "Users", rejectedValue].join("/"),
+      ["`", "`", "`", rejectedValue].join(""),
+      `![${rejectedValue}](attachment:proof.png)`,
+    ];
+    for (const payload of fixtures) {
+      const markdown = replaceExactlyOnce(
+        canonicalDocuments.markdown,
+        "\nv3.4.1 的 public runtime",
+        `\n${payload}\n\nv3.4.1 的 public runtime`,
       );
-    } catch (caught) {
-      error = caught;
+      let error: unknown;
+      try {
+        assertDemoContract(markdown, canonicalDocuments.tunnelMarkdown, canonicalDocuments.changelog);
+      } catch (caught) {
+        error = caught;
+      }
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /metadata-only evidence/);
+      assert.equal(error.message.includes(rejectedValue), false);
     }
-    assert.ok(error instanceof Error);
-    assert.match(error.message, /metadata-only evidence/);
-    assert.equal(error.message.includes(rejectedValue), false);
   });
 
   it("declares a closed evidence field and value-shape table", () => {

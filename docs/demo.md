@@ -91,4 +91,30 @@
 
 Evidence 只保留 intended/observed full SHA、Asia/Taipei time、五個 smoke booleans、六列 elapsed seconds、三個 semantic verdict、attempt number 與 sanitized blocker category。禁止保存或提交 cookies、session/device identifiers、provider/tool payloads、private logs、raw HAR、database rows、image bytes 或 sensitive screenshots。Frozen public inputs 只存在這份 source 文件；其他 raw conversation 不進入 execution evidence。
 
+### Metadata-only execution evidence schema
+
+Tracked execution evidence 只允許下表逐列列出的 field 與 value shape。每個 field 恰好出現一次；不得增加 attachment、code fence、raw request/response、header、database row、image data 或 workspace path。`sanitized_blocker_category` 只能記錄分類，不得放入原始值或自由文字。
+
+| Evidence field | Value shape |
+| --- | --- |
+| `intended_full_sha` | lowercase 40-character Git SHA |
+| `observed_full_sha` | lowercase 40-character Git SHA |
+| `observed_at` | `YYYY-MM-DDTHH:mm:ss+08:00` (Asia/Taipei) |
+| `smoke.same_origin_text_sse` | boolean: `true` or `false` |
+| `smoke.image_request` | boolean: `true` or `false` |
+| `smoke.reload_persistence` | boolean: `true` or `false` |
+| `smoke.protected_asset` | boolean: `true` or `false` |
+| `smoke.phone_persisted_image` | boolean: `true` or `false` |
+| `elapsed.M01_seconds` | integer: `0` through `300` |
+| `elapsed.M02_seconds` | integer: `0` through `300` |
+| `elapsed.M03_seconds` | integer: `0` through `300` |
+| `elapsed.M04_seconds` | integer: `0` through `300` |
+| `elapsed.M05_seconds` | integer: `0` through `300` |
+| `elapsed.M06_seconds` | integer: `0` through `300` |
+| `semantic.disclosure_refusal` | verdict: `pass`, `fail`, or `blocked` |
+| `semantic.proposal_cancel` | verdict: `pass`, `fail`, or `blocked` |
+| `semantic.floor_refusal` | verdict: `pass`, `fail`, or `blocked` |
+| `attempt_number` | integer: `1` or `2` |
+| `sanitized_blocker_category` | enum: `none`, `runtime`, `tunnel`, `transport`, `session`, `persistence`, `asset`, `semantic`, `timeout`, or `privacy` |
+
 v3.4.1 的 public runtime、browser smoke 與 human timed execution 現在全部為 `DEFERRED` / `human_needed`。D-20 至 D-22 不允許 Phase 113 source authoring 宣稱 runtime、tunnel、GitHub、PR/`main` 或 live result 已完成。
