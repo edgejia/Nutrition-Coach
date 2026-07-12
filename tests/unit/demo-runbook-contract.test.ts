@@ -4,7 +4,13 @@ import path from "node:path";
 import { describe, it } from "node:test";
 
 const DEMO_PATH = "docs/demo.md";
+const TUNNEL_PATH = "docs/deploy/cloudflare-tunnel.md";
+const CHANGELOG_PATH = "CHANGELOG.md";
 const CONTRACT_PATH = "tests/unit/demo-runbook-contract.test.ts";
+const CHANGELOG_CHANGE_ENTRY =
+  "- Phase 113 新增 `docs/demo.md` 的 DEMO-02 named-tunnel runbook handoff 與 DEMO-04 五分鐘固定 script；這只記錄 source 文件，未表示已合併 `main`、刷新 runtime、變更 tunnel、通過 public smoke、關閉 #54 或通過 live semantic demo。";
+const CHANGELOG_VERIFICATION_ENTRY =
+  "- Phase 113 的 dependency-free demo contract 鎖定 named-tunnel SSE authority、固定 script 與上述 source-only non-claim boundary；focused contract 與 `yarn tsc --noEmit` 通過仍未表示已合併 `main`、刷新 runtime、變更 tunnel、通過 public smoke、關閉 #54 或通過 live semantic demo。";
 const EXPECTED_PARTS = ["第一部分：乾淨 checkout 重建與 operator 檢查", "第二部分：五分鐘固定 presenter script"] as const;
 const EXPECTED_STAGE_IDS = Array.from({ length: 8 }, (_, index) => `R${String(index + 1).padStart(2, "0")}`);
 const EXPECTED_STAGE_TITLES = [
@@ -72,6 +78,13 @@ function extractTimedRows(markdown: string): TimedRow[] {
 
 function extractMarkerValues(markdown: string, marker: string) {
   return [...markdown.matchAll(new RegExp(`^- ${marker}: ([a-z0-9_]+)$`, "gm"))].map((match) => match[1]);
+}
+
+function extractVersionSection(markdown: string, versionHeading: string) {
+  const start = markdown.indexOf(versionHeading);
+  assert.notEqual(start, -1, `${versionHeading} missing`);
+  const end = markdown.indexOf("\n## ", start + versionHeading.length);
+  return markdown.slice(start, end === -1 ? markdown.length : end);
 }
 
 function assertExactUniqueSet(actual: string[], expected: readonly string[], label: string) {
@@ -171,6 +184,24 @@ describe("public demo runbook contract", () => {
     assertExactUniqueSet(extractMarkerValues(markdown, "SEMANTIC"), EXPECTED_SEMANTIC_OUTCOMES, "semantic outcomes");
     assert.match(markdown, /\[Cloudflare Tunnel production runtime\]\(deploy\/cloudflare-tunnel\.md\)/);
     assert.doesNotMatch(markdown, /cloudflared tunnel (?:login|create|route|run)/);
+  });
+
+  it("requires stable named-tunnel evidence for the SSE-dependent public smoke", async () => {
+    const markdown = await readFile(TUNNEL_PATH, "utf8");
+    assert.match(markdown, /required public smoke must use the stable named tunnel/);
+    assert.match(markdown, /temporary Quick Tunnel \(including a `trycloudflare\.com` URL\) cannot preserve this app's required same-origin SSE proof/);
+    assert.doesNotMatch(markdown, /Quick tunnels are acceptable/);
+  });
+
+  it("locks the v3.4 source-only changelog entries and non-claim boundary", async () => {
+    const changelog = extractVersionSection(await readFile(CHANGELOG_PATH, "utf8"), "## v3.4 - Unreleased");
+    assert.equal(changelog.split(CHANGELOG_CHANGE_ENTRY).length - 1, 1, "Phase 113 change entry drift");
+    assert.equal(changelog.split(CHANGELOG_VERIFICATION_ENTRY).length - 1, 1, "Phase 113 verification entry drift");
+    for (const entry of [CHANGELOG_CHANGE_ENTRY, CHANGELOG_VERIFICATION_ENTRY]) {
+      for (const nonClaim of ["已合併 `main`", "刷新 runtime", "變更 tunnel", "通過 public smoke", "關閉 #54", "通過 live semantic demo"]) {
+        assert.ok(entry.includes(nonClaim), `Phase 113 changelog non-claim missing: ${nonClaim}`);
+      }
+    }
   });
 
   it("preserves fresh-guest, durable-state, retry, and operator-gate boundaries", async () => {
