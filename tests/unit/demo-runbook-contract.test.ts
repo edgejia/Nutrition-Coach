@@ -246,6 +246,12 @@ describe("public demo runbook contract", () => {
 });
 
 describe("demo contract mutation resistance", () => {
+  it("routes the canonical and mutation suites through one real-document assertion entrypoint", async () => {
+    const source = await readFile(CONTRACT_PATH, "utf8");
+    assert.match(source, /function assertDemoContract\(/);
+    assert.doesNotMatch(source, /makeSyntheticContract|assertSyntheticContract/);
+  });
+
   for (const [mutation, message] of [
     ["remove_stage", /stage IDs/],
     ["duplicate_stage", /stage IDs/],
