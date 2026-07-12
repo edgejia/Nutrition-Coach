@@ -128,6 +128,20 @@ export interface AppOptions {
 export async function buildApp(opts: AppOptions) {
   const llmProvider = opts.llmProvider;
   const clientDistDir = path.resolve(opts.clientDistDir ?? config.clientDistDir);
+
+  const app = Fastify({ logger: opts.logger ?? false });
+
+  // Fail fast if the runtime timezone contract is misconfigured.
+  const { validateTimezone } = await import("./lib/time.js");
+  validateTimezone(app.log);
+  validateGuestSessionSecretForRuntime({
+    guestSessionSecret: config.guestSessionSecret,
+    guestSessionCookieSecure: config.guestSessionCookieSecure,
+    nodeEnv: config.nodeEnv,
+  });
+  const runtimeConfig = readRuntimeConfigFromEnv();
+  app.decorate("runtimeConfig", runtimeConfig);
+
   const deployedLikeRuntime = isDeployedLikeRuntime({
     guestSessionCookieSecure: config.guestSessionCookieSecure,
     nodeEnv: config.nodeEnv,
@@ -171,19 +185,6 @@ export async function buildApp(opts: AppOptions) {
       throw new Error(CLIENT_BUILD_PROVENANCE_ERROR);
     }
   }
-
-  const app = Fastify({ logger: opts.logger ?? false });
-
-  // Fail fast if the runtime timezone contract is misconfigured.
-  const { validateTimezone } = await import("./lib/time.js");
-  validateTimezone(app.log);
-  validateGuestSessionSecretForRuntime({
-    guestSessionSecret: config.guestSessionSecret,
-    guestSessionCookieSecure: config.guestSessionCookieSecure,
-    nodeEnv: config.nodeEnv,
-  });
-  const runtimeConfig = readRuntimeConfigFromEnv();
-  app.decorate("runtimeConfig", runtimeConfig);
 
   const db = createDb(opts.dbPath ?? config.dbPath);
   const deviceService = createDeviceService(db);

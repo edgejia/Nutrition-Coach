@@ -47,6 +47,8 @@ function localEnv() {
   const env: NodeJS.ProcessEnv = { ...process.env, NODE_ENV: "test" };
   delete env.GUEST_SESSION_COOKIE_SECURE;
   delete env.GUEST_SESSION_SECRET;
+  delete env.SOURCE_SHA;
+  delete env.CLIENT_DIST_DIR;
   return env;
 }
 
@@ -74,6 +76,8 @@ describe("CORS registration policy", () => {
         ...localEnv(),
         NODE_ENV: "production",
         GUEST_SESSION_SECRET: "strong-production-secret-with-punctuation!!!",
+        SOURCE_SHA: "0123456789abcdef0123456789abcdef01234567",
+        CLIENT_DIST_DIR: ".nonexistent-cors-probe-client-dist",
       },
       "https://example.invalid",
     );

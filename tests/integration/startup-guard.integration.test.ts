@@ -3,7 +3,7 @@ process.env.TZ = "Asia/Taipei";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DEFAULT_GUEST_SESSION_SECRET, MAX_GUEST_SESSION_TTL_SECONDS } from "../../server/config.js";
@@ -11,7 +11,7 @@ import { DEFAULT_GUEST_SESSION_SECRET, MAX_GUEST_SESSION_TTL_SECONDS } from "../
 const probeScript = [
   'const { buildApp } = await import("./server/app.ts");',
   'const { MockLLMProvider } = await import("./server/llm/mock.ts");',
-  'const app = await buildApp({ dbPath: process.env.TEST_DB_PATH ?? ":memory:", llmProvider: new MockLLMProvider() });',
+  'const app = await buildApp({ dbPath: process.env.TEST_DB_PATH ?? ":memory:", clientDistDir: process.env.TEST_CLIENT_DIST_DIR, llmProvider: new MockLLMProvider() });',
   'console.log(`RUNTIME_PORT:${app.runtimeConfig.port}`);',
   'console.log("BOOT_OK");',
   "await app.close();",
@@ -41,7 +41,18 @@ function baseEnv() {
   delete env.PORT;
   delete env.GUEST_SESSION_TTL_SECONDS;
   delete env.GUEST_SESSION_RESUME_TTL_SECONDS;
+  delete env.SOURCE_SHA;
   return env;
+}
+
+function createBuiltClientFixture() {
+  const directory = mkdtempSync(path.join(tmpdir(), "nc-startup-built-client-"));
+  writeFileSync(path.join(directory, "index.html"), "<!doctype html><div id=\"root\"></div>");
+  writeFileSync(
+    path.join(directory, "source-revision.json"),
+    '{"sourceSha":"0123456789abcdef0123456789abcdef01234567"}\n',
+  );
+  return directory;
 }
 
 function assertWeakSecretBootFailure(result: ReturnType<typeof runBootProbe>, rejectedSecret?: string) {
@@ -118,6 +129,18 @@ describe("startup guest-session security guard", () => {
 
     assertWeakSecretBootFailure(result);
     assert.doesNotMatch(result.output, /Database schema missing/);
+  });
+
+  it("fails on the guest-session secret before provenance under a built client manifest", () => {
+    const result = runBootProbe({
+      ...baseEnv(),
+      NODE_ENV: "production",
+      TEST_CLIENT_DIST_DIR: createBuiltClientFixture(),
+    });
+
+    assertWeakSecretBootFailure(result);
+    assert.doesNotMatch(result.output, /Runtime source provenance/);
+    assert.doesNotMatch(result.output, /Client build provenance/);
   });
 
   it("boots ordinary local test runtime with the development default and secure cookies off", () => {
