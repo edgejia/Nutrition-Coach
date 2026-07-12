@@ -60,7 +60,7 @@ cloudflared tunnel run <name>
 
 For a dashboard-managed tunnel, configure a published application route in Cloudflare that maps the chosen hostname to the local service URL.
 
-Do not use the Vite dev server as the tunnel origin for production smoke. Quick tunnels are acceptable only for explicitly temporary acceptance checks; they are not stable production evidence.
+Do not use the Vite dev server as the tunnel origin for production smoke. The required public smoke must use the stable named tunnel: a temporary Quick Tunnel (including a `trycloudflare.com` URL) cannot preserve this app's required same-origin SSE proof and is not acceptable evidence for the checklist below.
 
 References:
 
