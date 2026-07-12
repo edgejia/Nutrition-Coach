@@ -380,6 +380,54 @@ describe("demo contract mutation resistance", () => {
       mutate: (documents) => ({ ...documents, markdown: replaceExactlyOnce(documents.markdown, "integer: `1` or `2`", "free text") }),
     },
     {
+      name: "unquoted required evidence field",
+      expected: /evidence row shape drift/,
+      mutate: (documents) => ({
+        ...documents,
+        markdown: replaceExactlyOnce(
+          documents.markdown,
+          "| `attempt_number` | integer: `1` or `2` |",
+          "| attempt_number | integer: `1` or `2` |",
+        ),
+      }),
+    },
+    {
+      name: "malformed required evidence row",
+      expected: /evidence row shape drift/,
+      mutate: (documents) => ({
+        ...documents,
+        markdown: replaceExactlyOnce(
+          documents.markdown,
+          "| `attempt_number` | integer: `1` or `2` |",
+          "| `attempt_number` integer: `1` or `2` |",
+        ),
+      }),
+    },
+    {
+      name: "malformed extra evidence row",
+      expected: /evidence row shape drift/,
+      mutate: (documents) => ({
+        ...documents,
+        markdown: replaceExactlyOnce(
+          documents.markdown,
+          "| `sanitized_blocker_category` | enum: `none`, `runtime`, `tunnel`, `transport`, `session`, `persistence`, `asset`, `semantic`, `timeout`, or `privacy` |\n",
+          "| `sanitized_blocker_category` | enum: `none`, `runtime`, `tunnel`, `transport`, `session`, `persistence`, `asset`, `semantic`, `timeout`, or `privacy` |\n| raw_transcript | free text |\n",
+        ),
+      }),
+    },
+    {
+      name: "well-formed unexpected extra evidence row",
+      expected: /evidence field\/value allowlist drift/,
+      mutate: (documents) => ({
+        ...documents,
+        markdown: replaceExactlyOnce(
+          documents.markdown,
+          "| `sanitized_blocker_category` | enum: `none`, `runtime`, `tunnel`, `transport`, `session`, `persistence`, `asset`, `semantic`, `timeout`, or `privacy` |\n",
+          "| `sanitized_blocker_category` | enum: `none`, `runtime`, `tunnel`, `transport`, `session`, `persistence`, `asset`, `semantic`, `timeout`, or `privacy` |\n| `raw_transcript` | free text |\n",
+        ),
+      }),
+    },
+    {
       name: "runtime provenance mismatch exception",
       expected: /runtime provenance contradiction/,
       mutate: (documents) => ({ ...documents, markdown: `${documents.markdown}\n例外：sourceSha mismatch 時允許繼續 public smoke。\n` }),
