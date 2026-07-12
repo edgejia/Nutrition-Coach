@@ -135,21 +135,35 @@ function extractEvidenceSection(markdown: string) {
   return markdown.slice(start, end);
 }
 
+function parseExactTwoCellTable(section: string, header: string, label: string) {
+  const lines = section.split(/\r?\n/);
+  const headerIndexes = lines.flatMap((line, index) => line === header ? [index] : []);
+  assert.equal(headerIndexes.length, 1, `${label} table header must occur exactly once`);
+  const headerIndex = headerIndexes[0];
+  assert.equal(lines[headerIndex + 1], "| --- | --- |", `${label} table separator drift`);
+
+  const rows: Array<readonly [string, string]> = [];
+  let cursor = headerIndex + 2;
+  while (cursor < lines.length && lines[cursor] !== "") {
+    const match = /^\| `([^`|]+)` \| ([^|]+) \|$/.exec(lines[cursor]);
+    assert.ok(match, `${label} row shape drift at table row ${rows.length + 1}`);
+    rows.push([match[1], match[2]]);
+    cursor += 1;
+  }
+
+  return { lines, rows, cursor };
+}
+
 function assertEvidenceSchema(markdown: string) {
   const section = extractEvidenceSection(markdown);
-  const lines = section.split(/\r?\n/);
-  const headerIndex = lines.indexOf("| Evidence field | Value shape |");
-  assert.notEqual(headerIndex, -1, "evidence table header missing");
-  assert.equal(lines[headerIndex + 1], "| --- | --- |", "evidence table separator drift");
-  const rows = lines.slice(headerIndex + 2).filter((line) => line.startsWith("| `"));
-  const parsed = rows.map((line) => {
-    const match = /^\| `([^`]+)` \| (.+) \|$/.exec(line);
-    assert.ok(match, "evidence row shape drift");
-    return [match[1], match[2]] as const;
-  });
-  const names = parsed.map(([name]) => name);
+  const { rows } = parseExactTwoCellTable(
+    section,
+    "| Evidence field | Value shape |",
+    "evidence",
+  );
+  const names = rows.map(([name]) => name);
   assert.equal(new Set(names).size, names.length, "evidence fields must not contain duplicates");
-  assert.deepEqual(parsed, EXPECTED_EVIDENCE_FIELDS, "evidence field/value allowlist drift");
+  assert.deepEqual(rows, EXPECTED_EVIDENCE_FIELDS, "evidence field/value allowlist drift");
 
   const violations: string[] = [];
   if (/```|~~~/m.test(section)) violations.push("code-fence surface");
