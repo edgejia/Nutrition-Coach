@@ -135,14 +135,15 @@ describe("runtime provenance boot validation", () => {
       'catch (error) { if (!(error instanceof Error) || error.message !== "Runtime source provenance is required in deployed-like runtime.") process.exit(3); }',
     ].join(" ");
 
+    const childEnvironment = { ...process.env };
+    delete childEnvironment.SOURCE_SHA;
+    Object.assign(childEnvironment, {
+      NODE_ENV: "production",
+      GUEST_SESSION_SECRET: "runtime-provenance-test-secret-value-123456",
+    });
     const result = await execFileAsync(process.execPath, ["--import", "tsx", "--eval", code], {
       cwd: REPO_ROOT,
-      env: {
-        ...process.env,
-        NODE_ENV: "production",
-        GUEST_SESSION_SECRET: "runtime-provenance-test-secret-value-123456",
-        SOURCE_SHA: "",
-      },
+      env: childEnvironment,
     });
 
     assert.equal(result.stdout, "");
