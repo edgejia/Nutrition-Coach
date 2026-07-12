@@ -6,7 +6,7 @@
 
 ## 第一部分：乾淨 checkout 重建與 operator 檢查
 
-「從頭重建」指從刻意選定的 clean source checkout 依序完成下列八個階段，不是清空 production data。開始前先證明 intended full SHA 與 checkout full SHA；production refresh 只可在 source 已合併到 merged `main`、post-merge local closeout 完成且 operator 對精確動作重新批准後執行。
+「從頭重建」指從刻意選定的 clean source checkout 依序完成下列八個階段，不是清空 production data。開始前以 `git rev-parse HEAD` 記錄 `INTENDED_SHA`，並要求它符合 lowercase 40-character full SHA (`^[0-9a-f]{40}$`)；production refresh 只可在 source 已合併到 merged `main`、post-merge local closeout 完成且 operator 對精確動作重新批准後執行。
 
 整個重建必須沿用既有 stable paths 與 stable signing material。新 incognito window 或 isolated browser context 只重設該 browser context 的 cookies 與 localStorage；不得清除或改寫 durable SQLite、assets、uploads staging、stable signing secret 或其他使用者資料。
 
@@ -30,9 +30,9 @@
 
 ### R04 · build
 
-- **動作：** 執行 `yarn build`，產生由 Fastify 同源提供的 `dist/client` shell。
-- **完成條件：** production client build 成功，輸出可供同一 Fastify origin 使用。
-- **停止條件：** build 失敗、缺少 shell，或流程改用 Vite dev server 當作 public origin。
+- **動作：** 從記錄 `INTENDED_SHA` 的同一 clean checkout 執行 normal SHA-injected entrypoint `yarn build`，產生由 Fastify 同源提供的 `dist/client` shell。
+- **完成條件：** production client build 成功，且 successful build 的 `dist/client/source-revision.json` 只含與 `INTENDED_SHA` 完全相同的 `sourceSha`；輸出可供同一 Fastify origin 使用。
+- **停止條件：** build 失敗、缺少 shell/manifest、manifest 不是 lowercase 40-character full SHA、manifest 與 `INTENDED_SHA` 不完全相等，或流程改用 Vite dev server 當作 public origin。
 
 ### R05 · migration
 
@@ -42,9 +42,14 @@
 
 ### R06 · production-mode start
 
-- **動作：** 依 canonical 文件的 [Build and Start](deploy/cloudflare-tunnel.md#build-and-start) 以 `yarn start` 啟動或重啟 production-mode Fastify process。
-- **完成條件：** Fastify 以同一 origin 提供 shell、API、protected assets 與 cookie-backed SSE，且 observed runtime full SHA 可與 intended SHA 比對。
-- **停止條件：** boot error、invalid timezone/secret、served SHA 不符、wrong port/stale process，或只有 localhost/Vite 證據。
+- **動作：** 依 canonical 文件的 [Build and Start](deploy/cloudflare-tunnel.md#build-and-start) 以 normal SHA-injected entrypoint `yarn start` 啟動或重啟 production-mode Fastify process。把正在檢查的 local Fastify origin 設為 `CHECK_ORIGIN`，然後從該 same origin 讀取 `GET /api/runtime-provenance` 並執行下列 exact comparison；不得從另一個 process、checkout 或 hostname 代填 observed SHA。
+
+  ```bash
+  node --input-type=module --eval 'const [intended, origin] = process.argv.slice(1); if (!/^[0-9a-f]{40}$/.test(intended)) throw new Error("invalid intended provenance"); const response = await fetch(new URL("/api/runtime-provenance", origin), { cache: "no-store" }); if (!response.ok) throw new Error("runtime provenance unavailable"); const body = await response.json(); if (Object.keys(body).length !== 1 || !/^[0-9a-f]{40}$/.test(body.sourceSha) || body.sourceSha !== intended) throw new Error("runtime provenance mismatch");' "$INTENDED_SHA" "$CHECK_ORIGIN"
+  ```
+
+- **完成條件：** successful build manifest 已在 boot 時綁定 process，Fastify 以 `CHECK_ORIGIN` 同源提供 shell、API、protected assets 與 cookie-backed SSE，且 observed `sourceSha` 與 `INTENDED_SHA` 完全相等。
+- **停止條件：** boot error、invalid timezone/secret、endpoint unavailable、response shape/full-SHA invalid、exact comparison mismatch、wrong port/stale process，或只有另一個 origin/Vite 的證據；任何 mismatch 必須 fail closed，禁止繼續 tunnel handoff。
 
 ### R07 · stable named-tunnel handoff
 
@@ -54,9 +59,9 @@
 
 ### R08 · verification
 
-- **動作：** 在 v3.4.1 gate 開啟後，以 stable public hostname 依 canonical [Manual Smoke Checklist](deploy/cloudflare-tunnel.md#manual-smoke-checklist) 執行五項 real-browser checks；source/localhost checks 不等價。
-- **完成條件：** 五個 outcome 各自有 metadata-only boolean、full SHA、Asia/Taipei time 與必要時的 sanitized blocker category；browser owner 只驗 transport/session/persistence/asset/mobile contract。
-- **停止條件：** 任一 outcome 不符、source SHA drift、public origin 不同源、SSE/asset/persistence 失敗，或 evidence 需要原始 browser/private data。
+- **動作：** 在 v3.4.1 gate 開啟後，把 stable public hostname 設為新的 `CHECK_ORIGIN`，先從該 exact public same origin 重新執行 R06 的 `GET /api/runtime-provenance` exact comparison，再依 canonical [Manual Smoke Checklist](deploy/cloudflare-tunnel.md#manual-smoke-checklist) 執行五項 real-browser checks；source/localhost checks 不等價。
+- **完成條件：** public-origin observed `sourceSha` 與 `INTENDED_SHA` 完全相等，且五個 outcome 各自有 metadata-only boolean、full SHA、Asia/Taipei time 與必要時的 sanitized blocker category；browser owner 只驗 transport/session/persistence/asset/mobile contract。
+- **停止條件：** endpoint/response/full-SHA 不符、exact comparison mismatch、任一 outcome 不符、source SHA drift、public origin 不同源、SSE/asset/persistence 失敗，或 evidence 需要原始 browser/private data；任何 provenance mismatch 必須 fail closed，且不可進入或繼續 public smoke。
 
 五個 v3.4.1 browser handoff outcome 的固定名稱如下；此處都只是 schema，未表示已執行：
 

@@ -186,6 +186,27 @@ function assertOperatorPrerequisites(markdown: string) {
   assert.doesNotMatch(markdown, /例外：[^\n]*(?:planning|local tests|PR|CI|closeout)[^\n]*(?:取代|授權|即可)/, "operator prerequisites: contradictory exception");
 }
 
+function assertRuntimeProvenanceProcedure(markdown: string) {
+  const stages = new Map(extractStages(markdown).map((stage) => [stage.id, stage.body]));
+  const build = stages.get("R04") ?? "";
+  const start = stages.get("R06") ?? "";
+  const verification = stages.get("R08") ?? "";
+  assert.match(markdown, /`git rev-parse HEAD` 記錄 `INTENDED_SHA`/);
+  assert.match(markdown, /lowercase 40-character full SHA \(`\^\[0-9a-f\]\{40\}\$`\)/);
+  assert.match(build, /normal SHA-injected entrypoint `yarn build`/);
+  assert.match(build, /`dist\/client\/source-revision\.json`/);
+  assert.match(build, /`INTENDED_SHA` 完全相同的 `sourceSha`/);
+  assert.match(start, /normal SHA-injected entrypoint `yarn start`/);
+  assert.match(start, /same origin.*`GET \/api\/runtime-provenance`/);
+  assert.match(start, /body\.sourceSha !== intended/);
+  assert.match(start, /observed `sourceSha` 與 `INTENDED_SHA` 完全相等/);
+  assert.match(start, /mismatch 必須 fail closed，禁止繼續 tunnel handoff/);
+  assert.match(verification, /exact public same origin.*`GET \/api\/runtime-provenance` exact comparison/);
+  assert.match(verification, /public-origin observed `sourceSha` 與 `INTENDED_SHA` 完全相等/);
+  assert.match(verification, /provenance mismatch 必須 fail closed/);
+  assert.doesNotMatch(markdown, /例外：[^\n]*(?:sourceSha|provenance)[^\n]*(?:不符|mismatch)[^\n]*(?:繼續|忽略|允許)/i, "runtime provenance contradiction");
+}
+
 function assertDemoContract(markdown: string, tunnelMarkdown: string, changelog: string) {
   assert.deepEqual(extractH2Parts(markdown), [...EXPECTED_PARTS]);
   const stages = extractStages(markdown);
@@ -240,6 +261,7 @@ function assertDemoContract(markdown: string, tunnelMarkdown: string, changelog:
   assertRetryClauses(markdown);
   assertOperatorPrerequisites(markdown);
   assertEvidenceSchema(markdown);
+  assertRuntimeProvenanceProcedure(markdown);
   assertMetadataOnlySurface(markdown, DEMO_PATH);
 }
 
@@ -356,6 +378,11 @@ describe("demo contract mutation resistance", () => {
       name: "malformed evidence value shape",
       expected: /evidence field\/value allowlist drift/,
       mutate: (documents) => ({ ...documents, markdown: replaceExactlyOnce(documents.markdown, "integer: `1` or `2`", "free text") }),
+    },
+    {
+      name: "runtime provenance mismatch exception",
+      expected: /runtime provenance contradiction/,
+      mutate: (documents) => ({ ...documents, markdown: `${documents.markdown}\n例外：sourceSha mismatch 時允許繼續 public smoke。\n` }),
     },
   ];
 
