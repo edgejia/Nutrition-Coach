@@ -1,12 +1,26 @@
 process.env.TZ = "Asia/Taipei";
 
-import { describe, it } from "node:test";
+import { afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DEFAULT_GUEST_SESSION_SECRET, MAX_GUEST_SESSION_TTL_SECONDS } from "../../server/config.js";
+
+const temporaryDirectories = new Set<string>();
+
+function registerTemporaryDirectory(directory: string) {
+  temporaryDirectories.add(directory);
+  return directory;
+}
+
+afterEach(() => {
+  for (const directory of temporaryDirectories) {
+    rmSync(directory, { recursive: true, force: true });
+  }
+  temporaryDirectories.clear();
+});
 
 const probeScript = [
   'const { buildApp } = await import("./server/app.ts");',
@@ -46,7 +60,9 @@ function baseEnv() {
 }
 
 function createBuiltClientFixture() {
-  const directory = mkdtempSync(path.join(tmpdir(), "nc-startup-built-client-"));
+  const directory = registerTemporaryDirectory(
+    mkdtempSync(path.join(tmpdir(), "nc-startup-built-client-")),
+  );
   writeFileSync(path.join(directory, "index.html"), "<!doctype html><div id=\"root\"></div>");
   writeFileSync(
     path.join(directory, "source-revision.json"),
@@ -120,7 +136,8 @@ describe("startup guest-session security guard", () => {
   });
 
   it("fails production boot on weak guest-session secret before file-backed schema validation", () => {
-    const dbPath = path.join(mkdtempSync(path.join(tmpdir(), "nc-weak-secret-")), "fresh.sqlite");
+    const directory = registerTemporaryDirectory(mkdtempSync(path.join(tmpdir(), "nc-weak-secret-")));
+    const dbPath = path.join(directory, "fresh.sqlite");
     const result = runBootProbe({
       ...baseEnv(),
       NODE_ENV: "production",

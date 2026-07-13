@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
@@ -78,20 +78,62 @@ async function writeManifestAtomically(manifestPath, sourceSha) {
   }
 }
 
+function runChildWithSignalForwarding(command, commandArgs, sourceSha) {
+  return new Promise((resolve, reject) => {
+    let child;
+    try {
+      child = spawn(command, commandArgs, {
+        stdio: "inherit",
+        env: { ...process.env, SOURCE_SHA: sourceSha },
+      });
+    } catch {
+      reject(new Error(COMMAND_ERROR));
+      return;
+    }
+
+    let settled = false;
+    let forwardedSignal;
+    const forwardSignal = (signal) => {
+      if (forwardedSignal) {
+        return;
+      }
+      forwardedSignal = signal;
+      child.kill(signal);
+    };
+    const onSigint = () => forwardSignal("SIGINT");
+    const onSigterm = () => forwardSignal("SIGTERM");
+    const removeSignalListeners = () => {
+      process.removeListener("SIGINT", onSigint);
+      process.removeListener("SIGTERM", onSigterm);
+    };
+    const finish = (callback) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      removeSignalListeners();
+      callback();
+    };
+
+    process.on("SIGINT", onSigint);
+    process.on("SIGTERM", onSigterm);
+    child.once("error", () => finish(() => reject(new Error(COMMAND_ERROR))));
+    child.once("close", (code, signal) => finish(() => resolve({ code, signal })));
+  });
+}
+
 async function main() {
   const { manifestPath, command, commandArgs } = parseArguments(process.argv.slice(2));
   const sourceSha = resolveSourceSha();
   assertCleanSourceInputs();
-  const result = spawnSync(command, commandArgs, {
-    stdio: "inherit",
-    env: { ...process.env, SOURCE_SHA: sourceSha },
-  });
+  const result = await runChildWithSignalForwarding(command, commandArgs, sourceSha);
 
-  if (result.error) {
-    throw new Error(COMMAND_ERROR);
+  if (result.signal) {
+    process.kill(process.pid, result.signal);
+    return;
   }
-  if (result.status !== 0) {
-    process.exit(result.status ?? 1);
+  if (result.code !== 0) {
+    process.exit(result.code ?? 1);
   }
 
   if (manifestPath) {
