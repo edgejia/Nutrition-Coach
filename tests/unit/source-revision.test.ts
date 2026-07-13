@@ -1,8 +1,9 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 import { afterEach, describe, it } from "node:test";
 import { parseSourceRevision, SOURCE_REVISION_PATTERN } from "../../server/lib/source-revision.js";
@@ -73,6 +74,100 @@ async function assertDirtyRepositoryRejected(
   await assert.rejects(readFile(markerPath, "utf8"), { code: "ENOENT" });
   await assert.rejects(readFile(missingManifestPath, "utf8"), { code: "ENOENT" });
   assert.equal(await readFile(staleManifestPath, "utf8"), "stale\n");
+}
+
+async function waitForFile(filePath: string, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      return await readFile(filePath, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+    }
+    await delay(20);
+  }
+  throw new Error("Timed out waiting for subprocess readiness.");
+}
+
+function isProcessAlive(pid: number) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+}
+
+async function waitForProcessGone(pid: number, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isProcessAlive(pid)) {
+      return;
+    }
+    await delay(20);
+  }
+  throw new Error("Timed out waiting for subprocess termination.");
+}
+
+async function runSignalForwardingProbe(signal: NodeJS.Signals) {
+  const directory = await makeTemporaryGitRepository();
+  const readyPath = path.join(directory, "child-ready.marker");
+  const manifestPath = path.join(directory, "signal-manifest.json");
+  await writeFile(manifestPath, "stale\n", "utf8");
+  const childSource = [
+    'const { writeFileSync } = require("node:fs");',
+    `writeFileSync(${JSON.stringify(readyPath)}, String(process.pid));`,
+    "setInterval(() => {}, 1000);",
+  ].join("\n");
+  const wrapper = spawn(
+    process.execPath,
+    [
+      "--import",
+      TSX_IMPORT_PATH,
+      WRAPPER_PATH,
+      "--manifest",
+      manifestPath,
+      "--",
+      process.execPath,
+      "-e",
+      childSource,
+    ],
+    { cwd: directory, stdio: "ignore" },
+  );
+  const wrapperCompletion = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+    (resolve, reject) => {
+      wrapper.once("error", reject);
+      wrapper.once("close", (code, closeSignal) => resolve({ code, signal: closeSignal }));
+    },
+  );
+  let childPid: number | undefined;
+
+  try {
+    childPid = Number(await waitForFile(readyPath));
+    assert.ok(Number.isSafeInteger(childPid) && childPid > 0);
+    assert.equal(wrapper.kill(signal), true);
+    const result = await Promise.race([
+      wrapperCompletion,
+      delay(5_000).then(() => {
+        throw new Error("Timed out waiting for wrapper termination.");
+      }),
+    ]);
+    await waitForProcessGone(childPid);
+
+    assert.equal(result.code, null);
+    assert.equal(result.signal, signal);
+    assert.equal(await readFile(manifestPath, "utf8"), "stale\n");
+  } finally {
+    if (wrapper.exitCode === null && wrapper.signalCode === null) {
+      wrapper.kill("SIGKILL");
+    }
+    if (childPid && isProcessAlive(childPid)) {
+      process.kill(childPid, "SIGKILL");
+      await waitForProcessGone(childPid).catch(() => undefined);
+    }
+  }
 }
 
 afterEach(async () => {
@@ -222,6 +317,14 @@ describe("source revision command wrapper", () => {
     await execFileAsync("git", ["add", rejectedPath], { cwd: directory });
 
     await assertDirtyRepositoryRejected(directory, rejectedPath, rejectedValue);
+  });
+
+  it("forwards SIGTERM, waits for the child, and preserves signal termination", async () => {
+    await runSignalForwardingProbe("SIGTERM");
+  });
+
+  it("forwards SIGINT, waits for the child, and preserves signal termination", async () => {
+    await runSignalForwardingProbe("SIGINT");
   });
 });
 
