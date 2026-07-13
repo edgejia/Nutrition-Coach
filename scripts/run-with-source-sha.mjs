@@ -9,6 +9,7 @@ import { parseSourceRevision } from "../server/lib/source-revision.js";
 
 const ARGUMENT_ERROR = "Source revision wrapper arguments are invalid.";
 const COMMAND_ERROR = "Source revision child command could not be started.";
+const SOURCE_INPUT_ERROR = "Source repository inputs are not clean.";
 
 function parseArguments(argv) {
   let manifestPath;
@@ -41,6 +42,23 @@ function resolveSourceSha() {
   return parseSourceRevision(output.trim());
 }
 
+function assertCleanSourceInputs() {
+  let output;
+  try {
+    output = execFileSync(
+      "git",
+      ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+      { stdio: ["ignore", "pipe", "ignore"] },
+    );
+  } catch {
+    throw new Error(SOURCE_INPUT_ERROR);
+  }
+
+  if (output.length !== 0) {
+    throw new Error(SOURCE_INPUT_ERROR);
+  }
+}
+
 async function writeManifestAtomically(manifestPath, sourceSha) {
   const resolvedPath = path.resolve(manifestPath);
   const directory = path.dirname(resolvedPath);
@@ -63,6 +81,7 @@ async function writeManifestAtomically(manifestPath, sourceSha) {
 async function main() {
   const { manifestPath, command, commandArgs } = parseArguments(process.argv.slice(2));
   const sourceSha = resolveSourceSha();
+  assertCleanSourceInputs();
   const result = spawnSync(command, commandArgs, {
     stdio: "inherit",
     env: { ...process.env, SOURCE_SHA: sourceSha },
