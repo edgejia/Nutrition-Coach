@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
-import { afterEach, describe, it } from "node:test";
+import { after, afterEach, describe, it } from "node:test";
 import { parseSourceRevision, SOURCE_REVISION_PATTERN } from "../../server/lib/source-revision.js";
 
 const execFileAsync = promisify(execFile);
@@ -94,7 +94,7 @@ function spawnWrapperProbe(
     ["--import", TSX_IMPORT_PATH, WRAPPER_PATH, ...args],
     {
       cwd,
-      env: { ...process.env, TMPDIR: caseTmpdir },
+      env: { ...process.env, TMPDIR: caseTmpdir, TSX_DISABLE_CACHE: "1" },
       stdio: ipc ? ["ignore", "pipe", "pipe", "ipc"] : ["ignore", "pipe", "pipe"],
     },
   );
@@ -141,7 +141,7 @@ function spawnWrapperProbe(
 async function waitForWrapper(probe: WrapperProbe, timeoutMs = 5_000) {
   return Promise.race([
     probe.completion,
-    delay(timeoutMs).then(() => {
+    delay(timeoutMs, undefined, { ref: false }).then(() => {
       throw new Error("Timed out waiting for wrapper termination.");
     }),
   ]);
@@ -295,7 +295,7 @@ async function runSignalForwardingProbe(signal: NodeJS.Signals) {
     assert.equal(wrapper.kill(signal), true);
     const result = await Promise.race([
       wrapperCompletion,
-      delay(5_000).then(() => {
+      delay(5_000, undefined, { ref: false }).then(() => {
         throw new Error("Timed out waiting for wrapper termination.");
       }),
     ]);
@@ -394,7 +394,7 @@ async function runRepeatedSignalProbe(signal: NodeJS.Signals, waitPastDeadline =
   const childSource = [
     'const { appendFileSync, writeFileSync } = require("node:fs");',
     `writeFileSync(${JSON.stringify(readyPath)}, String(process.pid));`,
-    `process.on(${JSON.stringify(signal)}, () => appendFileSync(${JSON.stringify(ackPath)}, "forwarded\n"));`,
+    `process.on(${JSON.stringify(signal)}, () => appendFileSync(${JSON.stringify(ackPath)}, "forwarded\\n"));`,
     "setInterval(() => {}, 1000);",
   ].join("\n");
   const probe = spawnWrapperProbe(
@@ -441,7 +441,12 @@ async function configureBarrier(probe: WrapperProbe, barrier: string) {
   await probe.waitForMessage("wrapper_test_hooks_ready");
   probe.child.send?.({ type: "wrapper_test_configure", barrier });
   await probe.waitForMessage("wrapper_test_configured");
-  await probe.waitForMessage("wrapper_test_barrier", 10_000);
+  await Promise.race([
+    probe.waitForMessage("wrapper_test_barrier", 10_000),
+    probe.completion.then((result) => {
+      throw new Error(`Wrapper exited before test barrier: ${result.stderr}`);
+    }),
+  ]);
 }
 
 async function runManifestBarrierProbe(
@@ -553,6 +558,20 @@ afterEach(async () => {
   await Promise.all(
     temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })),
   );
+});
+
+after(async () => {
+  const testTmpdir = tmpdir();
+  if (
+    path.basename(testTmpdir) === "tmp" &&
+    path.basename(path.dirname(testTmpdir)).startsWith("nutrition-coach-113-08.")
+  ) {
+    for (const entry of await readdir(testTmpdir)) {
+      if (entry.startsWith("tsx-")) {
+        await rm(path.join(testTmpdir, entry), { recursive: true, force: true });
+      }
+    }
+  }
 });
 
 describe("source revision validation", () => {
