@@ -102,13 +102,54 @@ export function SportProgressBar({
   className,
   variant = "default",
   replayKey,
+  drivenExternally = false,
 }: {
   value: number;
   variant?: "default" | "warn" | "amber" | "cyan";
   className?: string;
   replayKey?: number;
+  drivenExternally?: boolean;
 }) {
   const clamped = clampUnit(value);
+  if (drivenExternally) {
+    return (
+      <div className={cx("sp-bar-track", className)} role="presentation">
+        <i
+          className={cx(
+            "sp-bar-fill",
+            "sp-bar-fill--driven",
+            variant === "warn" && "sp-bar-fill-warn",
+            variant === "amber" && "sp-bar-fill-amber",
+            variant === "cyan" && "sp-bar-fill-cyan",
+          )}
+          style={{ width: `${clamped * 100}%` }}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <SportProgressBarReplay
+      value={clamped}
+      className={className}
+      variant={variant}
+      replayKey={replayKey}
+    />
+  );
+}
+
+function SportProgressBarReplay({
+  value,
+  className,
+  variant,
+  replayKey,
+}: {
+  value: number;
+  variant: "default" | "warn" | "amber" | "cyan";
+  className?: string;
+  replayKey?: number;
+}) {
+  const clamped = value;
   // Reuse the existing `.sp-bar-fill { transition: width 360ms }` so a refresh replays the fill
   // even when the target value is unchanged: when replayKey changes, drop the rendered width to a
   // reduced start on the first paint of that token, then transition back up to the clamped target.
@@ -160,6 +201,7 @@ export function SportRing({
   label,
   className,
   accentTick = false,
+  drivenExternally = false,
 }: {
   value: number;
   size?: number;
@@ -167,6 +209,7 @@ export function SportRing({
   label?: ReactNode;
   className?: string;
   accentTick?: boolean;
+  drivenExternally?: boolean;
 }) {
   const clamped = clampUnit(value);
   const center = size / 2;
@@ -186,7 +229,7 @@ export function SportRing({
           strokeWidth={stroke}
         />
         <circle
-          className={cx("sp-ring-progress")}
+          className={cx("sp-ring-progress", drivenExternally && "sp-ring-progress--driven")}
           cx={center}
           cy={center}
           fill="none"

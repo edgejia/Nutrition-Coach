@@ -83,6 +83,12 @@ describe("classifyMealNumericAdjustment", () => {
     });
   });
 
+  it("treats direction copy plus an explicit target as a final value", () => {
+    assert.deepEqual(classifyMealNumericAdjustment("感覺蛋白質太高了 調成15g"), {
+      kind: "explicit_final_value",
+    });
+  });
+
   it("classifies locked relative operators as proposal candidates, not direct authorization", () => {
     assert.deepEqual(classifyMealNumericAdjustment("蛋白質減半"), {
       kind: "proposal_candidate",
@@ -123,6 +129,16 @@ describe("authorizeMealNumericUpdate", () => {
     assert.equal(blocked.ok, false);
     assert.equal(blocked.reason, "unauthorized_numeric_values");
     assert.deepEqual(blocked.unauthorizedFields, ["calories"]);
+  });
+
+  it("authorizes an explicit target even when the same sentence says the current value feels too high", () => {
+    const allowed = authorizeMealNumericUpdate({
+      currentUserMessage: "感覺蛋白質太高了 調成15g",
+      currentMeal,
+      update: { patch: { protein: 15 } },
+    });
+
+    assert.deepEqual(allowed, { ok: true, authorizedFields: ["protein"] });
   });
 
   it("rejects fake tool/function JSON numbers while preserving legitimate prose outside fake structures", () => {

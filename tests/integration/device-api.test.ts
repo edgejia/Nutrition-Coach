@@ -236,6 +236,8 @@ function runDeployedLikeLegacySessionProbe() {
       TZ: "Asia/Taipei",
       GUEST_SESSION_COOKIE_SECURE: "true",
       GUEST_SESSION_SECRET: "test-guest-session-secret-strong-value",
+      SOURCE_SHA: "0123456789abcdef0123456789abcdef01234567",
+      CLIENT_DIST_DIR: ".nonexistent-device-probe-client-dist",
     },
     encoding: "utf8",
   });

@@ -60,12 +60,13 @@ describe("Home manual refresh source contract", () => {
 
     assert.match(body, /const \[refreshingHomeToday,\s*setRefreshingHomeToday\] = useState\(false\)/);
     assert.match(body, /const \[homeRefreshError,\s*setHomeRefreshError\] = useState<string \| null>\(null\)/);
-    assert.match(body, /const \[homeRefreshCueToken,\s*setHomeRefreshCueToken\] = useState\(0\)/);
+    assert.match(body, /const applyManualHomeRefresh = useStore\(\(s\) => s\.applyManualHomeRefresh\)/);
+    assert.doesNotMatch(body, /homeRefreshCueToken|setHomeRefreshCueToken/);
     assert.match(body, /const refreshHomeManually = useCallback\(async \(\) => \{/);
     assert.match(body, /if \(!deviceId\) return/);
     assert.match(body, /setHomeRefreshError\(null\)/);
     assert.match(body, /setRefreshingHomeToday\(true\)/);
-    assert.match(body, /try\s*\{[\s\S]*getMeals\(\{ refreshReason: "manual_refresh" \}\)[\s\S]*setMeals\(meals\)[\s\S]*setHomeRefreshCueToken\(\(token\) => token \+ 1\)/);
+    assert.match(body, /try\s*\{[\s\S]*getMeals\(\{ refreshReason: "manual_refresh" \}\)[\s\S]*applyManualHomeRefresh\(meals\)/);
     assert.match(body, /catch \(error\)\s*\{/);
     assert.match(
       body,
@@ -74,7 +75,7 @@ describe("Home manual refresh source contract", () => {
     assert.match(body, /setHomeRefreshError\("資料暫時無法更新，請稍後再試。"\)/);
     assert.match(body, /setHomeRefreshError\("資料暫時無法更新，請稍後再試。"\);[\s\S]*throw error;/);
     assert.match(body, /finally\s*\{[\s\S]*setRefreshingHomeToday\(false\)/);
-    assert.match(body, /\}, \[deviceId, recoverGuestSession, setMeals\]\);/);
+    assert.match(body, /\}, \[applyManualHomeRefresh, deviceId, recoverGuestSession\]\);/);
     assert.doesNotMatch(body, /runInitialMealsLoad\(\{ refreshReason: "manual_refresh" \}\)/);
   });
 
@@ -90,7 +91,7 @@ describe("Home manual refresh source contract", () => {
   it("passes refresh props only to the Home screen surface", () => {
     assert.match(
       sources.mainLayout,
-      /activeScreen === "home" && \(\s*<HomeScreen\s+onRefreshToday=\{refreshHomeManually\}\s+refreshingToday=\{refreshingHomeToday\}\s+refreshTodayError=\{homeRefreshError\}\s+refreshCueToken=\{homeRefreshCueToken\}\s*\/>\s*\)/,
+      /activeScreen === "home" && \(\s*<HomeScreen\s+onRefreshToday=\{refreshHomeManually\}\s+refreshingToday=\{refreshingHomeToday\}\s+refreshTodayError=\{homeRefreshError\}\s*\/>\s*\)/,
     );
     assert.doesNotMatch(sources.mainLayout, /<ChatPanel[\s\S]*onRefreshToday/);
     assert.doesNotMatch(sources.mainLayout, /<HistoryScreen[\s\S]*onRefreshToday/);
@@ -107,7 +108,7 @@ describe("Home manual refresh source contract", () => {
     assert.match(sources.homeScreen, /onRefreshToday: \(\) => void \| Promise<void>/);
     assert.match(sources.homeScreen, /refreshingToday: boolean/);
     assert.match(sources.homeScreen, /refreshTodayError: string \| null/);
-    assert.match(sources.homeScreen, /refreshCueToken: number/);
+    assert.doesNotMatch(sources.homeScreen, /refreshCueToken: number/);
     assert.doesNotMatch(sources.homeScreen, /interface HomeHeaderProps/);
     assert.equal(countMatches(headerBody, /<SportIconButton\b/g), 1);
     assert.equal(countMatches(headerBody, /<SportRefreshIcon\b/g), 0);
@@ -119,39 +120,65 @@ describe("Home manual refresh source contract", () => {
       ["Home header", "<HomeHeader />"],
       ["Refresh status copy", "{refreshTodayError ? ("],
       ["Pull refresh surface", "<PullToRefreshSurface"],
-      ["Home content scroller", '<main className="screen-scroll home-sport-scroll">'],
+      ["Home content scroller", '<main ref={homeScrollRef} className="screen-scroll home-sport-scroll">'],
     ]);
     assertIncludesInOrder(screenBody, [
       ["Pull refresh surface", "<PullToRefreshSurface"],
       ["Refresh callback prop", "onRefresh={onRefreshToday}"],
       ["Home surface id", 'surfaceId="home"'],
       ["Home completion label", 'completionLabel="今日資料已更新"'],
-      ["Home content scroller", '<main className="screen-scroll home-sport-scroll">'],
+      ["Home content scroller", '<main ref={homeScrollRef} className="screen-scroll home-sport-scroll">'],
     ]);
     assert.match(screenBody, /ariaLabel="下拉重新整理今日資料"/);
-    assert.match(screenBody, /refreshCueToken=\{refreshCueToken\}/);
+    assert.match(screenBody, /const secondaryScreen = useStore\(\(s\) => s\.secondaryScreen\)/);
+    assert.match(screenBody, /const homeAnimationEnabled = secondaryScreen === null/);
+    assert.match(screenBody, /const frame = useHomeNutritionTimeline\(homeAnimationEnabled\)/);
+    assert.match(screenBody, /<CalorieHero dailySummary=\{dailySummary\} dailyTargets=\{dailyTargets\} frame=\{frame\} \/>/);
     assertIncludesInOrder(headerBody, [
       ["Settings control", 'aria-label="設定"'],
     ]);
   });
 
-  it("replays a visible Home completion cue after successful manual refresh", () => {
+  it("routes manual refresh replay through the single Home nutrition frame", () => {
     const body = functionBody(sources.homeScreen, "CalorieHero");
 
-    assert.match(sources.homeScreen, /function useCountUpNumber\(targetValue: number, options: \{ durationMs\?: number; animate\?: boolean; replayKey\?: number \} = \{\}\)/);
-    assert.match(sources.homeScreen, /const previousReplayKeyRef = useRef<number \| undefined>\(options\.replayKey\)/);
-    assert.match(sources.homeScreen, /const replayChanged =[\s\S]*previousReplayKeyRef\.current !== options\.replayKey/);
+    assert.match(sources.homeScreen, /function useHomeNutritionTimeline\(enabled: boolean\): HomeTimelineFrame/);
+    assert.match(sources.homeScreen, /if \(!enabled\)\s*\{\s*return;\s*\}/);
+    assert.doesNotMatch(sources.homeScreen, /refreshCueChanged|previousRefreshCueRef|input\.refreshCueToken/);
+    assert.match(sources.homeScreen, /pendingIntent\?\.kind === "delta" && pendingIntent\.from[\s\S]*getSnapshotTimelineEndpoints\(pendingIntent\.from, dailyTargets\)[\s\S]*zeroEndpoints\(end\)/);
+    assert.match(sources.homeScreen, /setFrame\(finishImmediately \? end : frameAt\(start, end, 0\)\)/);
+    assert.match(sources.homeScreen, /consumeHomeAnimationIntent\(intentToken\)/);
+    assert.match(sources.homeScreen, /HOME_TIMELINE_DURATION_MS/);
     assert.match(
       sources.homeScreen,
-      /function CalorieHero\(\{\s*dailySummary,\s*dailyTargets,\s*refreshCueToken,\s*\}: \{/,
+      /function CalorieHero\(\{\s*dailySummary,\s*dailyTargets,\s*frame,\s*\}: \{/,
     );
-    assert.match(body, /replayKey: refreshCueToken/);
-    assert.match(body, /const refreshCueClass = refreshCueToken > 0 \? " home-sport-refresh-cue" : ""/);
-    assert.match(body, /key=\{`home-hero-\$\{refreshCueToken\}`\}/);
-    // Plan 104-13 (Gap B): the macro grid no longer remounts on refresh via a
-    // key={`home-macros-${refreshCueToken}`}; a remount would reset MacroCard hook state and skip the
-    // count-up. The macro replay now runs in place through MacroCard + replayKey={refreshCueToken}.
-    assert.match(body, /<MacroCard key=\{macro\.id\} macro=\{macro\} refreshCueToken=\{refreshCueToken\} \/>/);
+    assert.match(body, /value=\{frame\.ringValue\}/);
+    assert.match(body, /drivenExternally/);
+    assert.match(sources.homeScreen, /<SportProgressBar value=\{framePart\.barValue\} variant=\{macro\.variant\} drivenExternally \/>/);
+    assert.match(sources.homeScreen, /const frame = useHomeNutritionTimeline\(homeAnimationEnabled\)/);
+    assert.doesNotMatch(sources.homeScreen, /function useCountUpNumber/);
+    assert.doesNotMatch(sources.homeScreen, /home-sport-refresh-cue/);
+    assert.doesNotMatch(sources.homeScreen, /key=\{`home-hero-/);
+    assert.doesNotMatch(sources.homeScreen, /replayKey=\{refreshCueToken\}/);
+  });
+
+  it("scrolls the Home container to top only for navigation-origin consumed intents", () => {
+    const body = functionBody(sources.homeScreen, "HomeScreen");
+
+    assert.match(
+      sources.homeScreen,
+      /import \{ isNavigationEntryTrigger, type HomeNutritionSnapshot \} from "\.\.\/lib\/home-animation-intent\.js";/,
+    );
+    assert.match(body, /const pendingIntent = useStore\(\(s\) => s\.homeAnimation\.pendingIntent\)/);
+    assert.match(body, /const homeScrollRef = useRef<HTMLElement \| null>\(null\)/);
+    assert.match(body, /const lastNavigationScrollTokenRef = useRef<number \| null>\(null\)/);
+    assert.match(body, /!pendingIntent \|\| !isNavigationEntryTrigger\(pendingIntent\.origin\)/);
+    assert.match(body, /lastNavigationScrollTokenRef\.current === pendingIntent\.token/);
+    assert.match(body, /scrollContainer\.scrollTo\(0, 0\)/);
+    assert.match(body, /scrollContainer\.scrollTop = 0/);
+    assert.match(body, /<main ref=\{homeScrollRef\} className="screen-scroll home-sport-scroll">/);
+    assert.doesNotMatch(body, /scrollTo\(0, 0\)[\s\S]*manual_refresh|cold_start/);
   });
 
   it("keeps Settings governed by sending and error copy independent from button loading state", () => {

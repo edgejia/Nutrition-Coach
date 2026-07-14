@@ -7,7 +7,7 @@ type Call =
   | { name: "record"; affectedDate: string }
   | { name: "setDailySummary"; date: string }
   | { name: "getMeals"; refreshReason: string }
-  | { name: "setMeals"; meals: string[] };
+  | { name: "applyMealMutationRefresh"; meals: string[] };
 
 function createDeps(todayKey = "2026-05-17") {
   const calls: Call[] = [];
@@ -29,8 +29,8 @@ function createDeps(todayKey = "2026-05-17") {
         calls.push({ name: "getMeals", refreshReason });
         return { meals };
       },
-      setMeals: (nextMeals: string[]) => {
-        calls.push({ name: "setMeals", meals: nextMeals });
+      applyMealMutationRefresh: (nextMeals: string[]) => {
+        calls.push({ name: "applyMealMutationRefresh", meals: nextMeals });
       },
       todayKey: () => todayKey,
     },
@@ -61,7 +61,7 @@ describe("refreshAfterMealMutation", () => {
       { name: "redact", mealId: "meal-edit-1" },
       { name: "record", affectedDate: "2026-05-17" },
       { name: "getMeals", refreshReason: "meal_mutation" },
-      { name: "setMeals", meals: ["fresh-breakfast", "fresh-lunch"] },
+      { name: "applyMealMutationRefresh", meals: ["fresh-breakfast", "fresh-lunch"] },
     ]);
   });
 
@@ -77,7 +77,7 @@ describe("refreshAfterMealMutation", () => {
       { name: "redact", mealId: "meal-delete-1" },
       { name: "record", affectedDate: "2026-05-17" },
       { name: "getMeals", refreshReason: "meal_mutation" },
-      { name: "setMeals", meals: ["fresh-breakfast", "fresh-lunch"] },
+      { name: "applyMealMutationRefresh", meals: ["fresh-breakfast", "fresh-lunch"] },
     ]);
   });
 
@@ -95,7 +95,7 @@ describe("refreshAfterMealMutation", () => {
       { name: "record", affectedDate: "2026-05-17" },
       { name: "setDailySummary", date: "2026-05-17" },
       { name: "getMeals", refreshReason: "meal_mutation" },
-      { name: "setMeals", meals: ["fresh-breakfast", "fresh-lunch"] },
+      { name: "applyMealMutationRefresh", meals: ["fresh-breakfast", "fresh-lunch"] },
     ]);
   });
 

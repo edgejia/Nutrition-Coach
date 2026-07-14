@@ -383,7 +383,7 @@ export function SummaryDetailScreen() {
   const recoverGuestSession = useStore((s) => s.recoverGuestSession);
   const setActiveScreen = useStore((s) => s.setActiveScreen);
   const setDailySummary = useStore((s) => s.setDailySummary);
-  const setMeals = useStore((s) => s.setMeals);
+  const applyMealMutationRefresh = useStore((s) => s.applyMealMutationRefresh);
   const redactChatReceiptIdentity = useStore((s) => s.redactChatReceiptIdentity);
   const recordMealMutation = useStore((s) => s.recordMealMutation);
   const liveSummary = useStore((s) => s.dailySummary);
@@ -519,7 +519,7 @@ export function SummaryDetailScreen() {
           recordMealMutation,
           setDailySummary,
           getMeals,
-          setMeals,
+          applyMealMutationRefresh,
           todayKey: () => formatLocalDate(new Date()),
         }, {
           mealId,
@@ -539,7 +539,7 @@ export function SummaryDetailScreen() {
             recordMealMutation,
             setDailySummary,
             getMeals,
-            setMeals,
+            applyMealMutationRefresh,
             todayKey: () => formatLocalDate(new Date()),
           }, {
             mealId: err.mealId,

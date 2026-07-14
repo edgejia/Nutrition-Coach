@@ -2,7 +2,7 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
-import { access } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 import { createDb, type AppDatabase } from "./db/client.js";
 import { createDeviceService } from "./services/device.js";
@@ -39,6 +39,7 @@ import { registerProposalActionRoutes } from "./routes/proposal-actions.js";
 import { registerProtectedRouteSupport } from "./routes/protected-route.js";
 import type { LLMProvider } from "./llm/types.js";
 import type { LlmTraceRecorder } from "./orchestrator/llm-trace.js";
+import { parseSourceRevision } from "./lib/source-revision.js";
 import {
   config,
   isDeployedLikeRuntime,
@@ -48,6 +49,8 @@ import {
 } from "./config.js";
 
 const LOCAL_CORS_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"];
+const CLIENT_BUILD_PROVENANCE_ERROR = "Client build provenance is unavailable or invalid.";
+const RUNTIME_PROVENANCE_REQUIRED_ERROR = "Runtime source provenance is required in deployed-like runtime.";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -105,6 +108,8 @@ export interface AppOptions {
   assetsDir?: string;
   /** Override the built client directory used for same-origin beta serving. */
   clientDistDir?: string;
+  /** Override process source provenance in tests; runtime composition reads SOURCE_SHA. */
+  sourceRevision?: string;
   /**
    * Optional Fastify logger configuration.
    * When omitted: Fastify initializes with `logger: false` (silent — backward compatible with all existing tests).
@@ -136,6 +141,50 @@ export async function buildApp(opts: AppOptions) {
   });
   const runtimeConfig = readRuntimeConfigFromEnv();
   app.decorate("runtimeConfig", runtimeConfig);
+
+  const deployedLikeRuntime = isDeployedLikeRuntime({
+    guestSessionCookieSecure: config.guestSessionCookieSecure,
+    nodeEnv: config.nodeEnv,
+  });
+  const rawSourceRevision = opts.sourceRevision ?? process.env.SOURCE_SHA;
+  let sourceRevision: string | undefined;
+
+  if (rawSourceRevision !== undefined) {
+    sourceRevision = parseSourceRevision(rawSourceRevision);
+  } else if (deployedLikeRuntime) {
+    throw new Error(RUNTIME_PROVENANCE_REQUIRED_ERROR);
+  }
+
+  let hasClientDist = false;
+  try {
+    await access(path.join(clientDistDir, "index.html"));
+    hasClientDist = true;
+  } catch {
+    hasClientDist = false;
+  }
+
+  if (hasClientDist && sourceRevision) {
+    try {
+      const manifest = JSON.parse(
+        await readFile(path.join(clientDistDir, "source-revision.json"), "utf8"),
+      ) as unknown;
+      if (
+        typeof manifest !== "object"
+        || manifest === null
+        || Array.isArray(manifest)
+        || Object.keys(manifest).length !== 1
+        || !("sourceSha" in manifest)
+      ) {
+        throw new Error(CLIENT_BUILD_PROVENANCE_ERROR);
+      }
+      const clientSourceRevision = parseSourceRevision(manifest.sourceSha);
+      if (clientSourceRevision !== sourceRevision) {
+        throw new Error(CLIENT_BUILD_PROVENANCE_ERROR);
+      }
+    } catch {
+      throw new Error(CLIENT_BUILD_PROVENANCE_ERROR);
+    }
+  }
 
   const db = createDb(opts.dbPath ?? config.dbPath);
   const deviceService = createDeviceService(db);
@@ -255,13 +304,14 @@ export async function buildApp(opts: AppOptions) {
   registerObservabilityRoutes(app, { deviceService, guestSessionService });
   registerSSERoutes(app, { publisher, summaryService, deviceService, guestSessionService });
 
-  let hasClientDist = false;
-  try {
-    await access(path.join(clientDistDir, "index.html"));
-    hasClientDist = true;
-  } catch {
-    hasClientDist = false;
-  }
+  app.get("/api/runtime-provenance", async (_request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    if (!sourceRevision) {
+      return reply.code(503).send({ error: "Runtime provenance unavailable" });
+    }
+
+    return reply.send({ sourceSha: sourceRevision });
+  });
 
   if (hasClientDist) {
     await app.register(fastifyStatic, {

@@ -59,6 +59,17 @@ const sampleMeals = [
   },
 ];
 
+const dailyTargets = { calories: 1500, protein: 120, carbs: 150, fat: 50 };
+
+function initialHomeAnimation() {
+  return {
+    baseline: null,
+    unseenTodayMutation: false,
+    pendingIntent: null,
+    homeVisibleMutationBaseline: null,
+  };
+}
+
 function goalProposalCard(
   proposalId: string,
   calories: number,
@@ -107,6 +118,7 @@ describe("AppStore", () => {
       meals: [],
       pendingHomeChatDraft: null,
       lastMealMutation: null,
+      homeAnimation: initialHomeAnimation(),
       showSettings: false,
       secondaryScreen: null,
       sending: false,
@@ -193,6 +205,7 @@ describe("AppStore", () => {
     useStore.getState().setActiveScreen("chat");
     useStore.getState().setCoachAdvice("今天攝取均衡，繼續保持！");
     useStore.getState().setMeals(sampleMeals);
+    useStore.getState().recordMealMutation(formatLocalDate(new Date()));
     useStore.getState().setPendingHomeChatDraft({ id: "draft-1", text: "午餐吃了沙拉", status: "failed" });
     useStore.getState().clearDevice();
 
@@ -202,6 +215,7 @@ describe("AppStore", () => {
     assert.equal(useStore.getState().guestSessionRecoveryAttempted, false);
     assert.equal(useStore.getState().coachAdvice, null);
     assert.deepEqual(useStore.getState().meals, []);
+    assert.deepEqual(useStore.getState().homeAnimation, initialHomeAnimation());
     assert.equal(useStore.getState().pendingHomeChatDraft, null);
     assert.equal(storage.has("deviceId"), false);
   });
@@ -377,6 +391,191 @@ describe("AppStore", () => {
       totalFat: 24,
       mealCount: 2,
     });
+  });
+
+  it("arms cold-start replay on the first home-visible meal commit only", () => {
+    useStore.setState({ activeScreen: "home", dailyTargets, homeAnimation: initialHomeAnimation() });
+
+    useStore.getState().setMeals(sampleMeals);
+    const firstHomeAnimation = useStore.getState().homeAnimation;
+
+    assert.deepEqual(firstHomeAnimation.baseline, {
+      date: formatLocalDate(new Date()),
+      kcal: 700,
+      protein: 54,
+      carbs: 68,
+      fat: 24,
+      targets: dailyTargets,
+    });
+    assert.deepEqual(firstHomeAnimation.pendingIntent, {
+      kind: "replay",
+      from: null,
+      token: 1,
+      origin: "cold_start",
+    });
+
+    useStore.getState().setMeals([{ ...sampleMeals[0], calories: 540 }, sampleMeals[1]]);
+    const secondHomeAnimation = useStore.getState().homeAnimation;
+
+    assert.equal(secondHomeAnimation.baseline?.kcal, 720);
+    assert.equal(secondHomeAnimation.pendingIntent?.token, 1);
+    assert.equal(secondHomeAnimation.pendingIntent?.origin, "cold_start");
+  });
+
+  it("freezes the home animation baseline while away from home", () => {
+    useStore.setState({ activeScreen: "home", dailyTargets, homeAnimation: initialHomeAnimation() });
+    useStore.getState().setMeals(sampleMeals);
+    const baseline = useStore.getState().homeAnimation.baseline;
+
+    useStore.getState().setActiveScreen("chat");
+    useStore.getState().setMeals([{ ...sampleMeals[0], calories: 540 }, sampleMeals[1]]);
+
+    assert.deepEqual(useStore.getState().homeAnimation.baseline, baseline);
+    assert.equal(useStore.getState().dailySummary?.totalCalories, 720);
+  });
+
+  it("setActiveScreen arms replay when returning from chat without unseen today mutations", () => {
+    const today = formatLocalDate(new Date());
+    const frozenBaseline = {
+      date: today,
+      kcal: 700,
+      protein: 54,
+      carbs: 68,
+      fat: 24,
+      targets: dailyTargets,
+    };
+
+    useStore.setState({
+      activeScreen: "chat",
+      dailyTargets,
+      dailySummary: {
+        date: today,
+        totalCalories: 820,
+        totalProtein: 64,
+        totalCarbs: 78,
+        totalFat: 30,
+        mealCount: 3,
+      },
+      homeAnimation: {
+        baseline: frozenBaseline,
+        unseenTodayMutation: false,
+        pendingIntent: null,
+        homeVisibleMutationBaseline: null,
+      },
+    });
+
+    useStore.getState().setActiveScreen("home");
+
+    assert.equal(useStore.getState().activeScreen, "home");
+    assert.deepEqual(useStore.getState().homeAnimation.pendingIntent, {
+      kind: "replay",
+      from: null,
+      token: 1,
+      origin: "nav_from_chat",
+    });
+    assert.equal(useStore.getState().homeAnimation.unseenTodayMutation, false);
+  });
+
+  it("setActiveScreen arms a collapsed delta when returning from chat with an unseen today mutation", () => {
+    const today = formatLocalDate(new Date());
+    const frozenBaseline = {
+      date: today,
+      kcal: 700,
+      protein: 54,
+      carbs: 68,
+      fat: 24,
+      targets: dailyTargets,
+    };
+
+    useStore.setState({
+      activeScreen: "chat",
+      dailyTargets,
+      dailySummary: {
+        date: today,
+        totalCalories: 900,
+        totalProtein: 70,
+        totalCarbs: 90,
+        totalFat: 32,
+        mealCount: 3,
+      },
+      homeAnimation: {
+        baseline: frozenBaseline,
+        unseenTodayMutation: true,
+        pendingIntent: null,
+        homeVisibleMutationBaseline: null,
+      },
+    });
+
+    useStore.getState().setActiveScreen("home");
+
+    assert.equal(useStore.getState().homeAnimation.pendingIntent?.kind, "delta");
+    assert.deepEqual(useStore.getState().homeAnimation.pendingIntent?.from, frozenBaseline);
+    assert.equal(useStore.getState().homeAnimation.pendingIntent?.origin, "nav_from_chat");
+    assert.equal(useStore.getState().homeAnimation.baseline?.kcal, 900);
+    assert.equal(useStore.getState().homeAnimation.unseenTodayMutation, false);
+  });
+
+  it("setActiveScreen returning from history arms a navigation replay", () => {
+    const today = formatLocalDate(new Date());
+
+    useStore.setState({
+      activeScreen: "history",
+      dailyTargets,
+      dailySummary: {
+        date: today,
+        totalCalories: 700,
+        totalProtein: 54,
+        totalCarbs: 68,
+        totalFat: 24,
+        mealCount: 2,
+      },
+      homeAnimation: {
+        baseline: {
+          date: today,
+          kcal: 700,
+          protein: 54,
+          carbs: 68,
+          fat: 24,
+          targets: dailyTargets,
+        },
+        unseenTodayMutation: false,
+        pendingIntent: null,
+        homeVisibleMutationBaseline: null,
+      },
+    });
+
+    useStore.getState().setActiveScreen("home");
+
+    assert.deepEqual(useStore.getState().homeAnimation.pendingIntent, {
+      kind: "replay",
+      from: null,
+      token: 1,
+      origin: "nav_from_history",
+    });
+  });
+
+  it("setActiveScreen does not arm a home animation intent when leaving home", () => {
+    const pendingIntent = {
+      kind: "replay" as const,
+      from: null,
+      token: 4,
+      origin: "cold_start" as const,
+    };
+
+    useStore.setState({
+      activeScreen: "home",
+      homeAnimation: {
+        baseline: null,
+        unseenTodayMutation: false,
+        pendingIntent,
+        homeVisibleMutationBaseline: null,
+      },
+    });
+
+    useStore.getState().setActiveScreen("chat");
+
+    assert.equal(useStore.getState().activeScreen, "chat");
+    assert.deepEqual(useStore.getState().homeAnimation.pendingIntent, pendingIntent);
   });
 
   it("tracks activeScreen changes and meal collection helpers", () => {
@@ -634,6 +833,374 @@ describe("AppStore", () => {
 
     assert.deepEqual(first, { affectedDate: "2026-04-30", nonce: 1 });
     assert.deepEqual(second, { affectedDate: "2026-04-30", nonce: 2 });
+  });
+
+  it("recordMealMutation marks only away today mutations as unseen", () => {
+    const today = formatLocalDate(new Date());
+
+    useStore.setState({ activeScreen: "chat", homeAnimation: initialHomeAnimation() });
+    useStore.getState().recordMealMutation(today);
+    assert.equal(useStore.getState().homeAnimation.unseenTodayMutation, true);
+
+    useStore.setState({ activeScreen: "chat", homeAnimation: initialHomeAnimation() });
+    useStore.getState().recordMealMutation("1999-01-01");
+    assert.equal(useStore.getState().homeAnimation.unseenTodayMutation, false);
+
+    useStore.setState({ activeScreen: "home", homeAnimation: initialHomeAnimation() });
+    useStore.getState().openMealEdit(
+      {
+        mealId: "meal-1",
+        mealRevisionId: "meal-1:r1",
+        dateKey: today,
+        foodName: "雞胸肉便當",
+        calories: 520,
+        protein: 42,
+        carbs: 48,
+        fat: 18,
+        itemCount: 1,
+      },
+      "home",
+    );
+    useStore.getState().recordMealMutation(today);
+    assert.equal(useStore.getState().activeScreen, "home");
+    assert.equal(useStore.getState().secondaryScreen?.screen, "mealEdit");
+    assert.equal(useStore.getState().homeAnimation.unseenTodayMutation, false);
+  });
+
+  it("requestHomeEntryAnimation commits a pending intent with origin and clears unseen mutations", () => {
+    const today = formatLocalDate(new Date());
+    const frozenBaseline = {
+      date: today,
+      kcal: 700,
+      protein: 54,
+      carbs: 68,
+      fat: 24,
+      targets: dailyTargets,
+    };
+
+    useStore.setState({
+      activeScreen: "chat",
+      dailyTargets,
+      dailySummary: {
+        date: today,
+        totalCalories: 820,
+        totalProtein: 64,
+        totalCarbs: 78,
+        totalFat: 30,
+        mealCount: 3,
+      },
+      homeAnimation: {
+        baseline: frozenBaseline,
+        unseenTodayMutation: true,
+        pendingIntent: null,
+        homeVisibleMutationBaseline: null,
+      },
+    });
+
+    useStore.getState().requestHomeEntryAnimation("nav_from_chat");
+    const chatIntent = useStore.getState().homeAnimation.pendingIntent;
+
+    assert.deepEqual(chatIntent, {
+      kind: "delta",
+      from: frozenBaseline,
+      token: 1,
+      origin: "nav_from_chat",
+    });
+    assert.equal(useStore.getState().homeAnimation.unseenTodayMutation, false);
+    assert.equal(useStore.getState().homeAnimation.baseline?.kcal, 820);
+
+    useStore.getState().requestHomeEntryAnimation("nav_from_history");
+    assert.equal(useStore.getState().homeAnimation.pendingIntent?.kind, "replay");
+    assert.equal(useStore.getState().homeAnimation.pendingIntent?.from, null);
+    assert.equal(useStore.getState().homeAnimation.pendingIntent?.token, 2);
+    assert.equal(useStore.getState().homeAnimation.pendingIntent?.origin, "nav_from_history");
+  });
+
+  it("goBack from an overlay does not create or consume home animation intent", () => {
+    useStore.setState({
+      activeScreen: "home",
+      homeAnimation: {
+        baseline: null,
+        unseenTodayMutation: false,
+        pendingIntent: null,
+        homeVisibleMutationBaseline: null,
+      },
+    });
+    useStore.getState().openSecondaryScreen("settings", "home");
+
+    assert.equal(useStore.getState().goBack(), true);
+    assert.equal(useStore.getState().secondaryScreen, null);
+    assert.equal(useStore.getState().homeAnimation.pendingIntent, null);
+  });
+
+  it("goBack from chat returns home and arms a nav_from_chat replay intent", () => {
+    const today = formatLocalDate(new Date());
+
+    useStore.setState({
+      activeScreen: "chat",
+      dailyTargets,
+      dailySummary: {
+        date: today,
+        totalCalories: 700,
+        totalProtein: 54,
+        totalCarbs: 68,
+        totalFat: 24,
+        mealCount: 2,
+      },
+      homeAnimation: {
+        baseline: {
+          date: today,
+          kcal: 700,
+          protein: 54,
+          carbs: 68,
+          fat: 24,
+          targets: dailyTargets,
+        },
+        unseenTodayMutation: false,
+        pendingIntent: null,
+        homeVisibleMutationBaseline: null,
+      },
+    });
+
+    assert.equal(useStore.getState().goBack(), true);
+    assert.equal(useStore.getState().activeScreen, "home");
+    assert.deepEqual(useStore.getState().homeAnimation.pendingIntent, {
+      kind: "replay",
+      from: null,
+      token: 1,
+      origin: "nav_from_chat",
+    });
+  });
+
+  it("applyManualHomeRefresh replays unchanged totals against the old baseline", () => {
+    const today = formatLocalDate(new Date());
+    const baseline = {
+      date: today,
+      kcal: 700,
+      protein: 54,
+      carbs: 68,
+      fat: 24,
+      targets: dailyTargets,
+    };
+
+    useStore.setState({
+      activeScreen: "home",
+      dailyTargets,
+      homeAnimation: {
+        baseline,
+        unseenTodayMutation: true,
+        pendingIntent: null,
+        homeVisibleMutationBaseline: null,
+      },
+    });
+
+    useStore.getState().applyManualHomeRefresh(sampleMeals);
+
+    assert.deepEqual(useStore.getState().homeAnimation.pendingIntent, {
+      kind: "replay",
+      from: null,
+      token: 1,
+      origin: "manual_refresh",
+    });
+    assert.deepEqual(useStore.getState().homeAnimation.baseline, baseline);
+    assert.equal(useStore.getState().homeAnimation.unseenTodayMutation, false);
+    assert.equal(useStore.getState().dailySummary?.totalCalories, 700);
+  });
+
+  it("applyManualHomeRefresh derives a changed refresh delta from the old baseline", () => {
+    const today = formatLocalDate(new Date());
+    const oldBaseline = {
+      date: today,
+      kcal: 700,
+      protein: 54,
+      carbs: 68,
+      fat: 24,
+      targets: dailyTargets,
+    };
+    const changedMeals = [{ ...sampleMeals[0], calories: 540, protein: 44 }, sampleMeals[1]];
+
+    useStore.setState({
+      activeScreen: "home",
+      dailyTargets,
+      homeAnimation: {
+        baseline: oldBaseline,
+        unseenTodayMutation: true,
+        pendingIntent: null,
+        homeVisibleMutationBaseline: null,
+      },
+    });
+
+    useStore.getState().applyManualHomeRefresh(changedMeals);
+
+    assert.deepEqual(useStore.getState().homeAnimation.pendingIntent, {
+      kind: "delta",
+      from: oldBaseline,
+      token: 1,
+      origin: "manual_refresh",
+    });
+    assert.deepEqual(useStore.getState().homeAnimation.baseline, {
+      date: today,
+      kcal: 720,
+      protein: 56,
+      carbs: 68,
+      fat: 24,
+      targets: dailyTargets,
+    });
+    assert.equal(useStore.getState().homeAnimation.unseenTodayMutation, false);
+  });
+
+  it("applyMealMutationRefresh animates a Home-visible delete from the pre-mutation baseline", () => {
+    const today = formatLocalDate(new Date());
+    const oldBaseline = {
+      date: today,
+      kcal: 700,
+      protein: 54,
+      carbs: 68,
+      fat: 24,
+      targets: dailyTargets,
+    };
+    const deletedMealSummary = {
+      date: today,
+      totalCalories: 180,
+      totalProtein: 12,
+      totalCarbs: 20,
+      totalFat: 6,
+      mealCount: 1,
+    };
+
+    useStore.setState({
+      activeScreen: "home",
+      dailyTargets,
+      homeAnimation: {
+        baseline: oldBaseline,
+        unseenTodayMutation: false,
+        pendingIntent: null,
+        homeVisibleMutationBaseline: null,
+      },
+    });
+
+    useStore.getState().recordMealMutation(today);
+    useStore.getState().setDailySummary(deletedMealSummary);
+    useStore.getState().applyMealMutationRefresh([sampleMeals[1]]);
+
+    assert.deepEqual(useStore.getState().homeAnimation.pendingIntent, {
+      kind: "delta",
+      from: oldBaseline,
+      token: 1,
+      origin: "meal_mutation",
+    });
+    assert.deepEqual(useStore.getState().homeAnimation.baseline, {
+      date: today,
+      kcal: 180,
+      protein: 12,
+      carbs: 20,
+      fat: 6,
+      targets: dailyTargets,
+    });
+    assert.equal(useStore.getState().homeAnimation.homeVisibleMutationBaseline, null);
+    assert.equal(useStore.getState().homeAnimation.unseenTodayMutation, false);
+  });
+
+  it("applyMealMutationRefresh preserves away mutation state for chat-to-home delta", () => {
+    const today = formatLocalDate(new Date());
+    const oldBaseline = {
+      date: today,
+      kcal: 700,
+      protein: 54,
+      carbs: 68,
+      fat: 24,
+      targets: dailyTargets,
+    };
+    const changedMeals = [{ ...sampleMeals[0], calories: 540, protein: 44 }, sampleMeals[1]];
+
+    useStore.setState({
+      activeScreen: "chat",
+      dailyTargets,
+      homeAnimation: {
+        baseline: oldBaseline,
+        unseenTodayMutation: false,
+        pendingIntent: null,
+        homeVisibleMutationBaseline: null,
+      },
+    });
+
+    useStore.getState().recordMealMutation(today);
+    useStore.getState().applyMealMutationRefresh(changedMeals);
+
+    assert.deepEqual(useStore.getState().homeAnimation.baseline, oldBaseline);
+    assert.equal(useStore.getState().homeAnimation.unseenTodayMutation, true);
+    assert.equal(useStore.getState().homeAnimation.pendingIntent, null);
+
+    useStore.getState().setActiveScreen("home");
+
+    assert.equal(useStore.getState().homeAnimation.pendingIntent?.kind, "delta");
+    assert.deepEqual(useStore.getState().homeAnimation.pendingIntent?.from, oldBaseline);
+    assert.equal(useStore.getState().homeAnimation.pendingIntent?.origin, "nav_from_chat");
+  });
+
+  it("applyMealMutationRefresh preserves an existing Home-visible mutation intent during duplicate refreshes", () => {
+    const today = formatLocalDate(new Date());
+    const oldBaseline = {
+      date: today,
+      kcal: 700,
+      protein: 54,
+      carbs: 68,
+      fat: 24,
+      targets: dailyTargets,
+    };
+    const currentBaseline = {
+      date: today,
+      kcal: 180,
+      protein: 12,
+      carbs: 20,
+      fat: 6,
+      targets: dailyTargets,
+    };
+    const pendingIntent = {
+      kind: "delta" as const,
+      from: oldBaseline,
+      token: 3,
+      origin: "meal_mutation" as const,
+    };
+
+    useStore.setState({
+      activeScreen: "home",
+      dailyTargets,
+      homeAnimation: {
+        baseline: currentBaseline,
+        unseenTodayMutation: false,
+        pendingIntent,
+        homeVisibleMutationBaseline: null,
+      },
+    });
+
+    useStore.getState().applyMealMutationRefresh([sampleMeals[1]]);
+
+    assert.deepEqual(useStore.getState().homeAnimation.pendingIntent, pendingIntent);
+    assert.deepEqual(useStore.getState().homeAnimation.baseline, currentBaseline);
+  });
+
+  it("consumeHomeAnimationIntent clears only the matching pending token", () => {
+    const pendingIntent = {
+      kind: "replay" as const,
+      from: null,
+      token: 3,
+      origin: "cold_start" as const,
+    };
+    useStore.setState({
+      homeAnimation: {
+        baseline: null,
+        unseenTodayMutation: false,
+        pendingIntent,
+        homeVisibleMutationBaseline: null,
+      },
+    });
+
+    useStore.getState().consumeHomeAnimationIntent(2);
+    assert.deepEqual(useStore.getState().homeAnimation.pendingIntent, pendingIntent);
+
+    useStore.getState().consumeHomeAnimationIntent(3);
+    assert.equal(useStore.getState().homeAnimation.pendingIntent, null);
   });
 
   it("redactChatReceiptIdentity makes matching chat receipts display-only without removing receipt content", () => {

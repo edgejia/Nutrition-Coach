@@ -135,6 +135,7 @@ describe("sport UI source contract", () => {
     assert.match(sources.sportPrimitives, /function clampUnit\(value: number\)/);
     assert.match(sources.sportPrimitives, /Math\.max\(0, Math\.min\(1, value\)\)/);
     assert.match(sources.sportPrimitives, /"aria-label": string/);
+    assert.match(sources.sportPrimitives, /drivenExternally\?: boolean/);
 
     for (const className of [
       "sp-screen",
@@ -146,6 +147,7 @@ describe("sport UI source contract", () => {
       "sp-iconbtn",
       "sp-bar-track",
       "sp-bar-fill",
+      "sp-bar-fill--driven",
       "sp-bar-fill-cyan",
       "sp-receipt",
     ]) {
@@ -158,14 +160,19 @@ describe("sport UI source contract", () => {
   it("defines primitive motion transitions with reduced-motion override", () => {
     const ringCircles = sources.sportPrimitives.match(/<circle[\s\S]*?\/>/g) ?? [];
     const foregroundProgressCircle = ringCircles.find(
-      (circle) => circle.includes('className={cx("sp-ring-progress")}') && circle.includes("strokeDashoffset={dashOffset}"),
+      (circle) => circle.includes('"sp-ring-progress"') && circle.includes("strokeDashoffset={dashOffset}"),
     );
 
     assert.ok(foregroundProgressCircle, "SportRing foreground progress circle must own the transition class");
     assert.match(foregroundProgressCircle, /strokeDasharray=\{circumference\}/);
     assert.match(foregroundProgressCircle, /strokeLinecap="round"/);
+    assert.match(foregroundProgressCircle, /drivenExternally && "sp-ring-progress--driven"/);
     assert.match(sources.appCss, /\.sp-bar-fill\s*\{[\s\S]*transition: width 360ms ease/);
     assert.match(sources.appCss, /\.sp-ring-progress\s*\{[\s\S]*transition: stroke-dashoffset 360ms ease/);
+    assert.match(sources.appCss, /\.sp-bar-fill--driven\s*\{\s*transition: none;\s*\}/);
+    assert.match(sources.appCss, /\.sp-ring-progress--driven\s*\{\s*transition: none;\s*\}/);
+    assert.doesNotMatch(sources.appCss, /@keyframes home-refresh-confirm/);
+    assert.doesNotMatch(sources.appCss, /\.home-sport-refresh-cue/);
     assert.match(sources.appCss, /@media \(prefers-reduced-motion: reduce\)/);
 
     const reducedMotionBlock = sources.appCss.match(

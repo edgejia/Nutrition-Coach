@@ -120,6 +120,8 @@ export function MainLayout() {
   const setDailySummary = useStore((s) => s.setDailySummary);
   const setDailyTargets = useStore((s) => s.setDailyTargets);
   const setMeals = useStore((s) => s.setMeals);
+  const applyManualHomeRefresh = useStore((s) => s.applyManualHomeRefresh);
+  const applyMealMutationRefresh = useStore((s) => s.applyMealMutationRefresh);
   const recordMealMutation = useStore((s) => s.recordMealMutation);
   const recoverGuestSession = useStore((s) => s.recoverGuestSession);
   const setRolloverRefreshHandler = useStore((s) => s.setRolloverRefreshHandler);
@@ -129,13 +131,13 @@ export function MainLayout() {
   const goBack = useStore((s) => s.goBack);
   const [refreshingHomeToday, setRefreshingHomeToday] = useState(false);
   const [homeRefreshError, setHomeRefreshError] = useState<string | null>(null);
-  const [homeRefreshCueToken, setHomeRefreshCueToken] = useState(0);
 
   const sseSummaryCoordinator = useMemo(
     () =>
       createSSESummaryCoordinator({
         getMeals,
         setMeals,
+        applyMealMutationRefresh,
         setDailySummary,
         recordMealMutation,
         todayKey: () => formatLocalDate(new Date()),
@@ -143,7 +145,7 @@ export function MainLayout() {
           void recoverGuestSession();
         },
       }),
-    [setMeals, setDailySummary, recordMealMutation, recoverGuestSession],
+    [setMeals, applyMealMutationRefresh, setDailySummary, recordMealMutation, recoverGuestSession],
   );
 
   const refreshForRollover = useCallback(async () => {
@@ -164,8 +166,7 @@ export function MainLayout() {
     setRefreshingHomeToday(true);
     try {
       const { meals } = await getMeals({ refreshReason: "manual_refresh" });
-      setMeals(meals);
-      setHomeRefreshCueToken((token) => token + 1);
+      applyManualHomeRefresh(meals);
     } catch (error) {
       if (error instanceof Error && error.message === "UNAUTHORIZED") {
         void recoverGuestSession();
@@ -177,7 +178,7 @@ export function MainLayout() {
     } finally {
       setRefreshingHomeToday(false);
     }
-  }, [deviceId, recoverGuestSession, setMeals]);
+  }, [applyManualHomeRefresh, deviceId, recoverGuestSession]);
 
   useEffect(() => {
     if (!deviceId) return;
@@ -211,7 +212,6 @@ export function MainLayout() {
           onRefreshToday={refreshHomeManually}
           refreshingToday={refreshingHomeToday}
           refreshTodayError={homeRefreshError}
-          refreshCueToken={homeRefreshCueToken}
         />
       )}
       {activeScreen === "chat" && <ChatPanel />}

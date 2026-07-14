@@ -220,45 +220,43 @@ describe("Home dashboard display contracts", () => {
     assert.doesNotMatch(homeSource, /disabled[^=]|暫不可編輯|不可編輯|無法編輯|tooltip|title=\{`編輯/);
   });
 
-  it("replays count-up on the hero AND all three macro blocks on refresh", async () => {
-    // Plan 104-13 (Gap B) relaxes the prior "scopes count-up to consumed calories and ring percent"
-    // contract. WOULD-HAVE-CAUGHT: the previous version asserted exactly 3 `useCountUpNumber` calls
-    // and explicitly forbade `useCountUpNumber(macro`, which locked the device-visible bug (static
-    // macro blocks with no reload animation) into the source contract for five rounds. The relaxed
-    // contract below fails unless each macro number counts up and each macro progress bar replays
-    // its fill on every refresh, while still requiring the hero kcal/ring replay and reduced-motion
-    // handling and forbidding any SECOND parallel animation mechanism.
+  it("drives hero and macro replay from one Home nutrition timeline frame", async () => {
     const homeSource = await readSource("../../client/src/components/HomeScreen.tsx");
     const sportSource = await readSource("../../client/src/components/SportPrimitives.tsx");
     const cssSource = await readSource("../../client/src/app.css");
 
-    // Single shared replay primitive remains in place.
-    assert.match(homeSource, /function useCountUpNumber|const useCountUpNumber/);
-    assert.match(homeSource, /activeAnimationTargetRef/);
-    assert.match(homeSource, /previousReplayKeyRef/);
-    assert.match(homeSource, /\}, \[durationMs, options\.replayKey, replayChanged, targetValue, animate\]\)/);
+    assert.match(homeSource, /function useHomeNutritionTimeline\(enabled: boolean\): HomeTimelineFrame/);
+    assert.match(homeSource, /if \(!enabled\)\s*\{\s*return;\s*\}/);
+    assert.match(homeSource, /const secondaryScreen = useStore\(\(s\) => s\.secondaryScreen\)/);
+    assert.match(homeSource, /const homeAnimationEnabled = secondaryScreen === null/);
+    assert.match(homeSource, /const frame = useHomeNutritionTimeline\(homeAnimationEnabled\)/);
+    assert.doesNotMatch(homeSource, /refreshCueToken/);
+    assert.match(homeSource, /frameAt\(start, end, easeShared\(progress\)\)/);
+    assert.match(homeSource, /HOME_TIMELINE_DURATION_MS/);
     assert.match(homeSource, /matchMedia\("\(prefers-reduced-motion: reduce\)"\)/);
+    assert.match(homeSource, /consumeHomeAnimationIntent\(intentToken\)/);
 
-    // Hero kcal number, ring percent, and animated ring value still replay on refresh.
-    assert.match(homeSource, /useCountUpNumber\(display\.consumed, \{[\s\S]*animate: shouldAnimateConsumedChange,[\s\S]*replayKey: refreshCueToken/);
-    assert.match(homeSource, /useCountUpNumber\(display\.percent, \{[\s\S]*animate: shouldAnimateConsumedChange,[\s\S]*replayKey: refreshCueToken/);
-    assert.match(homeSource, /<SportRing[\s\S]*value=\{animatedRingValue\}/);
+    assert.match(homeSource, /\{frame\.kcal\.toLocaleString\("en-US"\)\}/);
+    assert.match(homeSource, /<SportRing[\s\S]*value=\{frame\.ringValue\}[\s\S]*drivenExternally/);
+    assert.match(homeSource, /<strong className="sp-display">\{frame\.percent\}<\/strong>/);
 
-    // Each macro number now counts up via the SAME helper, keyed on refreshCueToken.
-    assert.match(homeSource, /useCountUpNumber\(macro/);
-    assert.match(homeSource, /useCountUpNumber\(macro[\s\S]*replayKey: refreshCueToken/);
-
-    // Each macro progress bar replays its fill on refresh via a refresh-keyed replay signal.
-    assert.match(homeSource, /<SportProgressBar[\s\S]*replayKey=\{refreshCueToken\}/);
+    assert.match(homeSource, /<span>\{framePart\.grams\}<\/span>/);
+    assert.match(homeSource, /<SportProgressBar value=\{framePart\.barValue\} variant=\{macro\.variant\} drivenExternally \/>/);
+    assert.match(homeSource, /<div className="home-sport-macro-percent">\{framePart\.percent\}%<\/div>/);
+    assert.match(homeSource, /framePart=\{frame\.macros\[index\]/);
     assert.match(sportSource, /replayKey\??: ?number/);
+    assert.match(sportSource, /drivenExternally\?: boolean/);
     assert.match(sportSource, /sp-bar-fill/);
 
-    // Reuse the existing single mechanism: the .sp-bar-fill width transition and the reduced-motion
-    // media query stay in place; no parallel keyframe system is introduced.
     assert.match(cssSource, /\.sp-bar-fill \{[^}]*transition: width 360ms/);
+    assert.match(cssSource, /\.sp-bar-fill--driven\s*\{\s*transition: none;\s*\}/);
+    assert.match(cssSource, /\.sp-ring-progress--driven\s*\{\s*transition: none;\s*\}/);
     assert.match(cssSource, /@media \(prefers-reduced-motion: reduce\) \{ \.sp-bar-fill/);
 
-    // Guard against a SECOND parallel animation mechanism for the macro blocks.
+    assert.doesNotMatch(homeSource, /function useCountUpNumber|const useCountUpNumber/);
+    assert.doesNotMatch(homeSource, /animatedRingValue/);
+    assert.doesNotMatch(homeSource, /home-sport-refresh-cue/);
+    assert.doesNotMatch(homeSource, /key=\{`home-hero-/);
     assert.doesNotMatch(homeSource, /sessionStorage/);
     assert.doesNotMatch(homeSource, /macroAnimation/);
     assert.doesNotMatch(homeSource, /animatedMacro/);
@@ -273,7 +271,7 @@ describe("Home dashboard display contracts", () => {
     const cssSource = await readSource("../../client/src/app.css");
     const homeScrollBlock = cssBlock(cssSource, ".home-sport-scroll");
 
-    assert.match(homeSource, /<main className="screen-scroll home-sport-scroll">/);
+    assert.match(homeSource, /<main ref=\{homeScrollRef\} className="screen-scroll home-sport-scroll">/);
     assert.match(homeSource, /<CoachAdviceCard advice=\{coachAdvice\} cta=\{cta\}/);
     assert.match(homeSource, /sendHomeCtaTaskOption\(option, intent, setPendingHomeChatDraft, setActiveScreen\)/);
     assert.match(homeScrollBlock, /display:\s*flex/);

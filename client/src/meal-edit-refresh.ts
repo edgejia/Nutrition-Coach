@@ -5,7 +5,7 @@ interface RefreshAfterMealMutationDeps<Meal> {
   recordMealMutation: (affectedDate: string) => void;
   setDailySummary: (dailySummary: DailySummary) => void;
   getMeals: (options: { refreshReason: "meal_mutation" }) => Promise<{ meals: Meal[] }>;
-  setMeals: (meals: Meal[]) => void;
+  applyMealMutationRefresh: (meals: Meal[]) => void;
   todayKey: () => string;
 }
 
@@ -33,5 +33,5 @@ export async function refreshAfterMealMutation<Meal>(
   }
 
   const { meals } = await deps.getMeals({ refreshReason: "meal_mutation" });
-  deps.setMeals(meals);
+  deps.applyMealMutationRefresh(meals);
 }

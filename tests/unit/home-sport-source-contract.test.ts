@@ -45,13 +45,16 @@ describe("Home canonical Sport kit source parity", () => {
   });
 
   it("keeps the canonical ring size and top accent tick while preserving production data binding", () => {
-    // Plan 104-13 (Gap B): the hero ring now binds to animatedRingValue (derived from animatedPercent)
-    // so the arc replays together with the kcal number on every refresh. It is still derived from
-    // production data (display.target / display.percent), just animated rather than static.
-    assert.match(sources.home, /<SportRing[\s\S]*value=\{animatedRingValue\}[\s\S]*accentTick[\s\S]*size=\{120\}[\s\S]*stroke=\{9\}/);
-    assert.match(sources.home, /const animatedRingValue = display\.target > 0 \? Math\.min\(1, animatedPercent \/ 100\) : display\.ringValue/);
-    assert.match(sources.home, /display\.percent/);
+    assert.match(sources.home, /function useHomeNutritionTimeline/);
+    assert.match(sources.home, /getHomeCalorieDisplay\(dailySummary, dailyTargets\)/);
+    assert.match(sources.home, /getHomeMacroDisplays\(dailySummary, dailyTargets\)/);
+    assert.match(sources.home, /frameAt\(start, end, easeShared\(progress\)\)/);
+    assert.match(sources.home, /<SportRing[\s\S]*value=\{frame\.ringValue\}[\s\S]*accentTick[\s\S]*drivenExternally[\s\S]*size=\{120\}[\s\S]*stroke=\{9\}/);
+    assert.match(sources.home, /\{frame\.kcal\.toLocaleString\("en-US"\)\}/);
+    assert.match(sources.home, /\{frame\.percent\}/);
+    assert.doesNotMatch(sources.home, /animatedRingValue/);
     assert.match(sources.primitives, /accentTick\?: boolean/);
+    assert.match(sources.primitives, /drivenExternally\?: boolean/);
     assert.match(sources.primitives, /center - radius/);
     assert.match(sources.primitives, /fill="var\(--sp-ink-3\)"/);
   });

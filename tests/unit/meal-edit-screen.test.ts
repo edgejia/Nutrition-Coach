@@ -71,7 +71,7 @@ describe("Meal Edit source contract", () => {
       "recordMealMutation",
       "redactChatReceiptIdentity(mealId)",
       'getMeals({ refreshReason: "meal_mutation" })',
-      "setMeals",
+      "applyMealMutationRefresh",
       "recoverGuestSession",
     ]) {
       assert.match(source, escapedPattern(expected));
@@ -131,8 +131,9 @@ describe("Meal Edit source contract", () => {
   it("preserves committed direct mutation side effects when dailySummary is absent", () => {
     assert.match(source, /import \{ refreshAfterMealMutation \} from "\.\.\/meal-edit-refresh\.js";/);
     assert.doesNotMatch(source, /if \(!dailySummary \|\| dailySummary\.date !== formatLocalDate\(new Date\(\)\)\) \{\s*return;\s*\}/);
-    assert.match(source, /await refreshAfterMealMutation\(\{\s*redactChatReceiptIdentity,\s*recordMealMutation,\s*setDailySummary,\s*getMeals,\s*setMeals,\s*todayKey: \(\) => formatLocalDate\(new Date\(\)\),\s*\}, \{\s*mealId: payload\.mealId,\s*affectedDate: response\.affectedDate,\s*dailySummary: response\.dailySummary,\s*\}\);/);
-    assert.match(source, /await refreshAfterMealMutation\(\{\s*redactChatReceiptIdentity,\s*recordMealMutation,\s*setDailySummary,\s*getMeals,\s*setMeals,\s*todayKey: \(\) => formatLocalDate\(new Date\(\)\),\s*\}, \{\s*mealId: payload\.mealId,\s*affectedDate,\s*dailySummary,\s*\}\);/);
+    assert.match(source, /const applyMealMutationRefresh = useStore\(\(s\) => s\.applyMealMutationRefresh\);/);
+    assert.match(source, /await refreshAfterMealMutation\(\{\s*redactChatReceiptIdentity,\s*recordMealMutation,\s*setDailySummary,\s*getMeals,\s*applyMealMutationRefresh,\s*todayKey: \(\) => formatLocalDate\(new Date\(\)\),\s*\}, \{\s*mealId: payload\.mealId,\s*affectedDate: response\.affectedDate,\s*dailySummary: response\.dailySummary,\s*\}\);/);
+    assert.match(source, /await refreshAfterMealMutation\(\{\s*redactChatReceiptIdentity,\s*recordMealMutation,\s*setDailySummary,\s*getMeals,\s*applyMealMutationRefresh,\s*todayKey: \(\) => formatLocalDate\(new Date\(\)\),\s*\}, \{\s*mealId: payload\.mealId,\s*affectedDate,\s*dailySummary,\s*\}\);/);
 
     for (const rejected of [
       "summary unavailable",
@@ -149,7 +150,8 @@ describe("Meal Edit source contract", () => {
     assert.match(summaryDetailSource, /import \{ refreshAfterMealMutation \} from "\.\.\/meal-edit-refresh\.js";/);
     assert.match(summaryDetailSource, /MealRevisionConflictError/);
     assert.match(summaryDetailSource, /redactChatReceiptIdentity,/);
-    assert.match(summaryDetailSource, /await refreshAfterMealMutation\(\{\s*redactChatReceiptIdentity,\s*recordMealMutation,\s*setDailySummary,\s*getMeals,\s*setMeals,\s*todayKey: \(\) => formatLocalDate\(new Date\(\)\),\s*\}, \{\s*mealId,\s*affectedDate,\s*dailySummary,\s*\}\);/);
+    assert.match(summaryDetailSource, /const applyMealMutationRefresh = useStore\(\(s\) => s\.applyMealMutationRefresh\);/);
+    assert.match(summaryDetailSource, /await refreshAfterMealMutation\(\{\s*redactChatReceiptIdentity,\s*recordMealMutation,\s*setDailySummary,\s*getMeals,\s*applyMealMutationRefresh,\s*todayKey: \(\) => formatLocalDate\(new Date\(\)\),\s*\}, \{\s*mealId,\s*affectedDate,\s*dailySummary,\s*\}\);/);
     assert.match(summaryDetailSource, /if \(err instanceof MealRevisionConflictError\) \{/);
     assert.match(summaryDetailSource, /mealId: err\.mealId,\s*affectedDate: err\.affectedDate,/);
     assert.doesNotMatch(summaryDetailSource, /if \(dailySummary\?\.date === todayKey\) \{/);

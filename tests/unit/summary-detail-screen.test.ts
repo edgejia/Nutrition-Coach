@@ -228,7 +228,8 @@ describe("SummaryDetailScreen disclosure shell", () => {
     assert.match(summaryDetailSource, /MealRevisionConflictError/);
     assert.match(summaryDetailSource, /import \{ refreshAfterMealMutation \} from "\.\.\/meal-edit-refresh\.js";/);
     assert.match(summaryDetailSource, /const redactChatReceiptIdentity = useStore\(\(s\) => s\.redactChatReceiptIdentity\);/);
-    assert.match(summaryDetailSource, /await refreshAfterMealMutation\(\{\s*redactChatReceiptIdentity,\s*recordMealMutation,\s*setDailySummary,\s*getMeals,\s*setMeals,\s*todayKey: \(\) => formatLocalDate\(new Date\(\)\),\s*\}, \{\s*mealId,\s*affectedDate,\s*dailySummary,\s*\}\);/);
+    assert.match(summaryDetailSource, /const applyMealMutationRefresh = useStore\(\(s\) => s\.applyMealMutationRefresh\);/);
+    assert.match(summaryDetailSource, /await refreshAfterMealMutation\(\{\s*redactChatReceiptIdentity,\s*recordMealMutation,\s*setDailySummary,\s*getMeals,\s*applyMealMutationRefresh,\s*todayKey: \(\) => formatLocalDate\(new Date\(\)\),\s*\}, \{\s*mealId,\s*affectedDate,\s*dailySummary,\s*\}\);/);
     assert.match(summaryDetailSource, /if \(err instanceof MealRevisionConflictError\) \{/);
     assert.match(summaryDetailSource, /mealId: err\.mealId,\s*affectedDate: err\.affectedDate,/);
     assert.doesNotMatch(

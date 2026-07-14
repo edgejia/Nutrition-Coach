@@ -100,6 +100,7 @@ import {
   type ExcludedProteinSource,
   type ProteinSourceCertainty,
   type ProteinSourceInput,
+  type TrustedProteinEstimate,
   type TrustedProteinSource,
 } from "./protein-trust.js";
 import type { DeletedMealSnapshot } from "./mutation-effects.js";
@@ -1269,13 +1270,13 @@ function totalProposedProtein(args: LogFoodArgs): number {
 
 function shouldRejectTrustedProteinPersistence(
   args: LogFoodArgs,
-  countedSourceCount: number,
+  estimate: TrustedProteinEstimate,
 ): boolean {
-  if (countedSourceCount > 0) {
-    return false;
+  const proposedProtein = totalProposedProtein(args);
+  if (estimate.countedSources.length > 0) {
+    return proposedProtein <= 0;
   }
 
-  const proposedProtein = totalProposedProtein(args);
   if (proposedProtein <= 0) {
     return false;
   }
@@ -1879,7 +1880,7 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
       proteinSources,
     });
 
-    if (shouldRejectTrustedProteinPersistence(normalized, normalizedProtein.countedSources.length)) {
+    if (shouldRejectTrustedProteinPersistence(normalized, normalizedProtein)) {
       throw new FatalToolError("trusted protein basis required for this meal");
     }
 

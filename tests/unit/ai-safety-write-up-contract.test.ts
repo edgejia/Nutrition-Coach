@@ -1,0 +1,1145 @@
+import assert from "node:assert/strict";
+import { readFile, stat } from "node:fs/promises";
+import path from "node:path";
+import { describe, it } from "node:test";
+import ts from "typescript";
+
+const DOC_PATH = "docs/ai-safety.md";
+const CONTRACT_PATH = "tests/unit/ai-safety-write-up-contract.test.ts";
+const LEDGER_HEADING = "## Claim ledger";
+const INLINE_LINK_PATTERN = /(!?)\[([^\]\n]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
+const FENCE_DELIMITER_PATTERN = /^( {0,3})(`{3,}|~{3,})(.*)$/;
+
+const EXPECTED_CLAIM_IDS = Array.from(
+  { length: 18 },
+  (_, index) => `AS-${String(index + 1).padStart(2, "0")}`,
+);
+const EXPECTED_CASE_IDS = Array.from(
+  { length: 9 },
+  (_, index) => `CASE-${String(index + 9).padStart(2, "0")}`,
+);
+const REQUIRED_H2S = [
+  "System context",
+  "Threat model: trust and authority boundaries",
+  "Deterministic safety cases",
+  "The 1200 kcal product safety floor",
+  "What the evidence does—and does not—prove",
+  "Claim ledger",
+  "Known limitations and future eval questions",
+  "Conclusion",
+] as const;
+const ALLOWED_ISSUE_URLS = [
+  "https://github.com/edgejia/Nutrition-Coach/issues/107",
+  "https://github.com/edgejia/Nutrition-Coach/issues/108",
+  "https://github.com/edgejia/Nutrition-Coach/issues/109",
+] as const;
+const REQUIRED_SKIM_LINKS = [
+  ["Outcome summary", "#nutrition-coach-ai-safety-case-study"],
+  ["Boundary diagram", "#threat-model-trust-and-authority-boundaries"],
+  ["CASE table", "#deterministic-safety-cases"],
+  ["Known limitations", "#known-limitations-and-future-eval-questions"],
+  ["Conclusion", "#conclusion"],
+] as const;
+const LEDGER_HEADERS = [
+  "Claim ID",
+  "Bounded claim",
+  "Claim type",
+  "Primary executable evidence",
+  "Supporting rationale/source",
+  "What this does not prove",
+] as const;
+const CASE_HEADERS = [
+  "Domain / subgroup",
+  "CASE",
+  "Pressure",
+  "Bounded result",
+  "Evidence",
+] as const;
+const KNOWN_GAP_LABELS = [
+  "Observed behavior",
+  "What remained safe",
+  "What still failed",
+  "Why future evals are needed",
+] as const;
+const FUTURE_EVAL_QUESTIONS = [
+  "Does confusion receive explanation instead of a new proposal?",
+  "Does explanation copy remain coherent with an actionable proposal?",
+  "Is every apply promise backed by pending state?",
+] as const;
+const CLAIM_TYPES = new Map<string, "runtime" | "rationale" | "limitation">([
+  ...EXPECTED_CLAIM_IDS.slice(0, 9).map((id) => [id, "runtime"] as const),
+  ["AS-10", "rationale"],
+  ...EXPECTED_CLAIM_IDS.slice(10, 15).map((id) => [id, "runtime"] as const),
+  ...EXPECTED_CLAIM_IDS.slice(15).map((id) => [id, "limitation"] as const),
+]);
+const LIMITATION_ISSUES = new Map([
+  ["AS-16", ALLOWED_ISSUE_URLS[0]],
+  ["AS-17", ALLOWED_ISSUE_URLS[1]],
+  ["AS-18", ALLOWED_ISSUE_URLS[2]],
+]);
+const NON_PUBLIC_FIXTURE_ROOT = ["docs", "research"].join("/");
+const REFERENCE_LINK_FIXTURE = `
+[outside][external]
+[internal][private]
+
+[external]: https://example.invalid/evidence
+[private]: ../${NON_PUBLIC_FIXTURE_ROOT}/notes.md
+`;
+const REFERENCE_IMAGE_FIXTURE = "![diagram][image]\n[image]: ./diagram.png";
+const AUTOLINK_FIXTURE = "<https://example.invalid/evidence>\nhttps://example.invalid/bare";
+const INLINE_HTML_FIXTURE = '<a href="https://example.invalid">link</a>\n<img src="./diagram.png">\n<!-- hidden -->';
+const EXTENDED_AUTOLINK_FIXTURE = "www.example.invalid\nreviewer@example.invalid";
+const UNSAFE_TARGET_FIXTURE = [
+  "[absolute](/tmp/evidence.md)",
+  "[windows](C:\\private\\evidence.md)",
+  "[file](file:///tmp/evidence.md)",
+  "[mail](mailto:reviewer@example.invalid)",
+].join("\n");
+const UNPARSED_LINK_FIXTURE = "broken]( target\n~~~text\nunsupported\n~~~";
+const SUPPORTED_SURFACE_FIXTURE = `
+Prose with **[AS-01]** and [relative evidence](../tests/unit/example.test.ts).
+[Approved issue](https://github.com/edgejia/Nutrition-Coach/issues/107)
+
+\`\`\`mermaid
+flowchart LR
+  A[Untrusted data] --> B[Guarded authority]
+\`\`\`
+
+> Bounded evidence only.
+`;
+const SYNTHETIC_POSIX_PATH = ["", "var", "tmp", "synthetic-private-proof.md"].join("/");
+const SYNTHETIC_WINDOWS_PATH = ["Q:", "synthetic", "private-proof.md"].join("\\");
+const SYNTHETIC_FILE_PATH = [
+  ["fi", "le"].join(""),
+  "://",
+  ["localhost", "synthetic", "private-proof.md"].join("/"),
+].join("");
+const SYNTHETIC_CREDENTIAL_ASSIGNMENT = [
+  ["SYNTHETIC", "ACCESS", "TOKEN"].join("_"),
+  "=",
+  ["placeholder", "value", "only"].join("-"),
+].join("");
+const SYNTHETIC_TOKEN_PREFIX = ["gh", "p_", "placeholdervalueonly"].join("");
+const PLAIN_PRIVATE_SURFACE_FIXTURE = [
+  `POSIX sample: ${SYNTHETIC_POSIX_PATH}`,
+  `Windows sample: ${SYNTHETIC_WINDOWS_PATH}`,
+  `File sample: ${SYNTHETIC_FILE_PATH}`,
+].join("\n");
+const CREDENTIAL_PRIVATE_SURFACE_FIXTURE = [
+  SYNTHETIC_CREDENTIAL_ASSIGNMENT,
+  SYNTHETIC_TOKEN_PREFIX,
+].join("\n");
+const FENCED_PRIVATE_SURFACE_FIXTURE = [
+  "```text",
+  SYNTHETIC_POSIX_PATH,
+  SYNTHETIC_CREDENTIAL_ASSIGNMENT,
+  "```",
+].join("\n");
+const INDENTED_TILDE_FENCE_FIXTURE = [
+  "   ~~~text",
+  "   bounded sample",
+  "   ~~~",
+].join("\n");
+const CLEAN_INDENTED_BACKTICK_FENCE_FIXTURE = [
+  "   ```text",
+  "   bounded sample",
+  "   ```",
+].join("\n");
+const FENCE_DELIMITER_CREDENTIAL_FIXTURE = [
+  ["```", "text", SYNTHETIC_CREDENTIAL_ASSIGNMENT].join(" "),
+  "bounded sample",
+  "```",
+].join("\n");
+const FENCE_DELIMITER_PATH_TOKEN_FIXTURE = [
+  ["   ```", "text", SYNTHETIC_POSIX_PATH, SYNTHETIC_TOKEN_PREFIX].join(" "),
+  "   bounded sample",
+  "   ```",
+].join("\n");
+const COMMENTED_TITLE_FIXTURE = `
+// test("commented line title", () => {});
+/* it("commented block title", () => {}); */
+`;
+const STRING_TITLE_FIXTURE = `
+const shapedText = 'it("string-only title", () => {})';
+const dynamicTitle = \`template \${suffix}\`;
+test(dynamicTitle, () => {});
+`;
+const SKIPPED_TITLE_FIXTURE = `
+import { it, test } from "node:test";
+test.skip("skipped test", () => {});
+test.todo("todo test");
+it.skip("skipped it", () => {});
+`;
+const ACTIVE_TITLE_FIXTURE = `
+import { describe, it, test } from "node:test";
+test("active \\"quoted\\" test", () => {});
+describe("nested", () => {
+  it(\`active nested it\`, () => {});
+});
+`;
+const SHADOWED_NODE_TEST_FIXTURE = `
+import { it, test } from "node:test";
+function invokeShadowed(test: (title: string, callback: () => void) => void) {
+  test("shadowed test title", () => {});
+}
+{
+  const it = (title: string, callback: () => void) => callback();
+  it("shadowed it title", () => {});
+}
+void invokeShadowed;
+void test;
+void it;
+`;
+const INACTIVE_SUITE_FIXTURE = `
+import { describe, it, suite, test } from "node:test";
+describe.skip("skipped describe", () => {
+  test("test under skipped describe", () => {});
+});
+describe.todo("todo describe", () => {
+  it("it under todo describe", () => {});
+});
+suite.skip("skipped suite", () => {
+  test("test under skipped suite", () => {});
+});
+suite("option-disabled suite", { skip: true }, () => {
+  it("it under option-disabled suite", () => {});
+});
+`;
+const INACTIVE_TEST_OPTIONS_FIXTURE = `
+import { it, test } from "node:test";
+test("option-skipped test", { skip: true }, () => {});
+it("option-todo it", { todo: "later" }, () => {});
+`;
+const NON_RUNNABLE_CALLBACK_FIXTURE = `
+import { it, test } from "node:test";
+test("title-only test");
+it("options-only it", { skip: false });
+`;
+const RUNNABLE_NODE_TEST_FIXTURE = `
+import { describe, it, suite, test } from "node:test";
+test("active false-option test", { skip: false, todo: false }, () => {});
+describe("active describe", () => {
+  it("active \\"escaped\\" it", () => {});
+});
+suite("active suite", { skip: false }, () => {
+  test(\`active template test\`, function () {});
+});
+`;
+const INACTIVE_TEST_OPTION_SHAPES_FIXTURE = `
+import { it, test } from "node:test";
+test("spread-skipped test", { ...{ skip: true } }, () => {});
+it("computed-skip test", { ["skip"]: true }, () => {});
+test("computed-todo test", { [\`todo\`]: "later" }, () => {});
+`;
+const INACTIVE_SUITE_OPTION_SHAPES_FIXTURE = `
+import { describe, it, suite, test } from "node:test";
+describe("spread-skipped describe", { ...{ skip: true } }, () => {
+  test("test under spread-skipped describe", () => {});
+});
+suite("computed-todo suite", { ["todo"]: "later" }, () => {
+  it("it under computed-todo suite", () => {});
+});
+`;
+const UNRESOLVED_COMPUTED_OPTION_FIXTURE = `
+import { describe, it, test } from "node:test";
+const dynamicTestOption = "skip";
+const dynamicSuiteOption = "todo";
+test("unresolved-computed test", { [dynamicTestOption]: true }, () => {});
+describe("unresolved-computed describe", { [dynamicSuiteOption]: "later" }, () => {
+  it("it under unresolved-computed describe", () => {});
+});
+`;
+const STATICALLY_FALSE_OPTION_SHAPES_FIXTURE = `
+import { it, test } from "node:test";
+const dynamicFalseOption = "skip";
+test("direct false option test", { skip: false }, () => {});
+it("computed-literal false option test", { ["todo"]: false }, () => {});
+test("unresolved-computed false option test", { [dynamicFalseOption]: false }, () => {});
+it("inline-spread false option test", { ...{ skip: false, [\`todo\`]: false } }, () => {});
+`;
+
+type MarkdownLink = {
+  text: string;
+  target: string;
+  image: boolean;
+};
+
+async function readAiSafetyDocument() {
+  return readFile(DOC_PATH, "utf8");
+}
+
+function splitNarrativeAndLedger(markdown: string) {
+  const parts = markdown.split(LEDGER_HEADING);
+  assert.equal(parts.length, 2, `${LEDGER_HEADING} must appear exactly once`);
+  return { narrative: parts[0], ledger: parts[1] };
+}
+
+function extractNarrativeClaimIds(markdown: string) {
+  return [...extractNarrative(markdown).matchAll(/\*\*\[(AS-\d{2})\]\*\*/g)].map((match) => match[1]);
+}
+
+function extractLedgerClaimIds(markdown: string) {
+  const { ledger } = splitNarrativeAndLedger(markdown);
+  return [...ledger.matchAll(/^\| (AS-\d{2}) \|/gm)].map((match) => match[1]);
+}
+
+function extractMarkdownLinks(markdown: string): MarkdownLink[] {
+  return [...markdown.matchAll(INLINE_LINK_PATTERN)].map(
+    (match) => ({ image: match[1] === "!", text: match[2], target: match[3] }),
+  );
+}
+
+function stripFencedCode(markdown: string) {
+  const prose: string[] = [];
+  const fencedBodies: string[] = [];
+  const fenceDelimiters: string[] = [];
+  let activeFence: { character: "`" | "~"; length: number } | undefined;
+  let mismatched = false;
+  let tildeDelimiterSeen = false;
+
+  for (const line of markdown.split(/\r?\n/)) {
+    const delimiter = line.match(FENCE_DELIMITER_PATTERN);
+    if (delimiter) {
+      fenceDelimiters.push(line);
+      const run = delimiter[2];
+      const character = run[0] as "`" | "~";
+      tildeDelimiterSeen ||= character === "~";
+
+      if (!activeFence) {
+        activeFence = { character, length: run.length };
+        continue;
+      }
+
+      const compatibleClose =
+        character === activeFence.character &&
+        run.length >= activeFence.length &&
+        delimiter[3].trim().length === 0;
+      if (compatibleClose) {
+        activeFence = undefined;
+        continue;
+      }
+
+      mismatched = true;
+      fencedBodies.push(line);
+      continue;
+    }
+    (activeFence ? fencedBodies : prose).push(line);
+  }
+
+  return {
+    prose: prose.join("\n"),
+    fencedBodies: fencedBodies.join("\n"),
+    fenceDelimiters: fenceDelimiters.join("\n"),
+    balanced: !activeFence,
+    mismatched,
+    tildeDelimiterSeen,
+  };
+}
+
+function findPrivateContentSurfaces(markdown: string, location: "prose" | "fenced body" | "fence delimiter") {
+  const categories = new Set<string>();
+  const posixAbsolutePath =
+    /(?:^|[\s"'=:(])\/(?:Users|home|var|tmp|etc|opt|private|root)\/(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+(?=$|[\s"'`),.;:])/m;
+  const windowsAbsolutePath = /(?:^|[\s"'=:(])[A-Za-z]:[\\/](?:[^\\/\s"'`]+[\\/])+[^\\/\s"'`]+/m;
+  const fileSchemePath = /\bfile:\/\/(?:localhost\/)?[^\s"'`<>)]+/i;
+  const credentialAssignment =
+    /\b[A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)[A-Z0-9_]*\s*=\s*(?:"[^"\s]{4,}"|'[^'\s]{4,}'|[^\s"'`]{4,})/;
+  const accessTokenPrefix =
+    /\b(?:ghp_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{8,}|sk-[A-Za-z0-9_-]{8,}|AKIA[A-Z0-9]{12,})\b/;
+
+  if (posixAbsolutePath.test(markdown)) categories.add("POSIX path");
+  if (windowsAbsolutePath.test(markdown)) categories.add("Windows path");
+  if (fileSchemePath.test(markdown)) categories.add("file-scheme path");
+  if (credentialAssignment.test(markdown)) categories.add("credential assignment");
+  if (accessTokenPrefix.test(markdown)) categories.add("access-token prefix");
+
+  return [...categories].map((category) => `${location}: ${category}`);
+}
+
+function findUnsupportedLinkSurfaces(markdown: string) {
+  const violations: string[] = [];
+  const { prose, fencedBodies, fenceDelimiters, balanced, mismatched, tildeDelimiterSeen } = stripFencedCode(markdown);
+
+  if (!balanced) violations.push("unbalanced backtick fence");
+  if (mismatched) violations.push("mismatched fence delimiter");
+  if (tildeDelimiterSeen) violations.push("tilde fence is unsupported");
+  if (/^\s{0,3}\[[^\]]+\]:/m.test(prose)) violations.push("reference definition is unsupported");
+  if (/\]\[/.test(prose)) violations.push("reference-style link or image is unsupported");
+  if (/<[A-Za-z/!?]/.test(prose)) violations.push("inline HTML or angle-bracket autolink is unsupported");
+
+  const residue = prose.replace(INLINE_LINK_PATTERN, "");
+  if (/\]\(/.test(residue)) violations.push("unparsed inline-link residue is unsupported");
+  if (/(?:https?|ftp|file):\/\//i.test(residue)) violations.push("bare URL is unsupported");
+  if (/\bwww\./i.test(residue)) violations.push("www extended autolink is unsupported");
+  if (/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.test(residue)) {
+    violations.push("email extended autolink is unsupported");
+  }
+
+  for (const { target } of extractMarkdownLinks(prose)) {
+    if (target.startsWith("/") || /^[A-Za-z]:[\\/]/.test(target)) {
+      violations.push("absolute local link target is unsupported");
+    }
+    const scheme = target.match(/^([A-Za-z][A-Za-z0-9+.-]*):/)?.[1]?.toLowerCase();
+    if (scheme && scheme !== "http" && scheme !== "https") {
+      violations.push(`non-http link target scheme is unsupported: ${scheme}`);
+    }
+  }
+
+  if (/(?:https?|ftp|file):\/\//i.test(fencedBodies)) {
+    violations.push("URI scheme inside fenced code is unsupported");
+  }
+  if (/<[A-Za-z/!?]/.test(fencedBodies)) {
+    violations.push("HTML-like content inside fenced code is unsupported");
+  }
+
+  violations.push(...findPrivateContentSurfaces(prose, "prose"));
+  violations.push(...findPrivateContentSurfaces(fencedBodies, "fenced body"));
+  violations.push(...findPrivateContentSurfaces(fenceDelimiters, "fence delimiter"));
+
+  return violations;
+}
+
+function resolveLocalEvidencePath(target: string) {
+  const withoutFragment = target.split("#", 1)[0];
+  return path.normalize(path.resolve(path.dirname(DOC_PATH), withoutFragment));
+}
+
+function createTypeCheckedSource(source: string, sourcePath: string) {
+  const virtualPath = path.resolve(sourcePath);
+  const options: ts.CompilerOptions = {
+    module: ts.ModuleKind.NodeNext,
+    moduleResolution: ts.ModuleResolutionKind.NodeNext,
+    noEmit: true,
+    skipLibCheck: true,
+    target: ts.ScriptTarget.Latest,
+    types: ["node"],
+  };
+  const defaultHost = ts.createCompilerHost(options, true);
+  const isVirtualSource = (fileName: string) => path.resolve(fileName) === virtualPath;
+  const host: ts.CompilerHost = {
+    ...defaultHost,
+    fileExists: (fileName) => isVirtualSource(fileName) || defaultHost.fileExists(fileName),
+    readFile: (fileName) => (isVirtualSource(fileName) ? source : defaultHost.readFile(fileName)),
+    getSourceFile: (fileName, languageVersion, onError, shouldCreateNewSourceFile) => {
+      if (isVirtualSource(fileName)) {
+        return ts.createSourceFile(fileName, source, languageVersion, true, ts.ScriptKind.TS);
+      }
+      return defaultHost.getSourceFile(fileName, languageVersion, onError, shouldCreateNewSourceFile);
+    },
+  };
+  const program = ts.createProgram([virtualPath], options, host);
+  const sourceFile = program.getSourceFile(virtualPath);
+  assert.ok(sourceFile, `unable to type-check evidence source ${sourcePath}`);
+  return { checker: program.getTypeChecker(), sourceFile };
+}
+
+function isNodeTestImportBinding(
+  checker: ts.TypeChecker,
+  identifier: ts.Identifier,
+  exportedNames: ReadonlySet<string>,
+) {
+  const symbol = checker.getSymbolAtLocation(identifier);
+  return symbol?.declarations?.some((declaration) => {
+    if (!ts.isImportSpecifier(declaration)) return false;
+    const importDeclaration = declaration.parent.parent.parent;
+    return (
+      ts.isImportDeclaration(importDeclaration) &&
+      ts.isStringLiteral(importDeclaration.moduleSpecifier) &&
+      importDeclaration.moduleSpecifier.text === "node:test" &&
+      exportedNames.has((declaration.propertyName ?? declaration.name).text)
+    );
+  }) ?? false;
+}
+
+function isRunnableCallbackArgument(node: ts.Node) {
+  return ts.isArrowFunction(node) || ts.isFunctionExpression(node);
+}
+
+type StaticNodeTestOptionKey = "skip" | "todo" | "unrelated" | "unresolved";
+
+function getStaticNodeTestOptionKey(name: ts.PropertyName): StaticNodeTestOptionKey {
+  let key: string | undefined;
+  if (ts.isIdentifier(name) || ts.isStringLiteral(name)) {
+    key = name.text;
+  } else if (ts.isComputedPropertyName(name)) {
+    if (ts.isStringLiteral(name.expression) || ts.isNoSubstitutionTemplateLiteral(name.expression)) {
+      key = name.expression.text;
+    } else {
+      return "unresolved";
+    }
+  } else {
+    return "unrelated";
+  }
+
+  return key === "skip" || key === "todo" ? key : "unrelated";
+}
+
+function hasInactiveNodeTestOptionProperties(options: ts.ObjectLiteralExpression): boolean {
+  return options.properties.some((property) => {
+    if (ts.isSpreadAssignment(property)) {
+      return !ts.isObjectLiteralExpression(property.expression) || hasInactiveNodeTestOptionProperties(property.expression);
+    }
+
+    const optionKey = getStaticNodeTestOptionKey(property.name);
+    if (optionKey === "unrelated") return false;
+    return !ts.isPropertyAssignment(property) || property.initializer.kind !== ts.SyntaxKind.FalseKeyword;
+  });
+}
+
+function hasInactiveNodeTestOptions(call: ts.CallExpression) {
+  const optionArguments = call.arguments.slice(1).filter((argument) => !isRunnableCallbackArgument(argument));
+  if (optionArguments.length === 0) return false;
+
+  return optionArguments.some((argument) => {
+    if (!ts.isObjectLiteralExpression(argument)) return true;
+    return hasInactiveNodeTestOptionProperties(argument);
+  });
+}
+
+function extractActiveTestTitles(source: string, sourcePath: string) {
+  const titles = new Set<string>();
+  const { checker, sourceFile } = createTypeCheckedSource(source, sourcePath);
+  const testExports = new Set(["test", "it"]);
+  const suiteExports = new Set(["describe", "suite"]);
+
+  function visit(node: ts.Node, inactiveSuite = false) {
+    if (ts.isCallExpression(node)) {
+      const directSuite =
+        ts.isIdentifier(node.expression) &&
+        isNodeTestImportBinding(checker, node.expression, suiteExports);
+      const propertySuite =
+        ts.isPropertyAccessExpression(node.expression) &&
+        ts.isIdentifier(node.expression.expression) &&
+        isNodeTestImportBinding(checker, node.expression.expression, suiteExports);
+
+      if (directSuite || propertySuite) {
+        const inactiveProperty =
+          propertySuite && (node.expression.name.text === "skip" || node.expression.name.text === "todo");
+        const descendantInactive = inactiveSuite || inactiveProperty || hasInactiveNodeTestOptions(node);
+        ts.forEachChild(node, (child) => visit(child, descendantInactive));
+        return;
+      }
+
+      if (ts.isIdentifier(node.expression)) {
+      const title = node.arguments[0];
+      if (
+        !inactiveSuite &&
+        isNodeTestImportBinding(checker, node.expression, testExports) &&
+        title &&
+        (ts.isStringLiteral(title) || ts.isNoSubstitutionTemplateLiteral(title)) &&
+        !hasInactiveNodeTestOptions(node) &&
+        node.arguments.slice(1).some(isRunnableCallbackArgument)
+      ) {
+        titles.add(title.text);
+      }
+      }
+    }
+    ts.forEachChild(node, (child) => visit(child, inactiveSuite));
+  }
+
+  visit(sourceFile);
+  return titles;
+}
+
+function assertExactUniqueSet(actual: string[], expected: readonly string[], label: string) {
+  assert.equal(new Set(actual).size, actual.length, `${label} must not contain duplicates`);
+  assert.deepEqual([...actual].sort(), [...expected].sort(), `${label} exact set drift`);
+}
+
+function splitTableRow(line: string) {
+  assert.match(line, /^\|.*\|$/, `invalid Markdown table row: ${line}`);
+  return line
+    .slice(1, -1)
+    .split("|")
+    .map((cell) => cell.trim());
+}
+
+function extractTable(markdown: string, headers: readonly string[]) {
+  const lines = markdown.split(/\r?\n/);
+  const headerIndex = lines.findIndex(
+    (line) => JSON.stringify(splitTableRowIfPossible(line)) === JSON.stringify(headers),
+  );
+  assert.notEqual(headerIndex, -1, `missing table with headers: ${headers.join(", ")}`);
+
+  const separator = splitTableRow(lines[headerIndex + 1]);
+  assert.equal(separator.length, headers.length, "table separator column count drift");
+  for (const cell of separator) {
+    assert.match(cell, /^:?-{3,}:?$/, `invalid Markdown table separator: ${cell}`);
+  }
+
+  const rows: string[][] = [];
+  for (let index = headerIndex + 2; index < lines.length && /^\|.*\|$/.test(lines[index]); index += 1) {
+    rows.push(splitTableRow(lines[index]));
+  }
+  return rows;
+}
+
+function splitTableRowIfPossible(line: string) {
+  return /^\|.*\|$/.test(line) ? splitTableRow(line) : [];
+}
+
+function extractSection(markdown: string, heading: string, nextHeading?: string) {
+  const start = markdown.indexOf(`## ${heading}`);
+  assert.notEqual(start, -1, `missing section ${heading}`);
+  const end = nextHeading ? markdown.indexOf(`## ${nextHeading}`, start + heading.length) : markdown.length;
+  assert.notEqual(end, -1, `missing section boundary ${nextHeading}`);
+  return markdown.slice(start, end);
+}
+
+function isExternalTarget(target: string) {
+  return /^https?:\/\//.test(target);
+}
+
+function repositoryRelativePath(absolutePath: string) {
+  return path.relative(process.cwd(), absolutePath).split(path.sep).join("/");
+}
+
+function paragraphs(markdown: string) {
+  return markdown.split(/\r?\n\s*\r?\n/).map((paragraph) => paragraph.trim());
+}
+
+function extractNarrative(markdown: string) {
+  const { narrative, ledger } = splitNarrativeAndLedger(markdown);
+  const postLedgerNarrativeIndex = ledger.indexOf("## Known limitations and future eval questions");
+  assert.notEqual(postLedgerNarrativeIndex, -1, "missing post-ledger narrative boundary");
+  return `${narrative}\n${ledger.slice(postLedgerNarrativeIndex)}`;
+}
+
+describe("public AI-safety write-up contract", () => {
+  it("rejects unsupported Markdown link, image, and HTML surfaces across the whole document", async () => {
+    const markdown = await readAiSafetyDocument();
+    assert.deepEqual(findUnsupportedLinkSurfaces(markdown), []);
+  });
+
+  it("locks the approved heading, opening, navigation, diagram, and semantic Markdown shape", async () => {
+    const markdown = await readAiSafetyDocument();
+    const lines = markdown.split(/\r?\n/);
+    const h1s = lines.filter((line) => /^# /.test(line));
+    const h2s = lines.filter((line) => /^## /.test(line)).map((line) => line.slice(3));
+
+    assert.deepEqual(h1s, ["# Nutrition Coach AI-safety case study"]);
+    assert.deepEqual(h2s, REQUIRED_H2S);
+    assert.doesNotMatch(markdown, /^#{3,}\s/m, "H3/H4 or deeper headings are not allowed");
+
+    const firstH2Index = markdown.indexOf("\n## ");
+    assert.ok(firstH2Index > 0, "the opening block must precede the first H2");
+    const opening = markdown.slice(0, firstH2Index);
+    const skimLines = opening.match(/^Skim path: .+$/gm) ?? [];
+    assert.equal(skimLines.length, 1, "exactly one standalone Skim path line is required");
+    assert.deepEqual(
+      extractMarkdownLinks(skimLines[0]).map(({ text, target }) => [text, target]),
+      REQUIRED_SKIM_LINKS,
+    );
+    assert.equal(
+      opening.match(/^\[Inspect the evidence\]\(#claim-ledger\)$/gm)?.length,
+      1,
+      "the primary evidence action must appear once before the first H2",
+    );
+
+    const h1End = opening.indexOf("\n") + 1;
+    const skimIndex = opening.indexOf("Skim path:");
+    const inspectIndex = opening.indexOf("[Inspect the evidence](#claim-ledger)");
+    const limitationsIndex = opening.indexOf("> **Known limitations**");
+    assert.ok(h1End < skimIndex && skimIndex < inspectIndex && inspectIndex < limitationsIndex);
+    const summary = opening.slice(h1End, skimIndex).trim();
+    const summaryWordCount = summary.match(/[A-Za-z0-9]+(?:[-’'][A-Za-z0-9]+)*/g)?.length ?? 0;
+    assert.ok(
+      summaryWordCount >= 120 && summaryWordCount <= 180,
+      `opening outcome summary must contain 120-180 words; found ${summaryWordCount}`,
+    );
+    assert.doesNotMatch(summary, /^\s*(?:[-*]|\d+\.)\s/m, "opening summary must be prose");
+    for (const issueUrl of ALLOWED_ISSUE_URLS) {
+      assert.ok(opening.slice(limitationsIndex).includes(issueUrl), `opening limitations must link ${issueUrl}`);
+    }
+
+    assert.equal(markdown.match(/^```mermaid$/gm)?.length, 1, "exactly one Mermaid diagram is required");
+    assert.equal(markdown.match(/^flowchart LR$/gm)?.length, 1, "the diagram must use flowchart LR");
+    assert.equal(markdown.match(/^\*\*Text alternative:\*\*/gm)?.length, 1, "one prose diagram alternative is required");
+    const textAlternative = paragraphs(markdown).find((paragraph) => paragraph.startsWith("**Text alternative:**"));
+    assert.ok(textAlternative, "missing diagram text alternative");
+    for (const phrase of [
+      "untrusted data",
+      "model proposal/request",
+      "guarded backend authority",
+      "committed state",
+    ]) {
+      assert.ok(textAlternative.includes(phrase), `diagram text alternative must include ${phrase}`);
+    }
+
+    assert.doesNotMatch(markdown, /^##?\s+(?:Table of contents|Contents)\s*$/gim);
+    assert.doesNotMatch(markdown, /^\s*(?:[-*+] |\d+\. )\[[^\]]+\]\(#[^)]+\)\s*$/gm, "anchor-only lists are not allowed");
+    assert.doesNotMatch(markdown, /<\/?details\b|<\/?summary\b/i, "collapsible blocks are not allowed");
+    assert.doesNotMatch(markdown, /^\s*<\/?[A-Za-z][^>]*>\s*$/gm, "custom HTML is not allowed");
+    assert.equal(extractMarkdownLinks(markdown).filter((link) => link.image).length, 0, "images are not allowed");
+    assert.doesNotMatch(markdown, /shields\.io|badge/i, "badges are not allowed");
+
+    for (const sectionName of [
+      "Threat model: trust and authority boundaries",
+      "Deterministic safety cases",
+      "The 1200 kcal product safety floor",
+      "What the evidence does—and does not—prove",
+    ]) {
+      const sectionIndex = REQUIRED_H2S.indexOf(sectionName as (typeof REQUIRED_H2S)[number]);
+      const section = extractSection(markdown, sectionName, REQUIRED_H2S[sectionIndex + 1]);
+      assert.equal(section.match(/^\*\*What this proves:\*\*/gm)?.length, 1, `${sectionName} needs one proof statement`);
+      assert.equal(
+        section.match(/^\*\*What this does not prove:\*\*/gm)?.length,
+        1,
+        `${sectionName} needs one proof-limit statement`,
+      );
+    }
+  });
+
+  it("locks the exact narrative, ledger, CASE, and known-gap sets", async () => {
+    const markdown = await readAiSafetyDocument();
+    const narrativeClaimIds = extractNarrativeClaimIds(markdown);
+    const ledgerClaimIds = extractLedgerClaimIds(markdown);
+
+    assertExactUniqueSet(narrativeClaimIds, EXPECTED_CLAIM_IDS, "narrative claim IDs");
+    assertExactUniqueSet(ledgerClaimIds, EXPECTED_CLAIM_IDS, "ledger claim IDs");
+
+    const markedParagraphs = paragraphs(extractNarrative(markdown)).filter((paragraph) =>
+      /\*\*\[AS-\d{2}\]\*\*/.test(paragraph),
+    );
+    assert.equal(markedParagraphs.length, EXPECTED_CLAIM_IDS.length, "each claim must occupy one paragraph");
+    for (const paragraph of markedParagraphs) {
+      const ids = [...paragraph.matchAll(/\*\*\[(AS-\d{2})\]\*\*/g)].map((match) => match[1]);
+      assert.equal(ids.length, 1, "claim paragraphs must contain exactly one visible claim ID");
+      const links = extractMarkdownLinks(paragraph);
+      assert.ok(links.length > 0, `${ids[0]} must have adjacent evidence`);
+      for (const link of links) {
+        assert.doesNotMatch(link.text, /^(?:click here|here|https?:\/\/|\.\.?\/)/i, `${ids[0]} link text must be descriptive`);
+      }
+    }
+
+    const caseRows = extractTable(markdown, CASE_HEADERS);
+    assert.equal(caseRows.length, 9, "CASE table must contain exactly nine rows");
+    assert.ok(caseRows.every((row) => row.length === CASE_HEADERS.length), "CASE rows must contain five columns");
+    assert.deepEqual(caseRows.map((row) => row[1]), EXPECTED_CASE_IDS);
+    assert.deepEqual(caseRows.map((row) => row[0]), [
+      "Instruction / untrusted context",
+      "Instruction / untrusted context",
+      "Instruction / fake authority",
+      "Instruction / fake authority",
+      "Instruction / fake authority",
+      "Nutrition safety",
+      "Nutrition safety",
+      "Nutrition safety",
+      "Nutrition safety",
+    ]);
+    for (const row of caseRows) {
+      for (const cell of row) {
+        const visibleText = cell.replace(/(!?)\[([^\]\n]+)\]\([^)]+\)/g, "$2");
+        assert.ok(
+          (visibleText.match(/[.!?](?:\s|$)/g)?.length ?? 0) <= 1,
+          `${row[1]} cells must remain concise one-sentence values`,
+        );
+      }
+      const links = extractMarkdownLinks(row[4]);
+      assert.ok(links.length >= 1 && links.length <= 2, `${row[1]} must have one or two evidence links`);
+      assert.ok(links.some((link) => link.text.includes(row[1])), `${row[1]} evidence must name the CASE ID`);
+    }
+
+    const knownGaps = extractSection(markdown, "Known limitations and future eval questions", "Conclusion");
+    const issuePositions = ALLOWED_ISSUE_URLS.map((issueUrl) => knownGaps.indexOf(issueUrl));
+    assert.ok(issuePositions.every((position) => position >= 0), "every known-gap block needs its direct issue URL");
+    assert.ok(issuePositions[0] < issuePositions[1] && issuePositions[1] < issuePositions[2]);
+    for (let index = 0; index < ALLOWED_ISSUE_URLS.length; index += 1) {
+      const blockEnd = issuePositions[index + 1] ?? knownGaps.indexOf("**Future eval questions**");
+      const block = knownGaps.slice(issuePositions[index], blockEnd);
+      const labels = [...block.matchAll(/^\*\*(Observed behavior|What remained safe|What still failed|Why future evals are needed):\*\*/gm)].map(
+        (match) => match[1],
+      );
+      assert.deepEqual(labels, KNOWN_GAP_LABELS, `issue ${107 + index} known-gap field drift`);
+      const safeField = block.slice(block.indexOf("**What remained safe:**"), block.indexOf("**What still failed:**"));
+      assert.ok(
+        extractMarkdownLinks(safeField).some((link) => !isExternalTarget(link.target)),
+        `issue ${107 + index} What remained safe needs executable support`,
+      );
+    }
+
+    const questionLines = knownGaps
+      .split(/\r?\n/)
+      .filter((line) => /^\d+\. .+\?$/.test(line))
+      .map((line) => line.replace(/^\d+\. /, ""));
+    assert.deepEqual(questionLines, FUTURE_EVAL_QUESTIONS);
+    const knownGapTail = knownGaps.trimEnd().split(/\r?\n/).slice(-3).map((line) => line.replace(/^\d+\. /, ""));
+    assert.deepEqual(knownGapTail, FUTURE_EVAL_QUESTIONS, "the section must end with the three eval questions");
+  });
+
+  it("requires six-column evidence rows with executable title and CASE anchoring", async () => {
+    const markdown = await readAiSafetyDocument();
+    const ledgerRows = extractTable(markdown, LEDGER_HEADERS);
+    assert.equal(ledgerRows.length, EXPECTED_CLAIM_IDS.length, "claim ledger row count drift");
+
+    for (const row of ledgerRows) {
+      assert.equal(row.length, LEDGER_HEADERS.length, `${row[0]} ledger row must contain six columns`);
+      const [claimId, , claimType, primaryCell, supportingCell, proofLimit] = row;
+      assert.equal(claimType, CLAIM_TYPES.get(claimId), `${claimId} claim type drift`);
+      assert.ok(proofLimit.length > 0, `${claimId} must state what the claim does not prove`);
+      const primaryLinks = extractMarkdownLinks(primaryCell);
+      assert.ok(primaryLinks.length > 0, `${claimId} needs primary evidence`);
+
+      if (claimType === "runtime") {
+        for (const link of primaryLinks) {
+          assert.equal(isExternalTarget(link.target), false, `${claimId} runtime primary evidence must be local executable evidence`);
+          const resolved = resolveLocalEvidencePath(link.target);
+          const relative = repositoryRelativePath(resolved);
+          assert.match(
+            relative,
+            /^tests\/(?:unit|integration|harness\/cases)\//,
+            `${claimId} runtime primary evidence type is not allowed: ${relative}`,
+          );
+
+          if (/^tests\/(?:unit|integration)\//.test(relative)) {
+            const layer = relative.startsWith("tests/unit/") ? "unit" : "integration";
+            assert.match(link.text, new RegExp(`^${layer} test: .+`), `${claimId} must name a literal ${layer} test title`);
+            const title = link.text.slice(`${layer} test: `.length);
+            const targetSource = await readFile(resolved, "utf8");
+            assert.ok(
+              extractActiveTestTitles(targetSource, relative).has(title),
+              `${claimId} names a missing literal test title in ${relative}: ${title}`,
+            );
+          } else {
+            const caseId = link.text.match(/\b(CASE-(?:09|1[0-7]))\b/)?.[1];
+            assert.ok(caseId, `${claimId} harness primary link text must name CASE-09 through CASE-17`);
+            assert.match(
+              relative,
+              new RegExp(`/case-${caseId.slice(-2)}-[^/]+\\.ts$`),
+              `${claimId} harness link must resolve to its named case source`,
+            );
+          }
+        }
+      } else if (claimType === "rationale") {
+        assert.equal(primaryLinks.length, 1, `${claimId} rationale row needs one ADR primary link`);
+        assert.equal(
+          repositoryRelativePath(resolveLocalEvidencePath(primaryLinks[0].target)),
+          "docs/adr/0010-nutrition-safety-product-floor.md",
+        );
+        assert.match(primaryLinks[0].text, /^ADR: /, `${claimId} rationale link must identify the ADR evidence type`);
+      } else {
+        assert.equal(primaryLinks.length, 1, `${claimId} limitation row needs one issue primary link`);
+        assert.equal(primaryLinks[0].target, LIMITATION_ISSUES.get(claimId));
+        assert.match(primaryLinks[0].text, /^GitHub issue #10[789]$/, `${claimId} limitation link must identify the issue`);
+        const supportLinks = extractMarkdownLinks(supportingCell);
+        assert.ok(
+          supportLinks.some((link) => {
+            if (isExternalTarget(link.target)) return false;
+            return /^tests\/(?:unit|integration|harness\/cases)\//.test(
+              repositoryRelativePath(resolveLocalEvidencePath(link.target)),
+            );
+          }),
+          `${claimId} limitation support must include executable evidence for what remained safe`,
+        );
+      }
+
+      for (const link of extractMarkdownLinks(supportingCell)) {
+        if (isExternalTarget(link.target)) continue;
+        const relative = repositoryRelativePath(resolveLocalEvidencePath(link.target));
+        if (/^server\//.test(relative)) {
+          assert.match(link.text, /^source supplement: /, `${claimId} source links must be supplemental`);
+          assert.equal(claimType, "runtime", `${claimId} source supplements are only valid for runtime claims`);
+        }
+      }
+    }
+  });
+
+  it("requires AS-12 four-layer executable evidence in narrative and ledger", async () => {
+    const markdown = await readAiSafetyDocument();
+    const as12EvidenceByCategory = {
+      "prompt guidance": [
+        {
+          text: "unit test: renders a dedicated nutrition safety section after responsibilities",
+          target: "../tests/unit/system-prompt.test.ts",
+        },
+      ],
+      "shared policy": [
+        {
+          text: "unit test: rejects target patches below the calorie floor",
+          target: "../tests/unit/nutrition-safety-policy.test.ts",
+        },
+      ],
+      "guarded proposal or mutation paths": [
+        {
+          text: "integration test: blocks unsafe current-turn goal updates without mutation or goals_update publish",
+          target: "../tests/integration/chat-goal-update.integration.test.ts",
+        },
+      ],
+      "final-output scanning": [
+        {
+          text: "harness case CASE-15",
+          target: "../tests/harness/cases/case-15-extreme-restriction.ts",
+        },
+        {
+          text: "harness case CASE-16",
+          target: "../tests/harness/cases/case-16-rapid-weight-loss.ts",
+        },
+        {
+          text: "harness case CASE-17",
+          target: "../tests/harness/cases/case-17-punitive-exercise.ts",
+        },
+      ],
+    } as const;
+
+    const linkKey = (link: { text: string; target: string }) => `${link.text}\n${link.target}`;
+    const assertAs12Evidence = (document: string) => {
+      const narrative = paragraphs(extractNarrative(document)).find((paragraph) =>
+        paragraph.startsWith("**[AS-12]**"),
+      );
+      assert.ok(narrative, "missing AS-12 narrative paragraph");
+      const ledgerRow = extractTable(document, LEDGER_HEADERS).find((row) => row[0] === "AS-12");
+      assert.ok(ledgerRow, "missing AS-12 ledger row");
+
+      for (const [location, surface] of [
+        ["narrative", narrative],
+        ["ledger", ledgerRow[3]],
+      ] as const) {
+        const actualLinks = new Set(extractMarkdownLinks(surface).map(linkKey));
+        for (const [category, expectedLinks] of Object.entries(as12EvidenceByCategory)) {
+          assert.ok(
+            expectedLinks.every((link) => actualLinks.has(linkKey(link))),
+            `${location} missing AS-12 ${category} evidence`,
+          );
+        }
+      }
+    };
+    const removeAs12Category = (
+      document: string,
+      links: readonly { text: string; target: string }[],
+    ) => document
+      .split(/\r?\n/)
+      .map((line) => {
+        if (!line.startsWith("**[AS-12]**") && !line.startsWith("| AS-12 |")) return line;
+        return links.reduce(
+          (mutated, link) => mutated.replace(`[${link.text}](${link.target})`, ""),
+          line,
+        );
+      })
+      .join("\n");
+
+    assertAs12Evidence(markdown);
+    for (const [category, links] of Object.entries(as12EvidenceByCategory)) {
+      assert.throws(
+        () => assertAs12Evidence(removeAs12Category(markdown, links)),
+        new RegExp(`missing AS-12 ${category} evidence`),
+      );
+    }
+  });
+
+  it("resolves public evidence, restricts external links, and rejects non-public roots", async () => {
+    const markdown = await readAiSafetyDocument();
+    const contractSource = await readFile(CONTRACT_PATH, "utf8");
+    const nonPublicRoots = [
+      ["docs", "research"].join("/"),
+      ["docs", "HANDOFF"].join("/"),
+      ["", "planning"].join("."),
+    ];
+
+    for (const root of nonPublicRoots) {
+      assert.ok(!markdown.includes(root), `public document references a non-public root ending in ${path.basename(root)}`);
+      assert.ok(!contractSource.includes(root), `contract source embeds a non-public root ending in ${path.basename(root)}`);
+    }
+
+    const links = extractMarkdownLinks(markdown);
+    for (const link of links) {
+      assert.equal(link.image, false, "evidence must use links, not images");
+      if (link.target.startsWith("#")) continue;
+      if (isExternalTarget(link.target)) {
+        assert.ok(
+          ALLOWED_ISSUE_URLS.includes(link.target as (typeof ALLOWED_ISSUE_URLS)[number]),
+          `external evidence URL is not allowlisted: ${link.target}`,
+        );
+        continue;
+      }
+
+      const resolved = resolveLocalEvidencePath(link.target);
+      const relative = repositoryRelativePath(resolved);
+      assert.ok(!relative.startsWith("../"), `local evidence escapes the repository: ${link.target}`);
+      await assert.doesNotReject(stat(resolved), `local evidence link does not resolve: ${link.target}`);
+      assert.match(
+        relative,
+        /^(?:docs\/(?:architecture\.md|adr\/)|tests\/(?:unit|integration|harness\/(?:cases\/|behavior-matrix\.md$))|server\/)/,
+        `local evidence type is not public/allowed: ${relative}`,
+      );
+    }
+
+    assert.deepEqual(
+      [...new Set(links.filter((link) => isExternalTarget(link.target)).map((link) => link.target))].sort(),
+      [...ALLOWED_ISSUE_URLS].sort(),
+      "the three issue URLs are the only external evidence and all must appear",
+    );
+  });
+});
+
+describe("contract mutation resistance", () => {
+  it("mutation: rejects reference definitions and reference-style links", () => {
+    const violations = findUnsupportedLinkSurfaces(REFERENCE_LINK_FIXTURE);
+    assert.ok(violations.some((violation) => /reference/i.test(violation)));
+  });
+
+  it("mutation: rejects reference-style images", () => {
+    const violations = findUnsupportedLinkSurfaces(REFERENCE_IMAGE_FIXTURE);
+    assert.ok(violations.some((violation) => /reference/i.test(violation)));
+  });
+
+  it("mutation: rejects autolinks and bare URLs", () => {
+    const violations = findUnsupportedLinkSurfaces(AUTOLINK_FIXTURE);
+    assert.ok(violations.some((violation) => /HTML|autolink/i.test(violation)));
+    assert.ok(violations.some((violation) => /bare URL/i.test(violation)));
+  });
+
+  it("mutation: rejects inline HTML anchors, images, and comments", () => {
+    const violations = findUnsupportedLinkSurfaces(INLINE_HTML_FIXTURE);
+    assert.ok(violations.some((violation) => /HTML/i.test(violation)));
+  });
+
+  it("mutation: rejects www and email extended autolinks", () => {
+    const violations = findUnsupportedLinkSurfaces(EXTENDED_AUTOLINK_FIXTURE);
+    assert.ok(violations.some((violation) => /www/i.test(violation)));
+    assert.ok(violations.some((violation) => /email/i.test(violation)));
+  });
+
+  it("mutation: rejects absolute local and file-scheme link targets", () => {
+    const violations = findUnsupportedLinkSurfaces(UNSAFE_TARGET_FIXTURE);
+    assert.ok(violations.some((violation) => /absolute/i.test(violation)));
+    assert.ok(violations.some((violation) => /scheme/i.test(violation)));
+  });
+
+  it("mutation: rejects unparsed inline-link residue and tilde fences", () => {
+    const violations = findUnsupportedLinkSurfaces(UNPARSED_LINK_FIXTURE);
+    assert.ok(violations.some((violation) => /residue/i.test(violation)));
+    assert.ok(violations.some((violation) => /tilde/i.test(violation)));
+  });
+
+  it("mutation: accepts the supported inline-link, claim-marker, and fenced-diagram surface", () => {
+    assert.deepEqual(findUnsupportedLinkSurfaces(SUPPORTED_SURFACE_FIXTURE), []);
+  });
+
+  it("mutation: rejects plain absolute and file-path content", () => {
+    const violations = findUnsupportedLinkSurfaces(PLAIN_PRIVATE_SURFACE_FIXTURE);
+    assert.ok(violations.some((violation) => /POSIX path/i.test(violation)));
+    assert.ok(violations.some((violation) => /Windows path/i.test(violation)));
+    assert.ok(violations.some((violation) => /file-scheme path/i.test(violation)));
+    for (const privateValue of [SYNTHETIC_POSIX_PATH, SYNTHETIC_WINDOWS_PATH, SYNTHETIC_FILE_PATH]) {
+      assert.ok(violations.every((violation) => !violation.includes(privateValue)));
+    }
+  });
+
+  it("mutation: rejects credential-shaped assignments and token prefixes", () => {
+    const violations = findUnsupportedLinkSurfaces(CREDENTIAL_PRIVATE_SURFACE_FIXTURE);
+    assert.ok(violations.some((violation) => /credential assignment/i.test(violation)));
+    assert.ok(violations.some((violation) => /access-token prefix/i.test(violation)));
+    for (const privateValue of [SYNTHETIC_CREDENTIAL_ASSIGNMENT, SYNTHETIC_TOKEN_PREFIX]) {
+      assert.ok(violations.every((violation) => !violation.includes(privateValue)));
+    }
+  });
+
+  it("mutation: rejects private content inside fenced bodies", () => {
+    const violations = findUnsupportedLinkSurfaces(FENCED_PRIVATE_SURFACE_FIXTURE);
+    assert.ok(violations.some((violation) => /fenced body.*POSIX path/i.test(violation)));
+    assert.ok(violations.some((violation) => /fenced body.*credential assignment/i.test(violation)));
+    for (const privateValue of [SYNTHETIC_POSIX_PATH, SYNTHETIC_CREDENTIAL_ASSIGNMENT]) {
+      assert.ok(violations.every((violation) => !violation.includes(privateValue)));
+    }
+  });
+
+  it("mutation: rejects indented tilde fences", () => {
+    const violations = findUnsupportedLinkSurfaces(INDENTED_TILDE_FENCE_FIXTURE);
+    assert.ok(violations.some((violation) => /tilde fence/i.test(violation)));
+  });
+
+  it("mutation: accepts a clean three-space backtick fence", () => {
+    assert.deepEqual(findUnsupportedLinkSurfaces(CLEAN_INDENTED_BACKTICK_FENCE_FIXTURE), []);
+  });
+
+  it("mutation: rejects private content on recognized opening fence delimiters", () => {
+    const credentialViolations = findUnsupportedLinkSurfaces(FENCE_DELIMITER_CREDENTIAL_FIXTURE);
+    const pathTokenViolations = findUnsupportedLinkSurfaces(FENCE_DELIMITER_PATH_TOKEN_FIXTURE);
+
+    assert.ok(credentialViolations.includes("fence delimiter: credential assignment"));
+    assert.ok(pathTokenViolations.includes("fence delimiter: POSIX path"));
+    assert.ok(pathTokenViolations.includes("fence delimiter: access-token prefix"));
+    for (const privateValue of [
+      SYNTHETIC_CREDENTIAL_ASSIGNMENT,
+      SYNTHETIC_POSIX_PATH,
+      SYNTHETIC_TOKEN_PREFIX,
+    ]) {
+      assert.ok([...credentialViolations, ...pathTokenViolations].every((violation) => !violation.includes(privateValue)));
+    }
+  });
+
+  it("mutation: rejects commented-out test titles", () => {
+    assert.deepEqual([...extractActiveTestTitles(COMMENTED_TITLE_FIXTURE, "commented.ts")], []);
+  });
+
+  it("mutation: rejects string-literal and template-substitution test titles", () => {
+    assert.deepEqual([...extractActiveTestTitles(STRING_TITLE_FIXTURE, "strings.ts")], []);
+  });
+
+  it("mutation: rejects skipped and todo test declarations", () => {
+    assert.deepEqual([...extractActiveTestTitles(SKIPPED_TITLE_FIXTURE, "skipped.ts")], []);
+  });
+
+  it("mutation: accepts active test and it declarations in nested describe blocks", () => {
+    assert.deepEqual(
+      [...extractActiveTestTitles(ACTIVE_TITLE_FIXTURE, "active.ts")],
+      ['active "quoted" test', "active nested it"],
+    );
+  });
+
+  it("mutation: rejects shadowed node:test identifiers", () => {
+    assert.deepEqual([...extractActiveTestTitles(SHADOWED_NODE_TEST_FIXTURE, "shadowed.ts")], []);
+  });
+
+  it("mutation: rejects declarations under skipped or todo suites", () => {
+    assert.deepEqual([...extractActiveTestTitles(INACTIVE_SUITE_FIXTURE, "inactive-suites.ts")], []);
+  });
+
+  it("mutation: rejects option-skipped and option-todo declarations", () => {
+    assert.deepEqual([...extractActiveTestTitles(INACTIVE_TEST_OPTIONS_FIXTURE, "inactive-options.ts")], []);
+  });
+
+  it("mutation: rejects declarations without runnable callbacks", () => {
+    assert.deepEqual([...extractActiveTestTitles(NON_RUNNABLE_CALLBACK_FIXTURE, "no-callback.ts")], []);
+  });
+
+  it("mutation: accepts imported runnable node:test declarations", () => {
+    assert.deepEqual(
+      [...extractActiveTestTitles(RUNNABLE_NODE_TEST_FIXTURE, "runnable.ts")],
+      ["active false-option test", 'active "escaped" it', "active template test"],
+    );
+  });
+
+  it("mutation: rejects spread and computed inactive test options", () => {
+    assert.deepEqual(
+      [...extractActiveTestTitles(INACTIVE_TEST_OPTION_SHAPES_FIXTURE, "inactive-test-option-shapes.ts")],
+      [],
+    );
+  });
+
+  it("mutation: rejects spread and computed inactive suite options", () => {
+    assert.deepEqual(
+      [...extractActiveTestTitles(INACTIVE_SUITE_OPTION_SHAPES_FIXTURE, "inactive-suite-option-shapes.ts")],
+      [],
+    );
+  });
+
+  it("mutation: rejects unresolved computed inactive option keys", () => {
+    assert.deepEqual(
+      [...extractActiveTestTitles(UNRESOLVED_COMPUTED_OPTION_FIXTURE, "unresolved-option-shapes.ts")],
+      [],
+    );
+  });
+
+  it("mutation: accepts statically false spread and computed options", () => {
+    assert.deepEqual(
+      [...extractActiveTestTitles(STATICALLY_FALSE_OPTION_SHAPES_FIXTURE, "statically-false-option-shapes.ts")],
+      [
+        "direct false option test",
+        "computed-literal false option test",
+        "unresolved-computed false option test",
+        "inline-spread false option test",
+      ],
+    );
+  });
+});

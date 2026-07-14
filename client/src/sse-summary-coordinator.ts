@@ -5,6 +5,7 @@ export type MealRowRefreshReason = "day_rollover" | "meal_mutation" | "manual_re
 export interface SSESummaryCoordinatorDeps<Meal> {
   getMeals: (options?: { refreshReason?: MealRowRefreshReason }) => Promise<{ meals: Meal[] }>;
   setMeals: (meals: Meal[]) => void;
+  applyMealMutationRefresh: (meals: Meal[]) => void;
   setDailySummary: (summary: DailySummarySSEPayload["summary"]) => void;
   recordMealMutation: (affectedDate: string) => void;
   todayKey: () => string;
@@ -38,25 +39,25 @@ export function createSSESummaryCoordinator<Meal>(
     }
   };
 
-  const commitRowsIfLatest = (token: number, meals: Meal[]) => {
+  const commitRowsIfLatest = (token: number, meals: Meal[], commitRows: (meals: Meal[]) => void = deps.setMeals) => {
     if (token !== latestToken) {
       return false;
     }
-    deps.setMeals(meals);
+    commitRows(meals);
     rowsLoaded = true;
     return true;
   };
 
   const reconcileTodayRowsBeforeSummary = async (payload: DailySummarySSEPayload) => {
     const token = nextToken();
+    deps.recordMealMutation(payload.affectedDate);
     try {
       const { meals } = await deps.getMeals({ refreshReason: "meal_mutation" });
-      if (!commitRowsIfLatest(token, meals)) {
+      if (!commitRowsIfLatest(token, meals, deps.applyMealMutationRefresh)) {
         return;
       }
       sameDayCommitSeen = true;
       deps.setDailySummary(payload.summary);
-      deps.recordMealMutation(payload.affectedDate);
     } catch (error) {
       handleLoadError(error);
     }

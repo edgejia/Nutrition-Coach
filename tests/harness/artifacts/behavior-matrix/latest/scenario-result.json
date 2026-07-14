@@ -741,7 +741,7 @@
                   "protein"
                 ]
               },
-              "replyLength": 57
+              "replyLength": 75
             }
           },
           {
@@ -770,7 +770,7 @@
                   "protein"
                 ]
               },
-              "replyLength": 57
+              "replyLength": 75
             }
           },
           {
@@ -799,7 +799,7 @@
                   "protein"
                 ]
               },
-              "replyLength": 57
+              "replyLength": 75
             }
           },
           {
@@ -820,6 +820,7 @@
             "ok": true,
             "evidence": {
               "extractedNumbers": [
+                1800,
                 1800,
                 130,
                 150,
@@ -1013,7 +1014,7 @@
                   "protein"
                 ]
               },
-              "replyLength": 57
+              "replyLength": 75
             },
             {
               "name": "vague_goal_intent",
@@ -3126,7 +3127,7 @@
                 "[REDACTED_TOOL]"
               ],
               "traceFinalReplySource": "renderer",
-              "finalReplyLength": 57,
+              "finalReplyLength": 75,
               "committedTargetsMatchExpected": true,
               "committedTargetFieldCount": 4
             }
@@ -3164,6 +3165,7 @@
             "evidence": {
               "extractedNumbers": [
                 1800,
+                1800,
                 130,
                 150,
                 50
@@ -3197,7 +3199,7 @@
                 "[REDACTED_TOOL]"
               ],
               "traceFinalReplySource": "renderer",
-              "finalReplyLength": 57,
+              "finalReplyLength": 75,
               "committedTargetsMatchExpected": true,
               "committedTargetFieldCount": 4
             }
@@ -3307,7 +3309,7 @@
                 "[REDACTED_TOOL]"
               ],
               "traceFinalReplySource": "renderer",
-              "finalReplyLength": 57,
+              "finalReplyLength": 75,
               "committedTargetsMatchExpected": true,
               "committedTargetFieldCount": 4
             },
@@ -4016,7 +4018,7 @@
                   "protein"
                 ]
               },
-              "replyLength": 57
+              "replyLength": 75
             }
           },
           {
@@ -4045,7 +4047,7 @@
                   "protein"
                 ]
               },
-              "replyLength": 57
+              "replyLength": 75
             }
           },
           {
@@ -4074,7 +4076,7 @@
                   "protein"
                 ]
               },
-              "replyLength": 57
+              "replyLength": 75
             }
           },
           {
@@ -4095,6 +4097,7 @@
             "ok": true,
             "evidence": {
               "extractedNumbers": [
+                1800,
                 1800,
                 130,
                 150,
@@ -4288,7 +4291,7 @@
                   "protein"
                 ]
               },
-              "replyLength": 57
+              "replyLength": 75
             },
             {
               "name": "vague_goal_intent",
@@ -6206,7 +6209,7 @@
                 "[REDACTED_TOOL]"
               ],
               "traceFinalReplySource": "renderer",
-              "finalReplyLength": 57,
+              "finalReplyLength": 75,
               "committedTargetsMatchExpected": true,
               "committedTargetFieldCount": 4
             }
@@ -6244,6 +6247,7 @@
             "evidence": {
               "extractedNumbers": [
                 1800,
+                1800,
                 130,
                 150,
                 50
@@ -6277,7 +6281,7 @@
                 "[REDACTED_TOOL]"
               ],
               "traceFinalReplySource": "renderer",
-              "finalReplyLength": 57,
+              "finalReplyLength": 75,
               "committedTargetsMatchExpected": true,
               "committedTargetFieldCount": 4
             }
@@ -6387,7 +6391,7 @@
                 "[REDACTED_TOOL]"
               ],
               "traceFinalReplySource": "renderer",
-              "finalReplyLength": 57,
+              "finalReplyLength": 75,
               "committedTargetsMatchExpected": true,
               "committedTargetFieldCount": 4
             },
