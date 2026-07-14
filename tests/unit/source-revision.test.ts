@@ -165,13 +165,15 @@ async function assertCaseTmpdirEmpty(caseTmpdir: string) {
 async function prepareLiveOutput(directory: string, manifestVariant: "missing" | "stale" = "stale") {
   const outputDirectory = path.join(directory, "dist/client");
   const outputPath = path.join(outputDirectory, "app.txt");
+  const indexPath = path.join(outputDirectory, "index.html");
   const manifestPath = path.join(outputDirectory, "source-revision.json");
   await mkdir(outputDirectory, { recursive: true });
   await writeFile(outputPath, "prior output\n", "utf8");
+  await writeFile(indexPath, "<html>prior shell</html>\n", "utf8");
   if (manifestVariant === "stale") {
     await writeFile(manifestPath, "stale manifest\n", "utf8");
   }
-  return { outputDirectory, outputPath, manifestPath };
+  return { outputDirectory, outputPath, indexPath, manifestPath };
 }
 
 async function assertPriorPublicationPreserved(
@@ -180,6 +182,10 @@ async function assertPriorPublicationPreserved(
   manifestVariant: "missing" | "stale",
 ) {
   assert.equal(await readFile(outputPath, "utf8"), "prior output\n");
+  assert.equal(
+    await readFile(path.join(path.dirname(outputPath), "index.html"), "utf8"),
+    "<html>prior shell</html>\n",
+  );
   assert.equal(
     await readIfPresent(manifestPath),
     manifestVariant === "stale" ? "stale manifest\n" : undefined,
@@ -320,10 +326,62 @@ function snapshotBuildChildSource(extraSource = "") {
     'const { mkdirSync, readFileSync, writeFileSync } = require("node:fs");',
     extraSource,
     'mkdirSync("dist/client", { recursive: true });',
+    'writeFileSync("dist/client/index.html", "<html>snapshot shell</html>\\n");',
     'writeFileSync("dist/client/app.txt", readFileSync("tracked.txt", "utf8"));',
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+function invalidSnapshotBuildChildSource(
+  shape: "missing" | "empty" | "directory-index" | "symlink-index",
+) {
+  if (shape === "missing") {
+    return "process.exit(0);";
+  }
+  if (shape === "empty") {
+    return 'require("node:fs").mkdirSync("dist/client", { recursive: true });';
+  }
+  if (shape === "directory-index") {
+    return 'require("node:fs").mkdirSync("dist/client/index.html", { recursive: true });';
+  }
+  return [
+    'const { mkdirSync, symlinkSync } = require("node:fs");',
+    'mkdirSync("dist/client", { recursive: true });',
+    'symlinkSync("../../tracked.txt", "dist/client/index.html");',
+  ].join("\n");
+}
+
+async function runInvalidBuildOutputProbe(
+  shape: "missing" | "empty" | "directory-index" | "symlink-index",
+  manifestVariant: "missing" | "stale",
+) {
+  const directory = await makeTemporaryGitRepository();
+  const caseTmpdir = await makeCaseTmpdir(directory);
+  const publication = await prepareLiveOutput(directory, manifestVariant);
+  const probe = spawnWrapperProbe(
+    [
+      "--manifest",
+      publication.manifestPath,
+      "--",
+      process.execPath,
+      "-e",
+      invalidSnapshotBuildChildSource(shape),
+    ],
+    directory,
+    caseTmpdir,
+  );
+  const result = await waitForWrapper(probe, 10_000);
+
+  assert.deepEqual({ code: result.code, signal: result.signal }, { code: 1, signal: null });
+  assert.equal(result.stderr, "Source revision build output is unavailable.\n");
+  assert.equal(result.stderr.includes(directory), false);
+  await assertPriorPublicationPreserved(
+    publication.outputPath,
+    publication.manifestPath,
+    manifestVariant,
+  );
+  await assertCaseTmpdirEmpty(caseTmpdir);
 }
 
 async function runHandledExitZeroProbe(
@@ -670,6 +728,14 @@ describe("source revision command wrapper", () => {
     }
   });
 
+  for (const shape of ["missing", "empty", "directory-index", "symlink-index"] as const) {
+    for (const manifestVariant of ["missing", "stale"] as const) {
+      it(`rejects ${shape} client output with a ${manifestVariant} manifest before publication`, async () => {
+        await runInvalidBuildOutputProbe(shape, manifestVariant);
+      });
+    }
+  }
+
   it("rejects an unstaged tracked input before child launch or manifest mutation", async () => {
     const directory = await makeTemporaryGitRepository();
     const rejectedPath = "tracked.txt";
@@ -914,7 +980,11 @@ describe("source revision command wrapper", () => {
     assert.deepEqual(JSON.parse(await readFile(publication.manifestPath, "utf8")), {
       sourceSha: expectedSha,
     });
-    assert.deepEqual(await readdir(publication.outputDirectory), ["app.txt", "source-revision.json"]);
+    assert.deepEqual(await readdir(publication.outputDirectory), [
+      "app.txt",
+      "index.html",
+      "source-revision.json",
+    ]);
     await assertCaseTmpdirEmpty(caseTmpdir);
   });
 
