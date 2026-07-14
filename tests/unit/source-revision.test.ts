@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
-import { afterEach, describe, it } from "node:test";
+import { after, afterEach, describe, it } from "node:test";
 import { parseSourceRevision, SOURCE_REVISION_PATTERN } from "../../server/lib/source-revision.js";
 
 const execFileAsync = promisify(execFile);
@@ -16,22 +16,127 @@ const TSX_IMPORT_PATH = path.join(REPO_ROOT, "node_modules/tsx/dist/loader.mjs")
 const temporaryDirectories: string[] = [];
 
 const ADVERSARIAL_SOURCE_WRAPPER_CASES = [
-  ["pre_launch_dirtiness", "reject before allocation, launch, or publication"],
-  ["signal_during_snapshot_setup", "original signal; no allocation, launch, or publication"],
-  ["non_manifest_handled_signal_exit_zero", "original signal, never code zero"],
-  ["manifest_handled_signal_exit_zero", "original signal; preserve output and manifest"],
-  ["ignored_first_repeated_signal", "forward first once, escalate once, report first signal"],
-  ["signal_exit_race", "wrapper cancellation dominates child exit zero"],
-  ["signal_after_child_success_before_publish", "original signal; preserve output and manifest"],
-  ["persistent_post_launch_mutation", "fail closed without publication"],
-  ["transient_restored_post_launch_mutation", "fail closed without publication"],
-  ["child_originated_snapshot_mutation", "fail closed without publication"],
-  ["spawn_error", "category-only failure without publication"],
-  ["numeric_failure", "preserve numeric exit without publication"],
-  ["child_signal_termination", "preserve child signal without publication"],
-  ["ordinary_success", "publish snapshot output and exact one-field manifest"],
-  ["timeout_after_deadline", "bounded forward/escalate cleanup with no publication"],
+  {
+    name: "pre_launch_dirtiness",
+    expected: "reject before allocation, launch, or publication",
+    registrations: 5,
+    executions: 5,
+  },
+  {
+    name: "signal_during_snapshot_setup",
+    expected: "original signal; no allocation, launch, or publication",
+    registrations: 1,
+    executions: 1,
+  },
+  {
+    name: "non_manifest_handled_signal_exit_zero",
+    expected: "original signal, never code zero",
+    registrations: 2,
+    executions: 2,
+  },
+  {
+    name: "manifest_handled_signal_exit_zero",
+    expected: "original signal; preserve output and manifest",
+    registrations: 4,
+    executions: 4,
+  },
+  {
+    name: "ignored_first_repeated_signal",
+    expected: "forward first once, escalate once, report first signal",
+    registrations: 2,
+    executions: 2,
+  },
+  {
+    name: "signal_exit_race",
+    expected: "wrapper cancellation dominates child exit zero",
+    registrations: 6,
+    executions: 6,
+  },
+  {
+    name: "signal_after_child_success_before_publish",
+    expected: "original signal; preserve output and manifest",
+    registrations: 1,
+    executions: 1,
+  },
+  {
+    name: "persistent_post_launch_mutation",
+    expected: "fail closed without publication",
+    registrations: 1,
+    executions: 1,
+  },
+  {
+    name: "transient_restored_post_launch_mutation",
+    expected: "fail closed without publication",
+    registrations: 1,
+    executions: 1,
+  },
+  {
+    name: "child_originated_snapshot_mutation",
+    expected: "fail closed without publication",
+    registrations: 1,
+    executions: 1,
+  },
+  {
+    name: "spawn_error",
+    expected: "category-only failure without publication",
+    registrations: 1,
+    executions: 1,
+  },
+  {
+    name: "numeric_failure",
+    expected: "preserve numeric exit without publication",
+    registrations: 1,
+    executions: 1,
+  },
+  {
+    name: "child_signal_termination",
+    expected: "preserve child signal without publication",
+    registrations: 1,
+    executions: 1,
+  },
+  {
+    name: "ordinary_success",
+    expected: "publish snapshot output and exact one-field manifest",
+    registrations: 1,
+    executions: 1,
+  },
+  {
+    name: "timeout_after_deadline",
+    expected: "bounded manifest preservation and cleanup",
+    registrations: 2,
+    executions: 2,
+  },
 ] as const;
+
+type AdversarialCaseName = (typeof ADVERSARIAL_SOURCE_WRAPPER_CASES)[number]["name"];
+
+const adversarialRegistrations = new Map<AdversarialCaseName, number>();
+const adversarialExecutions = new Map<AdversarialCaseName, number>();
+
+function adversarialIt(
+  caseNames: AdversarialCaseName | readonly AdversarialCaseName[],
+  title: string,
+  body: () => void | Promise<void>,
+) {
+  const names = typeof caseNames === "string" ? [caseNames] : [...caseNames];
+  for (const name of names) {
+    const definition = ADVERSARIAL_SOURCE_WRAPPER_CASES.find((entry) => entry.name === name);
+    assert.ok(definition, `Unknown adversarial case: ${name}`);
+    const registrations = (adversarialRegistrations.get(name) ?? 0) + 1;
+    assert.ok(
+      registrations <= definition.registrations,
+      `Adversarial case over-registered: ${name}`,
+    );
+    adversarialRegistrations.set(name, registrations);
+  }
+
+  it(title, async () => {
+    await body();
+    for (const name of names) {
+      adversarialExecutions.set(name, (adversarialExecutions.get(name) ?? 0) + 1);
+    }
+  });
+}
 
 type WrapperResult = {
   code: number | null;
@@ -444,22 +549,29 @@ async function runHandledExitZeroProbe(
   }
 }
 
-async function runRepeatedSignalProbe(signal: NodeJS.Signals, waitPastDeadline = false) {
+async function runRepeatedSignalProbe(
+  signal: NodeJS.Signals,
+  waitPastDeadline = false,
+  manifestVariant?: "missing" | "stale",
+) {
   const directory = await makeTemporaryGitRepository();
   const caseTmpdir = await makeCaseTmpdir(directory);
-  const readyPath = path.join(directory, `repeat-${signal}-ready.marker`);
-  const ackPath = path.join(directory, `repeat-${signal}-ack.marker`);
+  const variantLabel = manifestVariant ?? "non-manifest";
+  const readyPath = path.join(directory, `repeat-${signal}-${variantLabel}-ready.marker`);
+  const ackPath = path.join(directory, `repeat-${signal}-${variantLabel}-ack.marker`);
+  const publication = manifestVariant
+    ? await prepareLiveOutput(directory, manifestVariant)
+    : undefined;
   const childSource = [
     'const { appendFileSync, writeFileSync } = require("node:fs");',
     `writeFileSync(${JSON.stringify(readyPath)}, String(process.pid));`,
     `process.on(${JSON.stringify(signal)}, () => appendFileSync(${JSON.stringify(ackPath)}, "forwarded\\n"));`,
     "setInterval(() => {}, 1000);",
   ].join("\n");
-  const probe = spawnWrapperProbe(
-    ["--", process.execPath, "-e", childSource],
-    directory,
-    caseTmpdir,
-  );
+  const args = publication
+    ? ["--manifest", publication.manifestPath, "--", process.execPath, "-e", childSource]
+    : ["--", process.execPath, "-e", childSource];
+  const probe = spawnWrapperProbe(args, directory, caseTmpdir);
   let childPid: number | undefined;
 
   try {
@@ -483,6 +595,13 @@ async function runRepeatedSignalProbe(signal: NodeJS.Signals, waitPastDeadline =
     assert.deepEqual({ code: result.code, signal: result.signal }, { code: null, signal });
     assert.equal(await readFile(ackPath, "utf8"), "forwarded\n");
     await waitForProcessGone(childPid);
+    if (publication && manifestVariant) {
+      await assertPriorPublicationPreserved(
+        publication.outputPath,
+        publication.manifestPath,
+        manifestVariant,
+      );
+    }
     await assertCaseTmpdirEmpty(caseTmpdir);
   } finally {
     if (probe.child.exitCode === null && probe.child.signalCode === null) {
@@ -618,6 +737,21 @@ afterEach(async () => {
   );
 });
 
+after(() => {
+  for (const definition of ADVERSARIAL_SOURCE_WRAPPER_CASES) {
+    assert.equal(
+      adversarialRegistrations.get(definition.name) ?? 0,
+      definition.registrations,
+      `Adversarial case registration mismatch: ${definition.name}`,
+    );
+    assert.equal(
+      adversarialExecutions.get(definition.name) ?? 0,
+      definition.executions,
+      `Adversarial case execution mismatch: ${definition.name}`,
+    );
+  }
+});
+
 describe("source revision validation", () => {
   it("accepts exactly one lowercase 40-character hexadecimal SHA", () => {
     assert.match(VALID_SHA, SOURCE_REVISION_PATTERN);
@@ -722,52 +856,72 @@ describe("source revision command wrapper", () => {
     }
   }
 
-  it("rejects an unstaged tracked input before child launch or manifest mutation", async () => {
-    const directory = await makeTemporaryGitRepository();
-    const rejectedPath = "tracked.txt";
-    const rejectedValue = "unstaged-private-value";
-    await writeFile(path.join(directory, rejectedPath), `${rejectedValue}\n`, "utf8");
+  adversarialIt(
+    "pre_launch_dirtiness",
+    "rejects an unstaged tracked input before child launch or manifest mutation",
+    async () => {
+      const directory = await makeTemporaryGitRepository();
+      const rejectedPath = "tracked.txt";
+      const rejectedValue = "unstaged-private-value";
+      await writeFile(path.join(directory, rejectedPath), `${rejectedValue}\n`, "utf8");
 
-    await assertDirtyRepositoryRejected(directory, rejectedPath, rejectedValue);
-  });
+      await assertDirtyRepositoryRejected(directory, rejectedPath, rejectedValue);
+    },
+  );
 
-  it("rejects a staged tracked input before child launch or manifest mutation", async () => {
-    const directory = await makeTemporaryGitRepository();
-    const rejectedPath = "tracked.txt";
-    const rejectedValue = "staged-private-value";
-    await writeFile(path.join(directory, rejectedPath), `${rejectedValue}\n`, "utf8");
-    await execFileAsync("git", ["add", rejectedPath], { cwd: directory });
+  adversarialIt(
+    "pre_launch_dirtiness",
+    "rejects a staged tracked input before child launch or manifest mutation",
+    async () => {
+      const directory = await makeTemporaryGitRepository();
+      const rejectedPath = "tracked.txt";
+      const rejectedValue = "staged-private-value";
+      await writeFile(path.join(directory, rejectedPath), `${rejectedValue}\n`, "utf8");
+      await execFileAsync("git", ["add", rejectedPath], { cwd: directory });
 
-    await assertDirtyRepositoryRejected(directory, rejectedPath, rejectedValue);
-  });
+      await assertDirtyRepositoryRejected(directory, rejectedPath, rejectedValue);
+    },
+  );
 
-  it("rejects a non-ignored untracked input before child launch or manifest mutation", async () => {
-    const directory = await makeTemporaryGitRepository();
-    const rejectedPath = "untracked-private-input.txt";
-    const rejectedValue = "untracked-private-value";
-    await writeFile(path.join(directory, rejectedPath), `${rejectedValue}\n`, "utf8");
+  adversarialIt(
+    "pre_launch_dirtiness",
+    "rejects a non-ignored untracked input before child launch or manifest mutation",
+    async () => {
+      const directory = await makeTemporaryGitRepository();
+      const rejectedPath = "untracked-private-input.txt";
+      const rejectedValue = "untracked-private-value";
+      await writeFile(path.join(directory, rejectedPath), `${rejectedValue}\n`, "utf8");
 
-    await assertDirtyRepositoryRejected(directory, rejectedPath, rejectedValue);
-  });
+      await assertDirtyRepositoryRejected(directory, rejectedPath, rejectedValue);
+    },
+  );
 
-  it("rejects an unstaged README change without a pathname exception", async () => {
-    const directory = await makeTemporaryGitRepository();
-    const rejectedPath = "README.md";
-    const rejectedValue = "unstaged-readme-private-value";
-    await writeFile(path.join(directory, rejectedPath), `${rejectedValue}\n`, "utf8");
+  adversarialIt(
+    "pre_launch_dirtiness",
+    "rejects an unstaged README change without a pathname exception",
+    async () => {
+      const directory = await makeTemporaryGitRepository();
+      const rejectedPath = "README.md";
+      const rejectedValue = "unstaged-readme-private-value";
+      await writeFile(path.join(directory, rejectedPath), `${rejectedValue}\n`, "utf8");
 
-    await assertDirtyRepositoryRejected(directory, rejectedPath, rejectedValue);
-  });
+      await assertDirtyRepositoryRejected(directory, rejectedPath, rejectedValue);
+    },
+  );
 
-  it("rejects a staged README change without a pathname exception", async () => {
-    const directory = await makeTemporaryGitRepository();
-    const rejectedPath = "README.md";
-    const rejectedValue = "staged-readme-private-value";
-    await writeFile(path.join(directory, rejectedPath), `${rejectedValue}\n`, "utf8");
-    await execFileAsync("git", ["add", rejectedPath], { cwd: directory });
+  adversarialIt(
+    "pre_launch_dirtiness",
+    "rejects a staged README change without a pathname exception",
+    async () => {
+      const directory = await makeTemporaryGitRepository();
+      const rejectedPath = "README.md";
+      const rejectedValue = "staged-readme-private-value";
+      await writeFile(path.join(directory, rejectedPath), `${rejectedValue}\n`, "utf8");
+      await execFileAsync("git", ["add", rejectedPath], { cwd: directory });
 
-    await assertDirtyRepositoryRejected(directory, rejectedPath, rejectedValue);
-  });
+      await assertDirtyRepositoryRejected(directory, rejectedPath, rejectedValue);
+    },
+  );
 
   it("forwards SIGTERM, waits for the child, and preserves signal termination", async () => {
     await runSignalForwardingProbe("SIGTERM");
@@ -779,7 +933,7 @@ describe("source revision command wrapper", () => {
 
   it("freezes the complete D-26 adversarial result matrix", () => {
     assert.deepEqual(
-      ADVERSARIAL_SOURCE_WRAPPER_CASES.map(([name]) => name),
+      ADVERSARIAL_SOURCE_WRAPPER_CASES.map(({ name }) => name),
       [
         "pre_launch_dirtiness",
         "signal_during_snapshot_setup",
@@ -798,185 +952,248 @@ describe("source revision command wrapper", () => {
         "timeout_after_deadline",
       ],
     );
-    for (const [name, expected] of ADVERSARIAL_SOURCE_WRAPPER_CASES) {
+    for (const { name, expected, registrations, executions } of ADVERSARIAL_SOURCE_WRAPPER_CASES) {
       assert.notEqual(name, "");
       assert.notEqual(expected, "");
+      assert.ok(registrations > 0);
+      assert.ok(executions > 0);
     }
   });
 
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
-    it(`keeps ${signal} authoritative when a non-manifest child handles it and exits zero`, async () => {
-      await runHandledExitZeroProbe(signal, "non-manifest");
-    });
+    adversarialIt(
+      ["non_manifest_handled_signal_exit_zero", "signal_exit_race"],
+      `keeps ${signal} authoritative when a non-manifest child handles it and exits zero`,
+      async () => {
+        await runHandledExitZeroProbe(signal, "non-manifest");
+      },
+    );
 
     for (const manifestVariant of ["missing", "stale"] as const) {
-      it(`keeps ${signal} authoritative for a ${manifestVariant} manifest when the child exits zero`, async () => {
-        await runHandledExitZeroProbe(signal, "manifest", manifestVariant);
-      });
+      adversarialIt(
+        ["manifest_handled_signal_exit_zero", "signal_exit_race"],
+        `keeps ${signal} authoritative for a ${manifestVariant} manifest when the child exits zero`,
+        async () => {
+          await runHandledExitZeroProbe(signal, "manifest", manifestVariant);
+        },
+      );
     }
 
-    it(`forwards ${signal} once and escalates one repeated live-child signal`, async () => {
-      await runRepeatedSignalProbe(signal);
-    });
+    adversarialIt(
+      "ignored_first_repeated_signal",
+      `forwards ${signal} once and escalates one repeated live-child signal`,
+      async () => {
+        await runRepeatedSignalProbe(signal);
+      },
+    );
   }
 
-  it("latches cancellation before manifest snapshot allocation or child launch", async () => {
-    await runManifestBarrierProbe("signal_during_snapshot_setup", "SIGTERM");
-  });
+  adversarialIt(
+    "signal_during_snapshot_setup",
+    "latches cancellation before manifest snapshot allocation or child launch",
+    async () => {
+      await runManifestBarrierProbe("signal_during_snapshot_setup", "SIGTERM");
+    },
+  );
 
-  it("blocks publication when cancellation arrives after child success at the final boundary", async () => {
-    await runManifestBarrierProbe("signal_after_child_success_before_publish", "SIGINT");
-  });
+  adversarialIt(
+    "signal_after_child_success_before_publish",
+    "blocks publication when cancellation arrives after child success at the final boundary",
+    async () => {
+      await runManifestBarrierProbe("signal_after_child_success_before_publish", "SIGINT");
+    },
+  );
 
-  it("fails closed after persistent shared-checkout mutation while the child reads the snapshot", async () => {
-    await runPostLaunchMutationProbe("persistent");
-  });
+  adversarialIt(
+    "persistent_post_launch_mutation",
+    "fails closed after persistent shared-checkout mutation while the child reads the snapshot",
+    async () => {
+      await runPostLaunchMutationProbe("persistent");
+    },
+  );
 
-  it("fails closed after transient shared-checkout mutation is restored", async () => {
-    await runPostLaunchMutationProbe("transient");
-  });
+  adversarialIt(
+    "transient_restored_post_launch_mutation",
+    "fails closed after transient shared-checkout mutation is restored",
+    async () => {
+      await runPostLaunchMutationProbe("transient");
+    },
+  );
 
-  it("fails closed when the child mutates a tracked snapshot path", async () => {
-    const directory = await makeTemporaryGitRepository();
-    const caseTmpdir = await makeCaseTmpdir(directory);
-    const publication = await prepareLiveOutput(directory);
-    const childSource = snapshotBuildChildSource(
-      'writeFileSync("tracked.txt", "child-originated mutation\\n");',
-    );
-    const probe = spawnWrapperProbe(
-      [
-        "--manifest",
+  adversarialIt(
+    "child_originated_snapshot_mutation",
+    "fails closed when the child mutates a tracked snapshot path",
+    async () => {
+      const directory = await makeTemporaryGitRepository();
+      const caseTmpdir = await makeCaseTmpdir(directory);
+      const publication = await prepareLiveOutput(directory);
+      const childSource = snapshotBuildChildSource(
+        'writeFileSync("tracked.txt", "child-originated mutation\\n");',
+      );
+      const probe = spawnWrapperProbe(
+        [
+          "--manifest",
+          publication.manifestPath,
+          "--",
+          process.execPath,
+          "-e",
+          childSource,
+        ],
+        directory,
+        caseTmpdir,
+      );
+
+      const result = await waitForWrapper(probe, 10_000);
+      assert.equal(result.code, 1);
+      assert.equal(result.signal, null);
+      assert.match(result.stderr, /Source repository changed during the build\./);
+      await assertPriorPublicationPreserved(
+        publication.outputPath,
         publication.manifestPath,
-        "--",
-        process.execPath,
-        "-e",
-        childSource,
-      ],
-      directory,
-      caseTmpdir,
-    );
+        "stale",
+      );
+      await assertCaseTmpdirEmpty(caseTmpdir);
+    },
+  );
 
-    const result = await waitForWrapper(probe, 10_000);
-    assert.equal(result.code, 1);
-    assert.equal(result.signal, null);
-    assert.match(result.stderr, /Source repository changed during the build\./);
-    await assertPriorPublicationPreserved(
-      publication.outputPath,
-      publication.manifestPath,
-      "stale",
-    );
-    await assertCaseTmpdirEmpty(caseTmpdir);
-  });
+  adversarialIt(
+    "spawn_error",
+    "reports a spawn error by category and preserves prior publication",
+    async () => {
+      const directory = await makeTemporaryGitRepository();
+      const caseTmpdir = await makeCaseTmpdir(directory);
+      const publication = await prepareLiveOutput(directory);
+      const probe = spawnWrapperProbe(
+        ["--manifest", publication.manifestPath, "--", "missing-source-wrapper-command"],
+        directory,
+        caseTmpdir,
+      );
+      const result = await waitForWrapper(probe);
 
-  it("reports a spawn error by category and preserves prior publication", async () => {
-    const directory = await makeTemporaryGitRepository();
-    const caseTmpdir = await makeCaseTmpdir(directory);
-    const publication = await prepareLiveOutput(directory);
-    const probe = spawnWrapperProbe(
-      ["--manifest", publication.manifestPath, "--", "missing-source-wrapper-command"],
-      directory,
-      caseTmpdir,
-    );
-    const result = await waitForWrapper(probe);
-
-    assert.deepEqual({ code: result.code, signal: result.signal }, { code: 1, signal: null });
-    assert.equal(result.stderr, "Source revision child command could not be started.\n");
-    await assertPriorPublicationPreserved(
-      publication.outputPath,
-      publication.manifestPath,
-      "stale",
-    );
-    await assertCaseTmpdirEmpty(caseTmpdir);
-  });
-
-  it("keeps numeric child failure numeric and leaves no transaction residue", async () => {
-    const directory = await makeTemporaryGitRepository();
-    const caseTmpdir = await makeCaseTmpdir(directory);
-    const publication = await prepareLiveOutput(directory);
-    const probe = spawnWrapperProbe(
-      ["--manifest", publication.manifestPath, "--", process.execPath, "-e", "process.exit(29)"],
-      directory,
-      caseTmpdir,
-    );
-    const result = await waitForWrapper(probe);
-
-    assert.deepEqual({ code: result.code, signal: result.signal }, { code: 29, signal: null });
-    assert.equal(result.stderr, "");
-    await assertPriorPublicationPreserved(
-      publication.outputPath,
-      publication.manifestPath,
-      "stale",
-    );
-    await assertCaseTmpdirEmpty(caseTmpdir);
-  });
-
-  it("keeps child signal termination distinct and leaves no transaction residue", async () => {
-    const directory = await makeTemporaryGitRepository();
-    const caseTmpdir = await makeCaseTmpdir(directory);
-    const publication = await prepareLiveOutput(directory);
-    const probe = spawnWrapperProbe(
-      [
-        "--manifest",
+      assert.deepEqual({ code: result.code, signal: result.signal }, { code: 1, signal: null });
+      assert.equal(result.stderr, "Source revision child command could not be started.\n");
+      await assertPriorPublicationPreserved(
+        publication.outputPath,
         publication.manifestPath,
-        "--",
-        process.execPath,
-        "-e",
-        'process.kill(process.pid, "SIGTERM")',
-      ],
-      directory,
-      caseTmpdir,
-    );
-    const result = await waitForWrapper(probe);
+        "stale",
+      );
+      await assertCaseTmpdirEmpty(caseTmpdir);
+    },
+  );
 
-    assert.deepEqual(
-      { code: result.code, signal: result.signal },
-      { code: null, signal: "SIGTERM" },
-    );
-    await assertPriorPublicationPreserved(
-      publication.outputPath,
-      publication.manifestPath,
-      "stale",
-    );
-    await assertCaseTmpdirEmpty(caseTmpdir);
-  });
+  adversarialIt(
+    "numeric_failure",
+    "keeps numeric child failure numeric and leaves no transaction residue",
+    async () => {
+      const directory = await makeTemporaryGitRepository();
+      const caseTmpdir = await makeCaseTmpdir(directory);
+      const publication = await prepareLiveOutput(directory);
+      const probe = spawnWrapperProbe(
+        [
+          "--manifest",
+          publication.manifestPath,
+          "--",
+          process.execPath,
+          "-e",
+          "process.exit(29)",
+        ],
+        directory,
+        caseTmpdir,
+      );
+      const result = await waitForWrapper(probe);
 
-  it("publishes only committed-snapshot output and one exact SHA field on ordinary success", async () => {
-    const directory = await makeTemporaryGitRepository();
-    const caseTmpdir = await makeCaseTmpdir(directory);
-    const publication = await prepareLiveOutput(directory);
-    const expectedSha = (
-      await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: directory })
-    ).stdout.trim();
-    const probe = spawnWrapperProbe(
-      [
-        "--manifest",
+      assert.deepEqual({ code: result.code, signal: result.signal }, { code: 29, signal: null });
+      assert.equal(result.stderr, "");
+      await assertPriorPublicationPreserved(
+        publication.outputPath,
         publication.manifestPath,
-        "--",
-        process.execPath,
-        "-e",
-        snapshotBuildChildSource(),
-      ],
-      directory,
-      caseTmpdir,
+        "stale",
+      );
+      await assertCaseTmpdirEmpty(caseTmpdir);
+    },
+  );
+
+  adversarialIt(
+    "child_signal_termination",
+    "keeps child signal termination distinct and leaves no transaction residue",
+    async () => {
+      const directory = await makeTemporaryGitRepository();
+      const caseTmpdir = await makeCaseTmpdir(directory);
+      const publication = await prepareLiveOutput(directory);
+      const probe = spawnWrapperProbe(
+        [
+          "--manifest",
+          publication.manifestPath,
+          "--",
+          process.execPath,
+          "-e",
+          'process.kill(process.pid, "SIGTERM")',
+        ],
+        directory,
+        caseTmpdir,
+      );
+      const result = await waitForWrapper(probe);
+
+      assert.deepEqual(
+        { code: result.code, signal: result.signal },
+        { code: null, signal: "SIGTERM" },
+      );
+      await assertPriorPublicationPreserved(
+        publication.outputPath,
+        publication.manifestPath,
+        "stale",
+      );
+      await assertCaseTmpdirEmpty(caseTmpdir);
+    },
+  );
+
+  adversarialIt(
+    "ordinary_success",
+    "publishes only committed-snapshot output and one exact SHA field on ordinary success",
+    async () => {
+      const directory = await makeTemporaryGitRepository();
+      const caseTmpdir = await makeCaseTmpdir(directory);
+      const publication = await prepareLiveOutput(directory);
+      const expectedSha = (
+        await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: directory })
+      ).stdout.trim();
+      const probe = spawnWrapperProbe(
+        [
+          "--manifest",
+          publication.manifestPath,
+          "--",
+          process.execPath,
+          "-e",
+          snapshotBuildChildSource(),
+        ],
+        directory,
+        caseTmpdir,
+      );
+      const result = await waitForWrapper(probe, 10_000);
+
+      assert.deepEqual({ code: result.code, signal: result.signal }, { code: 0, signal: null });
+      assert.equal(await readFile(publication.outputPath, "utf8"), "committed input\n");
+      assert.deepEqual(JSON.parse(await readFile(publication.manifestPath, "utf8")), {
+        sourceSha: expectedSha,
+      });
+      assert.deepEqual(await readdir(publication.outputDirectory), [
+        "app.txt",
+        "index.html",
+        "source-revision.json",
+      ]);
+      await assertCaseTmpdirEmpty(caseTmpdir);
+    },
+  );
+
+  for (const manifestVariant of ["missing", "stale"] as const) {
+    adversarialIt(
+      "timeout_after_deadline",
+      `bounds a timed-out child with a ${manifestVariant} manifest through the existing first-signal and escalation path`,
+      async () => {
+        await runRepeatedSignalProbe("SIGTERM", true, manifestVariant);
+      },
     );
-    const result = await waitForWrapper(probe, 10_000);
-
-    assert.deepEqual({ code: result.code, signal: result.signal }, { code: 0, signal: null });
-    assert.equal(await readFile(publication.outputPath, "utf8"), "committed input\n");
-    assert.deepEqual(JSON.parse(await readFile(publication.manifestPath, "utf8")), {
-      sourceSha: expectedSha,
-    });
-    assert.deepEqual(await readdir(publication.outputDirectory), [
-      "app.txt",
-      "index.html",
-      "source-revision.json",
-    ]);
-    await assertCaseTmpdirEmpty(caseTmpdir);
-  });
-
-  it("bounds a timed-out child through the existing first-signal and escalation path", async () => {
-    await runRepeatedSignalProbe("SIGTERM", true);
-  });
+  }
 });
 
 describe("package script provenance binding", () => {
