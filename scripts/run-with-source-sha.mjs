@@ -14,7 +14,6 @@ import {
   watch,
 } from "node:fs";
 import {
-  copyFile,
   cp,
   mkdir,
   mkdtemp,
@@ -415,6 +414,23 @@ async function materializeCommittedSnapshot(checkoutRoot, sourceSha, transaction
   return { archivePath, snapshotRoot };
 }
 
+function assertSubstantiveClientOutput(snapshotOutput) {
+  try {
+    const outputStat = lstatSync(snapshotOutput);
+    const shellStat = lstatSync(path.join(snapshotOutput, "index.html"));
+    if (
+      outputStat.isSymbolicLink() ||
+      !outputStat.isDirectory() ||
+      shellStat.isSymbolicLink() ||
+      !shellStat.isFile()
+    ) {
+      throw new Error(BUILD_OUTPUT_ERROR);
+    }
+  } catch {
+    throw new Error(BUILD_OUTPUT_ERROR);
+  }
+}
+
 async function stageSnapshotBuild(snapshotManifest, resolvedManifest, snapshotRoot, sourceSha) {
   const relativeManifest = path.relative(snapshotRoot, snapshotManifest);
   const relativeOutput = path.dirname(relativeManifest);
@@ -428,19 +444,16 @@ async function stageSnapshotBuild(snapshotManifest, resolvedManifest, snapshotRo
     : path.join(path.dirname(liveOutput), `.${path.basename(liveOutput)}.${randomUUID()}.backup`);
   const snapshotOutput = rootManifestOnly ? snapshotManifest : path.join(snapshotRoot, relativeOutput);
 
-  await mkdir(path.dirname(snapshotManifest), { recursive: true });
-  await writeFile(snapshotManifest, `${JSON.stringify({ sourceSha })}\n`, "utf8");
-  if (!existsSync(snapshotOutput)) {
+  if (rootManifestOnly) {
     throw new Error(BUILD_OUTPUT_ERROR);
   }
+  assertSubstantiveClientOutput(snapshotOutput);
+  await mkdir(path.dirname(snapshotManifest), { recursive: true });
+  await writeFile(snapshotManifest, `${JSON.stringify({ sourceSha })}\n`, "utf8");
   await mkdir(path.dirname(stageTarget), { recursive: true });
-  if (rootManifestOnly) {
-    await copyFile(snapshotOutput, stageTarget);
-  } else {
-    await cp(snapshotOutput, stageTarget, { recursive: true, errorOnExist: true });
-  }
+  await cp(snapshotOutput, stageTarget, { recursive: true, errorOnExist: true });
   return {
-    liveTarget: rootManifestOnly ? resolvedManifest : liveOutput,
+    liveTarget: liveOutput,
     stageTarget,
     backupTarget,
   };

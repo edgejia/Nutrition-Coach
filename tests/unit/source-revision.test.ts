@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
-import { after, afterEach, describe, it } from "node:test";
+import { afterEach, describe, it } from "node:test";
 import { parseSourceRevision, SOURCE_REVISION_PATTERN } from "../../server/lib/source-revision.js";
 
 const execFileAsync = promisify(execFile);
@@ -616,20 +616,6 @@ afterEach(async () => {
   await Promise.all(
     temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })),
   );
-});
-
-after(async () => {
-  const testTmpdir = tmpdir();
-  if (
-    path.basename(testTmpdir) === "tmp" &&
-    path.basename(path.dirname(testTmpdir)).startsWith("nutrition-coach-113-08.")
-  ) {
-    for (const entry of await readdir(testTmpdir)) {
-      if (entry.startsWith("tsx-")) {
-        await rm(path.join(testTmpdir, entry), { recursive: true, force: true });
-      }
-    }
-  }
 });
 
 describe("source revision validation", () => {
