@@ -265,14 +265,15 @@ function createWrapperCancellationController(testHooks) {
 function trackedPathFingerprint(root, relativePath) {
   try {
     const absolutePath = path.join(root, relativePath);
-    const entry = lstatSync(absolutePath);
+    const entry = lstatSync(absolutePath, { bigint: true });
+    const metadata = `${entry.mode & 0o777n}:${entry.size}:${entry.mtimeNs}:${entry.ctimeNs}`;
     if (entry.isSymbolicLink()) {
-      return `link:${entry.mode & 0o777}:${readlinkSync(absolutePath)}`;
+      return `link:${metadata}:${readlinkSync(absolutePath)}`;
     }
     if (!entry.isFile()) {
-      return `other:${entry.mode & 0o777}`;
+      return `other:${metadata}`;
     }
-    return `file:${entry.mode & 0o777}:${createHash("sha256").update(readFileSync(absolutePath)).digest("hex")}`;
+    return `file:${metadata}:${createHash("sha256").update(readFileSync(absolutePath)).digest("hex")}`;
   } catch {
     return "missing";
   }
@@ -285,9 +286,13 @@ function createSourceDriftMonitor(root, trackedPaths, verifyBytes = false) {
   let changed = false;
   let watcherFailed = false;
   let disposed = false;
-  const baseline = verifyBytes
-    ? new Map(trackedPaths.map((entry) => [entry, trackedPathFingerprint(root, entry)]))
-    : undefined;
+  const baseline = new Map(
+    trackedPaths.map((entry) => [entry, trackedPathFingerprint(root, entry)]),
+  );
+  const trackedBytesChanged = () =>
+    [...baseline].some(
+      ([entry, fingerprint]) => trackedPathFingerprint(root, entry) !== fingerprint,
+    );
 
   const latch = () => {
     changed = true;
@@ -297,14 +302,16 @@ function createSourceDriftMonitor(root, trackedPaths, verifyBytes = false) {
     try {
       const watcher = watch(absoluteDirectory, { persistent: false }, (_event, filename) => {
         if (filename === null) {
-          latch();
+          if (trackedBytesChanged()) {
+            latch();
+          }
           return;
         }
         const relativePath = path
           .join(relativeDirectory, filename.toString())
           .split(path.sep)
           .join("/");
-        if (tracked.has(relativePath)) {
+        if (tracked.has(relativePath) && trackedBytesChanged()) {
           latch();
         }
       });
@@ -330,12 +337,7 @@ function createSourceDriftMonitor(root, trackedPaths, verifyBytes = false) {
       if (changed) {
         throw new Error(SOURCE_DRIFT_ERROR);
       }
-      if (
-        baseline &&
-        [...baseline].some(
-          ([entry, fingerprint]) => trackedPathFingerprint(root, entry) !== fingerprint,
-        )
-      ) {
+      if (verifyBytes && trackedBytesChanged()) {
         throw new Error(SOURCE_DRIFT_ERROR);
       }
     },
@@ -528,7 +530,7 @@ async function runManifestBuildFromCommittedSnapshot({
     await testHooks.pause("signal_during_snapshot_setup");
     cancellationController.throwIfCancelled();
 
-    sharedMonitor = createSourceDriftMonitor(checkoutRoot, trackedPaths);
+    sharedMonitor = createSourceDriftMonitor(checkoutRoot, trackedPaths, true);
     resourceState.monitorDisposed = false;
     transactionRoot = await mkdtemp(
       path.join(process.env.TMPDIR || tmpdir(), "nutrition-source-wrapper-"),

@@ -188,6 +188,10 @@ async function makeCaseTmpdir(directory: string) {
   return caseTmpdir;
 }
 
+function makeCoordinationPath(directory: string, name: string) {
+  return path.join(path.dirname(directory), name);
+}
+
 function spawnWrapperProbe(
   args: string[],
   cwd: string,
@@ -302,7 +306,7 @@ async function assertDirtyRepositoryRejected(
   rejectedPath: string,
   rejectedValue: string,
 ) {
-  const markerPath = path.join(directory, "child-launched.marker");
+  const markerPath = makeCoordinationPath(directory, "child-launched.marker");
   const outputDirectory = path.join(directory, "dist/client");
   await mkdir(outputDirectory, { recursive: true });
   const missingManifestPath = path.join(outputDirectory, "missing-manifest.json");
@@ -368,7 +372,7 @@ async function waitForProcessGone(pid: number, timeoutMs = 5_000) {
 
 async function runSignalForwardingProbe(signal: NodeJS.Signals) {
   const directory = await makeTemporaryGitRepository();
-  const readyPath = path.join(directory, "child-ready.marker");
+  const readyPath = makeCoordinationPath(directory, "child-ready.marker");
   const manifestPath = path.join(directory, "dist/client/signal-manifest.json");
   await mkdir(path.dirname(manifestPath), { recursive: true });
   await writeFile(manifestPath, "stale\n", "utf8");
@@ -496,8 +500,8 @@ async function runHandledExitZeroProbe(
 ) {
   const directory = await makeTemporaryGitRepository();
   const caseTmpdir = await makeCaseTmpdir(directory);
-  const readyPath = path.join(directory, `${mode}-${signal}-ready.marker`);
-  const ackPath = path.join(directory, `${mode}-${signal}-ack.marker`);
+  const readyPath = makeCoordinationPath(directory, `${mode}-${signal}-ready.marker`);
+  const ackPath = makeCoordinationPath(directory, `${mode}-${signal}-ack.marker`);
   const publication = await prepareLiveOutput(directory, manifestVariant);
   const childSource = [
     'const { writeFileSync } = require("node:fs");',
@@ -557,8 +561,14 @@ async function runRepeatedSignalProbe(
   const directory = await makeTemporaryGitRepository();
   const caseTmpdir = await makeCaseTmpdir(directory);
   const variantLabel = manifestVariant ?? "non-manifest";
-  const readyPath = path.join(directory, `repeat-${signal}-${variantLabel}-ready.marker`);
-  const ackPath = path.join(directory, `repeat-${signal}-${variantLabel}-ack.marker`);
+  const readyPath = makeCoordinationPath(
+    directory,
+    `repeat-${signal}-${variantLabel}-ready.marker`,
+  );
+  const ackPath = makeCoordinationPath(
+    directory,
+    `repeat-${signal}-${variantLabel}-ack.marker`,
+  );
   const publication = manifestVariant
     ? await prepareLiveOutput(directory, manifestVariant)
     : undefined;
@@ -633,7 +643,7 @@ async function runManifestBarrierProbe(
   const directory = await makeTemporaryGitRepository();
   const caseTmpdir = await makeCaseTmpdir(directory);
   const publication = await prepareLiveOutput(directory);
-  const childMarker = path.join(directory, `${barrier}-child.marker`);
+  const childMarker = makeCoordinationPath(directory, `${barrier}-child.marker`);
   const childSource = snapshotBuildChildSource(
     `writeFileSync(${JSON.stringify(childMarker)}, "launched");`,
   );
@@ -687,8 +697,8 @@ async function runPostLaunchMutationProbe(kind: "persistent" | "transient") {
   const directory = await makeTemporaryGitRepository();
   const caseTmpdir = await makeCaseTmpdir(directory);
   const publication = await prepareLiveOutput(directory);
-  const readyPath = path.join(directory, `${kind}-mutation-ready.marker`);
-  const releasePath = path.join(directory, `${kind}-mutation-release.marker`);
+  const readyPath = makeCoordinationPath(directory, `${kind}-mutation-ready.marker`);
+  const releasePath = makeCoordinationPath(directory, `${kind}-mutation-release.marker`);
   const childSource = [
     'const { existsSync, mkdirSync, readFileSync, writeFileSync } = require("node:fs");',
     `writeFileSync(${JSON.stringify(readyPath)}, readFileSync("tracked.txt", "utf8"));`,
@@ -1184,6 +1194,34 @@ describe("source revision command wrapper", () => {
       await assertCaseTmpdirEmpty(caseTmpdir);
     },
   );
+
+  it("ignores shared-checkout churn that leaves all tracked source bytes unchanged", async () => {
+    const directory = await makeTemporaryGitRepository();
+    const caseTmpdir = await makeCaseTmpdir(directory);
+    const publication = await prepareLiveOutput(directory);
+    const ignoredMarker = path.join(directory, "ignored-source-churn.marker");
+    const childSource = snapshotBuildChildSource(
+      `for (let index = 0; index < 500; index += 1) writeFileSync(${JSON.stringify(ignoredMarker)}, String(index));`,
+    );
+    const probe = spawnWrapperProbe(
+      [
+        "--manifest",
+        publication.manifestPath,
+        "--",
+        process.execPath,
+        "-e",
+        childSource,
+      ],
+      directory,
+      caseTmpdir,
+    );
+    const result = await waitForWrapper(probe, 10_000);
+
+    assert.deepEqual({ code: result.code, signal: result.signal }, { code: 0, signal: null });
+    assert.equal(await readFile(publication.outputPath, "utf8"), "committed input\n");
+    assert.equal(await readFile(ignoredMarker, "utf8"), "499");
+    await assertCaseTmpdirEmpty(caseTmpdir);
+  });
 
   for (const manifestVariant of ["missing", "stale"] as const) {
     adversarialIt(
