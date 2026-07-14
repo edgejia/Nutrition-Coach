@@ -4,18 +4,23 @@
 
 ### 變更
 
+- Home 營養卡片現在由明確的 entry/update/replay intent、Zustand 狀態與單一時間軸驅動；冷啟動、手動重新整理、返回 Home、餐點編修與 SSE 更新會依來源選擇 replay 或 delta，並維持可測試的同步動畫與 scroll-to-top 邊界。
 - 新增公開英文 AI-safety case study `docs/ai-safety.md`，以 AS-01 到 AS-18 claim/evidence contract 對應 CASE-09 到 CASE-17 的 deterministic instruction/authority 與 nutrition-safety 邊界；這是既有證據的公開敘事，不是 runtime safety-system 變更。
 - ADR 0010 將 1200 kcal/day 記錄為 conservative、non-clinical product safety floor，並明確排除 universal medical advice 或 personalized clinical recommendation 的解讀。
 - 公開文件以相同四欄結構誠實揭露 #107、#108、#109 的 conversational-quality gaps，保留 deterministic guard 與 future eval 問題的界線，不在本 phase 提出修復或 eval framework。
 - 新增公開 `docs/tour.md` 十站／30 分鐘 reviewer path，並同步 README 與 README-en 的三段式 portfolio narrative；這是既有 architecture 與 AI-safety 證據的導覽層，不是 runtime 或 safety-policy 變更。
 - Phase 113 新增 `docs/demo.md` 的 DEMO-02 named-tunnel runbook handoff 與 DEMO-04 五分鐘固定 script；這只記錄 source 文件，未表示已合併 `main`、刷新 runtime、變更 tunnel、通過 public smoke、關閉 #54 或通過 live semantic demo。
+- Source-attested build wrapper 現在只會發佈所選 committed snapshot 產生的 substantive client shell；無效輸出、取消、timeout 或 source drift 都會保留既有 publication，frozen adversarial matrix 也以精確註冊／執行計數和 missing／stale manifest timeout 變體形成可執行證據。
 
 ### 驗證
 
+- Phase 110 的 reducer、timeline、store trigger 與 UI contract 測試通過，固定人工 visual checklist 也完成 10/10；主觀畫面判斷沿用已核准證據，未在收尾階段自行重做 browser 驗收。
 - 新增 dependency-free Node contract，檢查 AS-01 到 AS-18、CASE-09 到 CASE-17、標題與 Mermaid/table 結構、literal test-title evidence、公開連結與 private-path exclusion。
 - Phase 111 的 machine gates 包含 AI-safety quick contract、named unit/integration evidence regressions、`yarn tsc --noEmit`、`yarn test:unit`、behavior-matrix drift/harness 檢查與 final `yarn release:check`；release、merge、tag、tunnel 與 production action 仍是分開授權的後續 gate。
 - Phase 112 的 dependency-free reviewer-tour contract 鎖定十個問題、tour-to-source 一 hop／README-to-source 兩 hop 邊界，並搭配 capability 與 behavior generated-doc checks；通過只代表文件契約與 drift gate，不是 runtime、safety-policy 或 release completion 聲明。
 - Phase 113 的 dependency-free demo contract 鎖定 named-tunnel SSE authority、固定 script 與上述 source-only non-claim boundary；focused contract 與 `yarn tsc --noEmit` 通過仍未表示已合併 `main`、刷新 runtime、變更 tunnel、通過 public smoke、關閉 #54 或通過 live semantic demo。
+- Phase 113.1 的 fresh verifier 通過 5/5 must-haves，focused source-wrapper 測試通過 43/43、demo contract 通過 27/27、TypeScript 檢查通過；ASVS Level 2 security audit 關閉 10/10 threats，`threats_open: 0`。
+- v3.4 milestone audit 通過 12/12 requirements、5/5 phases、13/13 integration connections 與 5/5 source flows；Phase 113 的歷史 `gaps_found` 由 Phase 113.1 的 BUILD-01 精確關閉，未改寫或豁免原始 verifier 證據。
 
 ## v3.3 - 2026-07-05
 
