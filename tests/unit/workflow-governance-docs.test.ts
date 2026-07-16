@@ -93,7 +93,7 @@ describe("workflow runtime governance docs", () => {
   it("keeps the tracked re-enable report evidence-bound and non-authorizing", async () => {
     const readiness = await readFile(readinessPath, "utf8");
     for (const claim of [
-      "Decision status: **NOT_READY — evidence gathering open**",
+      "Decision status: **DECISION_REQUIRED — pause remains active**",
       "Temporary GSD Maintenance Pause: **ACTIVE**",
       "does not lift the pause",
       "060734d393db36d2241d42d46ad340b8c8a8cb33",
@@ -109,6 +109,15 @@ describe("workflow runtime governance docs", () => {
       "344 tests, 344 pass, 0 fail",
       "`status: pass`, `readiness: not_ready`",
       "APPROVE RULESET CANARY BUNDLE 20260716-060734d3",
+      "temporary mirror ruleset ID `19028500`",
+      "source marker commit: `cc6755bdbf69f34157d3f6bf66af10c58be29402`",
+      "PR #114",
+      "Actions run `29473605875`",
+      "job/check-run `87541721750`",
+      "mergeStateStatus: BLOCKED",
+      "rejected with GH013",
+      "rejected with HTTP 422",
+      "mergedAt: null",
       "same repository that a pull request can edit",
       "Explicitly choose **resume** or **continue-defer**",
       "No temporary remote resource exists",
