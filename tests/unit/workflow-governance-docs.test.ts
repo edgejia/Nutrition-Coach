@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 const governancePath = "docs/workflow/runtime-governance.md";
 const pilotPath = "docs/workflow/gsd-reenable-pilot.md";
 const parityPath = "docs/workflow/runtime-parity.json";
+const readinessPath = "docs/workflow/gsd-reenable-readiness.md";
 const packagePath = "package.json";
 const closeoutSkillPath = ".codex/skills/nutrition-milestone-closeout/SKILL.md";
 
@@ -87,6 +88,43 @@ describe("workflow runtime governance docs", () => {
     assert.match(governance, /The direct Node entrypoint is intentional/);
     assert.match(governance, /node scripts\/workflow\/workflow-telemetry\.mjs/);
     assert.equal(pkg.scripts["workflow:telemetry"], undefined);
+  });
+
+  it("keeps the tracked re-enable report evidence-bound and non-authorizing", async () => {
+    const readiness = await readFile(readinessPath, "utf8");
+    for (const claim of [
+      "Decision status: **NOT_READY — evidence gathering open**",
+      "Temporary GSD Maintenance Pause: **ACTIVE**",
+      "does not lift the pause",
+      "060734d393db36d2241d42d46ad340b8c8a8cb33",
+      "a84370bf0c207b2d3305156ce5baf13c0335f02e",
+      "ruleset history | version ID `43165861`",
+      "GitHub Actions integration ID `15368`",
+      "47/47",
+      "123/123",
+      "17/17",
+      "28/28",
+      "14/14",
+      "15/15",
+      "344 tests, 344 pass, 0 fail",
+      "`status: pass`, `readiness: not_ready`",
+      "APPROVE RULESET CANARY BUNDLE 20260716-060734d3",
+      "same repository that a pull request can edit",
+      "Explicitly choose **resume** or **continue-defer**",
+      "No temporary remote resource exists",
+    ]) {
+      assert.ok(readiness.includes(claim), `missing readiness boundary: ${claim}`);
+    }
+    for (const finding of [
+      "roadmap_progress_mismatch",
+      "roadmap_summary_completion_mismatch",
+      "state_completed_plan_count_mismatch",
+      "state_internal_plan_count_mismatch",
+      "state_session_continuity_stopped_at_mismatch",
+    ]) {
+      assert.ok(readiness.includes(finding), `missing live frozen finding: ${finding}`);
+    }
+    assert.doesNotMatch(readiness, /Temporary GSD Maintenance Pause:\s*\*\*(?:INACTIVE|LIFTED|RESUMED)\*\*/i);
   });
 
   it("keeps closeout source exceptions exact and binds state checks to project root", async () => {
