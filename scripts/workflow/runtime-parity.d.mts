@@ -99,6 +99,14 @@ export interface ProjectVerifierResult {
   findings: RuntimeParityFinding[];
 }
 
+export interface RuntimeCoreInspection {
+  status: RuntimeParityCheckStatus;
+  version: string | null;
+  observed: Record<string, string>;
+  registryRuntimes: Record<string, { runtime: Record<string, unknown> }> | null;
+  findings: RuntimeParityFinding[];
+}
+
 export interface RuntimeParityWiringComparison {
   exact: boolean;
   findings: RuntimeParityFinding[];
@@ -131,6 +139,14 @@ export interface RuntimeParityCheck {
 }
 
 export function captureRuntimeParityFileEvidence(filePath: string, code?: string): Promise<RuntimeParityFileEvidence>;
+export function parseGeneratedRegistryRuntimes(
+  raw: Buffer | string,
+): Record<string, { runtime: Record<string, unknown> }>;
+export function inspectRuntimeCoreRoot(
+  root: string,
+  expectedCoreFiles: Record<string, string>,
+  expectedVersion: string,
+): Promise<RuntimeCoreInspection>;
 export function validateRuntimeParityMatrix(matrix: unknown): RuntimeParityMatrix;
 export function compareRuntimeWiringFindings(
   observed: unknown,

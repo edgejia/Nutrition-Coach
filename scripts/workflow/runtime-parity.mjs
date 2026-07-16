@@ -7,14 +7,12 @@ import fs from "node:fs/promises";
 import { userInfo } from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { checkGsdHardeningWiring } from "./gsd-wiring.mjs";
 import { lintPlanProof } from "./plan-proof-lint.mjs";
 import { resolveCanonicalPlanningConfig } from "./project-scope.mjs";
 import { resolveWorkflowProjectScope } from "./workflow-lease.mjs";
 
-const require = createRequire(import.meta.url);
 const MATRIX_KIND = "nutrition_runtime_parity_matrix";
 const STATUSES = new Set(["equivalent", "intentional_difference", "blocking", "deferred"]);
 const SOURCE_SHA_PATTERN = /^[0-9a-f]{40}$/;
@@ -258,8 +256,11 @@ export function validateRuntimeParityMatrix(matrix) {
   requireCondition(
     JSON.stringify(matrix.expectedWiringFindings) ===
       JSON.stringify([...matrix.expectedWiringFindings].sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right), "en"))) &&
-      JSON.stringify(matrix.expectedWiringFindings.map((finding) => finding.role).sort()) ===
-        JSON.stringify(["gsd-plan-checker", "gsd-planner"]),
+      (
+        matrix.expectedWiringFindings.length === 0 ||
+        JSON.stringify(matrix.expectedWiringFindings.map((finding) => finding.role).sort()) ===
+          JSON.stringify(["gsd-plan-checker", "gsd-planner"])
+      ),
     "runtime_parity_matrix_invalid",
   );
   requireCondition(Array.isArray(matrix.rows), "runtime_parity_matrix_invalid");
@@ -335,8 +336,9 @@ export function validateRuntimeParityMatrix(matrix) {
         : ["id", "status", "proof", "codex", "claude", "residualRisk"],
     );
   }
+  const wiringStatus = matrix.rows.find((row) => row.id === "planner_checker_skill_wiring")?.status;
   requireCondition(
-    matrix.rows.find((row) => row.id === "planner_checker_skill_wiring")?.status === "blocking",
+    wiringStatus === (matrix.expectedWiringFindings.length === 0 ? "equivalent" : "blocking"),
     "runtime_parity_matrix_invalid",
   );
   return matrix;
@@ -353,12 +355,81 @@ async function loadMatrix(matrixPath) {
   return { matrix: validateRuntimeParityMatrix(matrix), raw };
 }
 
-function queryInstruction(gsdRoot, runtime, projectRoot) {
-  return execFileSync(
-    process.execPath,
-    [path.join(gsdRoot, "bin/gsd-tools.cjs"), "query", "project-instruction-file", "--runtime", runtime],
-    { cwd: projectRoot, encoding: "utf8" },
-  ).trim();
+export function parseGeneratedRegistryRuntimes(raw) {
+  const source = Buffer.isBuffer(raw) ? raw.toString("utf8") : String(raw);
+  const prefix = "const runtimes = ";
+  const suffix = "\n\nconst commandFamilies = ";
+  const start = source.indexOf(prefix);
+  requireCondition(start >= 0 && source.indexOf(prefix, start + prefix.length) === -1, "runtime_parity_core_registry_data_invalid");
+  const end = source.indexOf(suffix, start + prefix.length);
+  requireCondition(end > start, "runtime_parity_core_registry_data_invalid");
+  const literal = source.slice(start + prefix.length, end).trim();
+  requireCondition(literal.endsWith(";"), "runtime_parity_core_registry_data_invalid");
+  let runtimes;
+  try {
+    runtimes = JSON.parse(literal.slice(0, -1));
+  } catch {
+    fail("runtime_parity_core_registry_data_invalid");
+  }
+  requireCondition(
+    runtimes && typeof runtimes === "object" && !Array.isArray(runtimes) &&
+      runtimes.codex?.runtime && runtimes.claude?.runtime,
+    "runtime_parity_core_registry_data_invalid",
+  );
+  return runtimes;
+}
+
+function projectInstructionFromRegistry(runtimes, runtime) {
+  if (runtime === "claude") return ".claude/CLAUDE.md";
+  if (runtime === "copilot") return ".github/copilot-instructions.md";
+  const declared = runtimes[runtime]?.runtime?.hostBehaviors?.projectInstructionFile;
+  return typeof declared === "string" && declared.length > 0 ? declared : "AGENTS.md";
+}
+
+export async function inspectRuntimeCoreRoot(root, expectedCoreFiles, expectedVersion) {
+  requireCondition(
+    expectedCoreFiles && typeof expectedCoreFiles === "object" && !Array.isArray(expectedCoreFiles) &&
+      JSON.stringify(Object.keys(expectedCoreFiles).sort()) === JSON.stringify(CORE_FILES) &&
+      Object.values(expectedCoreFiles).every((digest) => typeof digest === "string" && /^[0-9a-f]{64}$/.test(digest)),
+    "runtime_parity_matrix_invalid",
+  );
+  const observed = {};
+  const snapshots = {};
+  const findings = [];
+  for (const relative of CORE_FILES) {
+    try {
+      const raw = await readPlainFile(path.join(root, relative), "runtime_parity_core_file_missing");
+      const digest = sha256(raw);
+      observed[relative] = digest;
+      snapshots[relative] = raw;
+      if (digest !== expectedCoreFiles[relative]) addFinding(findings, "runtime_parity_core_digest_drift", { file: relative });
+    } catch (error) {
+      addFinding(findings, error instanceof RuntimeParityError ? error.code : "runtime_parity_core_read_failed", { file: relative });
+    }
+  }
+  const version = snapshots.VERSION?.toString("utf8").trim() ?? null;
+  if (version !== null && version !== expectedVersion) {
+    addFinding(findings, "runtime_parity_version_drift", { observed: version });
+  }
+  let registryRuntimes = null;
+  if (findings.length === 0) {
+    try {
+      registryRuntimes = parseGeneratedRegistryRuntimes(snapshots["bin/lib/capability-registry.cjs"]);
+    } catch (error) {
+      addFinding(
+        findings,
+        error instanceof RuntimeParityError ? error.code : "runtime_parity_core_registry_data_invalid",
+      );
+    }
+  }
+  findings.sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right), "en"));
+  return {
+    status: findings.length === 0 ? "pass" : "fail",
+    version,
+    observed,
+    registryRuntimes,
+    findings,
+  };
 }
 
 function selectedHostProfile(runtimeDescriptor) {
@@ -559,26 +630,18 @@ export async function checkLiveRuntimeParity(options) {
   if (initialEvidence.sourceSha !== sourceShaBefore || initialEvidence.matrix?.sha256 !== matrixSha256) {
     addFinding(findings, "runtime_parity_evidence_changed_during_check");
   }
-  const observedCore = {};
+  const observedCore = Object.fromEntries(Object.keys(matrix.coreFiles).map((relative) => [relative, {}]));
+  const runtimeCore = {};
   const projectVerifier = await verifyProjectVerifierFiles(projectRoot, matrix.projectVerifierFiles);
   findings.push(...projectVerifier.findings);
 
-  for (const relative of Object.keys(matrix.coreFiles).sort((left, right) => left.localeCompare(right, "en"))) {
-    observedCore[relative] = {};
-    for (const [runtime, root] of [["codex", codexRoot], ["claude", claudeRoot]]) {
-      try {
-        const value = sha256(await readPlainFile(path.join(root, relative), "runtime_parity_core_file_missing"));
-        observedCore[relative][runtime] = value;
-        if (value !== matrix.coreFiles[relative]) addFinding(findings, "runtime_parity_core_digest_drift", { runtime, file: relative });
-      } catch (error) {
-        addFinding(findings, error instanceof RuntimeParityError ? error.code : "runtime_parity_core_read_failed", { runtime, file: relative });
-      }
-    }
-  }
-
   for (const [runtime, root] of [["codex", codexRoot], ["claude", claudeRoot]]) {
-    const version = (await readPlainFile(path.join(root, "VERSION"), "runtime_parity_version_missing")).toString("utf8").trim();
-    if (version !== matrix.gsdVersion) addFinding(findings, "runtime_parity_version_drift", { runtime, observed: version });
+    const inspected = await inspectRuntimeCoreRoot(root, matrix.coreFiles, matrix.gsdVersion);
+    runtimeCore[runtime] = inspected;
+    for (const [relative, digest] of Object.entries(inspected.observed)) {
+      observedCore[relative][runtime] = digest;
+    }
+    for (const finding of inspected.findings) findings.push({ ...finding, runtime });
   }
 
   try {
@@ -597,15 +660,15 @@ export async function checkLiveRuntimeParity(options) {
     addFinding(findings, "runtime_parity_skill_surface_unreadable");
   }
 
-  for (const root of [codexRoot, claudeRoot]) {
+  for (const [coreRuntime, inspected] of Object.entries(runtimeCore)) {
+    if (inspected.status !== "pass") continue;
     for (const runtime of ["codex", "claude"]) {
-      try {
-        const observed = queryInstruction(root, runtime, projectRoot);
-        if (observed !== matrix.projectInstructionFiles[runtime].path) {
-          addFinding(findings, "runtime_parity_instruction_query_drift", { runtime, observed });
-        }
-      } catch {
-        addFinding(findings, "runtime_parity_instruction_query_failed", { runtime });
+      const observed = projectInstructionFromRegistry(inspected.registryRuntimes, runtime);
+      if (observed !== matrix.projectInstructionFiles[runtime].path) {
+        addFinding(findings, "runtime_parity_instruction_registry_drift", { coreRuntime, runtime, observed });
+      }
+      if (JSON.stringify(selectedHostProfile(inspected.registryRuntimes[runtime])) !== JSON.stringify(matrix.hostProfiles[runtime])) {
+        addFinding(findings, "runtime_parity_host_profile_drift", { coreRuntime, runtime });
       }
     }
   }
@@ -636,17 +699,6 @@ export async function checkLiveRuntimeParity(options) {
     findings.push(...wiringComparison.findings);
   } catch (error) {
     addFinding(findings, error instanceof RuntimeParityError ? error.code : "runtime_parity_shared_config_unreadable");
-  }
-
-  try {
-    const registry = require(path.join(codexRoot, "bin/lib/capability-registry.cjs"));
-    for (const runtime of ["codex", "claude"]) {
-      if (JSON.stringify(selectedHostProfile(registry.runtimes[runtime])) !== JSON.stringify(matrix.hostProfiles[runtime])) {
-        addFinding(findings, "runtime_parity_host_profile_drift", { runtime });
-      }
-    }
-  } catch {
-    addFinding(findings, "runtime_parity_host_registry_unreadable");
   }
 
   const smoke = await runDeterministicParitySmoke(projectRoot);

@@ -294,13 +294,14 @@ async function terminateChildGroup(child) {
   return waitForChildGroupQuiescence(child, KILL_CONFIRMATION_MS);
 }
 
-async function executeStep(args, timeoutMs) {
+async function executeStep(args, timeoutMs, envOverrides = {}) {
   let child;
   try {
     child = spawn(YARN_BIN, args, {
       cwd: projectRoot,
       stdio: ["ignore", "ignore", "ignore"],
       detached: process.platform !== "win32",
+      env: { ...process.env, ...envOverrides },
     });
   } catch (error) {
     return { status: null, signal: null, error };
@@ -358,12 +359,12 @@ async function executeStep(args, timeoutMs) {
   };
 }
 
-async function runStep(label, gate, args) {
+async function runStep(label, gate, args, envOverrides = {}) {
   console.log(`\n[release-check] ${label}`);
   const remainingMs = releaseDeadlineAtMs - Date.now();
   const result = remainingMs <= 0
     ? { status: null, signal: "SIGTERM", error: Object.assign(new Error("release deadline exceeded"), { code: "ETIMEDOUT" }) }
-    : await executeStep(args, remainingMs);
+    : await executeStep(args, remainingMs, envOverrides);
   if (result.error || result.status !== 0) {
     console.error(`[release-check] FAIL: ${label}; raw child output suppressed`);
     await publishFailureReceipt(gate, result);
@@ -510,7 +511,7 @@ if (!timezoneValid) {
 }
 
 await runStep("TypeScript gate", "typescript_gate", ["tsc", "--noEmit"]);
-await runStep("Full test suite", "full_test_suite", ["test"]);
+await runStep("Full test suite", "full_test_suite", ["test"], { NODE_ENV: "test" });
 if (touchesServerBoundary) {
   console.log(
     "\n[release-check] Note: server route/service changes detected; yarn test already includes the integration suite.",

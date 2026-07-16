@@ -72,7 +72,10 @@ describe("release:check timezone contract", () => {
     const script = fs.readFileSync(new URL("../../scripts/release-check.mjs", import.meta.url), "utf8");
 
     assert.match(script, /await runStep\("TypeScript gate", "typescript_gate", \["tsc", "--noEmit"\]\);/);
-    assert.match(script, /await runStep\("Full test suite", "full_test_suite", \["test"\]\);/);
+    assert.match(
+      script,
+      /await runStep\("Full test suite", "full_test_suite", \["test"\], \{ NODE_ENV: "test" \}\);/,
+    );
     assert.match(script, /await runStep\("Capability matrix generated doc drift", "capability_matrix", \["matrix:gen:check"\]\);/);
     assert.match(script, /await runStep\("Behavior matrix generated doc drift", "behavior_matrix", \["behavior-matrix:gen:check"\]\);/);
     assert.match(script, /await runStep\("Frontend build", "frontend_build", \["build"\]\);/);
@@ -83,6 +86,7 @@ describe("release:check timezone contract", () => {
     assert.match(script, /signed receipts require both/);
     assert.match(script, /MAX_RELEASE_DURATION_MS = 18 \* 60 \* 1000/);
     assert.match(script, /spawn\(YARN_BIN, args/);
+    assert.match(script, /env: \{ \.\.\.process\.env, \.\.\.envOverrides \}/);
     assert.match(script, /signalChildGroup\(child, "SIGTERM"\)/);
     assert.match(script, /signalChildGroup\(child, "SIGKILL"\)/);
     assert.match(script, /result\.error \|\| result\.status !== 0/);

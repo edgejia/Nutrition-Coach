@@ -363,7 +363,10 @@ describe("public demo runbook contract", () => {
     const packageJson = JSON.parse(packageSource) as { scripts: Record<string, string> };
     assert.match(packageJson.scripts.test, /tests\/unit\/\*\.test\.ts/);
     assert.match(packageJson.scripts["test:unit"], /tests\/unit\/\*\.test\.ts/);
-    assert.match(releaseSource, /await runStep\("Full test suite", "full_test_suite", \["test"\]\);/);
+    assert.match(
+      releaseSource,
+      /await runStep\("Full test suite", "full_test_suite", \["test"\], \{ NODE_ENV: "test" \}\);/,
+    );
     await assert.doesNotReject(stat(CONTRACT_PATH));
   });
 });

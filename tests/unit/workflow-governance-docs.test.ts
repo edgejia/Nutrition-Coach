@@ -7,7 +7,9 @@ const pilotPath = "docs/workflow/gsd-reenable-pilot.md";
 const parityPath = "docs/workflow/runtime-parity.json";
 const readinessPath = "docs/workflow/gsd-reenable-readiness.md";
 const packagePath = "package.json";
-const closeoutSkillPath = ".codex/skills/nutrition-milestone-closeout/SKILL.md";
+const planningProofPath = "docs/workflow/planning-proof.md";
+const gitignorePath = ".gitignore";
+const stateCheckPath = "scripts/workflow/state-check.mjs";
 
 describe("workflow runtime governance docs", () => {
   it("keeps lease, provenance, and telemetry behind the active pause boundary", async () => {
@@ -132,7 +134,7 @@ describe("workflow runtime governance docs", () => {
       "A bare `RESUME`, bare `CONTINUE-DEFER`, modified bundle ID, or approximate wording is non-authorizing",
       "any drift leaves the pause active pending a new review",
       "invalidates bundle R1 and requires a new decision bundle ID",
-      "No temporary remote resource exists",
+      "No temporary canary resource exists",
     ]) {
       assert.ok(readiness.includes(claim), `missing readiness boundary: ${claim}`);
     }
@@ -155,14 +157,20 @@ describe("workflow runtime governance docs", () => {
     assert.doesNotMatch(readiness, /Temporary GSD Maintenance Pause:\s*\*\*ACTIVE\*\*/);
   });
 
-  it("keeps closeout source exceptions exact and binds state checks to project root", async () => {
-    const skill = await readFile(closeoutSkillPath, "utf8");
-    assert.match(skill, /yarn workflow:state-check --project-root=\./);
-    assert.doesNotMatch(skill, /workflow:state-check --planning-root/);
-    assert.match(skill, /\.codex\/skills\/nutrition-planning-proof\/SKILL\.md/);
-    assert.match(skill, /\.claude\/CLAUDE\.md/);
-    assert.match(skill, /git check-ignore -v -- <path>/);
-    assert.match(skill, /git ls-files --cached -- <path>/);
-    assert.match(skill, /a directory-wide force-add is forbidden/);
+  it("keeps planning-proof source exceptions exact and binds state checks to project root", async () => {
+    const planningProof = await readFile(planningProofPath, "utf8");
+    assert.match(planningProof, /Both `gsd-planner` and `gsd-plan-checker` must bind exactly/);
+    assert.match(planningProof, /\.codex\/skills\/nutrition-planning-proof/);
+
+    const ignoreLines = (await readFile(gitignorePath, "utf8")).split(/\r?\n/);
+    assert.equal(ignoreLines.filter((line) => line === "!.codex/skills/nutrition-planning-proof/").length, 1);
+    assert.equal(ignoreLines.filter((line) => line === "!.codex/skills/nutrition-planning-proof/SKILL.md").length, 1);
+    assert.equal(ignoreLines.filter((line) => line === "!.claude/CLAUDE.md").length, 1);
+    assert.equal(ignoreLines.filter((line) => line === ".planning/").length, 1);
+
+    const stateCheck = await readFile(stateCheckPath, "utf8");
+    assert.match(stateCheck, /arg\.startsWith\("--project-root="\)/);
+    assert.doesNotMatch(stateCheck, /--planning-root/);
+    assert.match(stateCheck, /path\.join\(path\.resolve\(projectRoot\), "\.planning"\)/);
   });
 });

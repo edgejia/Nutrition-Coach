@@ -159,19 +159,25 @@ describe("tracked deployment ordering", () => {
   });
 
   it("blocks runtime refresh until archive completion and isolates release preflight", () => {
-    const release = read("docs/codex-release.md");
-    const runtime = release.slice(release.indexOf("## Production Runtime Refresh Path"), release.indexOf("## Release Guardrails"));
+    const release = read("docs/deploy/cloudflare-tunnel.md");
+    const runtime = release.slice(release.indexOf("Source release and runtime refresh are separate gates"), release.indexOf("## Environment"));
     assertOrdered(runtime, [
-      "source release is merged to `main`",
-      "post-merge local archive has completed",
+      "A PR targets `main`",
+      "maintainer separately decides whether to merge",
+      "post-merge planning archive/closeout runs from updated `main`",
       "explicitly approves production runtime refresh",
-      "clean, non-serving verification checkout",
-      "active runtime checkout",
-      "create its non-production test environment with `cp .env.example .env`",
-      "run `yarn release:check` only there",
-      "Before storage mutation in the runtime checkout",
     ]);
-    assert.match(runtime, /maintenance pause or archive launcher gap blocks that archive, runtime refresh remains blocked/);
-    assert.match(runtime, /running it in the active runtime checkout would mutate served source before R06/);
+    assert.match(runtime, /If that workflow is paused, stop instead of inventing or skipping the archive/);
+
+    const build = release.slice(release.indexOf("## Build and Start"), release.indexOf("## Cloudflare Tunnel"));
+    assertOrdered(build, [
+      "clean, non-serving verification checkout",
+      "yarn release:check",
+      "completed post-merge archive",
+      "select the active runtime checkout separately",
+      "Before `yarn db:migrate`",
+    ]);
+    assert.match(build, /never run it in the checkout serving the active production runtime/);
+    assert.match(build, /Only a later R06 approval may build `dist\/client` in that runtime checkout/);
   });
 });

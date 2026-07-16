@@ -4,7 +4,8 @@ import fs from "node:fs/promises";
 
 const workflowUrl = new URL("../../.github/workflows/pr-check.yml", import.meta.url);
 const manualWorkflowUrl = new URL("../../.github/workflows/manual-release-diagnostic.yml", import.meta.url);
-const runbookUrl = new URL("../../docs/codex-pr-ci.md", import.meta.url);
+const releaseCheckUrl = new URL("../../scripts/release-check.mjs", import.meta.url);
+const readinessUrl = new URL("../../docs/workflow/gsd-reenable-readiness.md", import.meta.url);
 
 describe("PR Check workflow enforcement contract", () => {
   it("keeps the required PR context unreachable from manual dispatch", async () => {
@@ -31,16 +32,18 @@ describe("PR Check workflow enforcement contract", () => {
   });
 
   it("documents timeout observability and the mutable-workflow residual without overstating proof", async () => {
-    const runbook = await fs.readFile(runbookUrl, "utf8");
-    assert.match(runbook, /18-minute whole-run deadline is inside the 20-minute Actions deadline/);
-    assert.match(runbook, /sends TERM then KILL to the dedicated child process group/);
-    assert.match(runbook, /original process group is empty after an ordinary direct-child exit/);
-    assert.match(runbook, /classified `process_group_leak`, never pass/);
-    assert.match(runbook, /ignores TERM and later exits `0` cannot turn that timeout into a pass/);
-    assert.match(runbook, /PASS line is emitted only after any requested signed receipt has committed successfully/);
-    assert.match(runbook, /independently expected run ID, semantic outcome, before\/after workspace digests/);
-    assert.match(runbook, /absence of a receipt is therefore unknown\/fail-closed, never proof of pass/);
-    assert.match(runbook, /workflow definition that the same pull request can edit/);
-    assert.match(runbook, /explicit unresolved governance risk/);
+    const releaseCheck = await fs.readFile(releaseCheckUrl, "utf8");
+    assert.match(releaseCheck, /MAX_RELEASE_DURATION_MS = 18 \* 60 \* 1000/);
+    assert.match(releaseCheck, /signalChildGroup\(child, "SIGTERM"\)/);
+    assert.match(releaseCheck, /signalChildGroup\(child, "SIGKILL"\)/);
+    assert.match(releaseCheck, /completed child left a live process group/);
+    assert.match(releaseCheck, /publishPassedCommandReceipt/);
+    assert.match(releaseCheck, /assertWithinReleaseDeadline\(\);\n\s+console\.log\(`\[release-check\] Receipt:/);
+    assert.match(releaseCheck, /console\.log\("\\n\[release-check\] PASS"\)/);
+
+    const readiness = await fs.readFile(readinessUrl, "utf8");
+    assert.match(readiness, /required-check workflow is still source in the same repository that a pull request can edit/);
+    assert.match(readiness, /cannot prove that a future PR cannot weaken the `Release Check` implementation itself/);
+    assert.match(readiness, /remains a governance defer decision/);
   });
 });

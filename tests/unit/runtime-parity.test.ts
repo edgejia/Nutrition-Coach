@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -10,6 +11,7 @@ import {
   checkLiveRuntimeParity,
   compareRuntimeWiringFindings,
   deriveRuntimeParityReadiness,
+  inspectRuntimeCoreRoot,
   runDeterministicParitySmoke,
   validateRuntimeParityMatrix,
   verifyProjectVerifierFiles,
@@ -24,18 +26,8 @@ describe("Codex and Claude runtime parity matrix", () => {
     assert.ok(matrix.rows.some((row) => row.status === "blocking"));
     assert.ok(matrix.rows.some((row) => row.status === "deferred"));
     assert.ok(matrix.rows.some((row) => row.status === "intentional_difference"));
-    assert.deepEqual(matrix.expectedWiringFindings, [
-      {
-        code: "wiring_role_binding_missing",
-        role: "gsd-plan-checker",
-        skill: ".codex/skills/nutrition-planning-proof",
-      },
-      {
-        code: "wiring_role_binding_missing",
-        role: "gsd-planner",
-        skill: ".codex/skills/nutrition-planning-proof",
-      },
-    ]);
+    assert.deepEqual(matrix.expectedWiringFindings, []);
+    assert.equal(matrix.rows.find((row) => row.id === "planner_checker_skill_wiring")?.status, "equivalent");
   });
 
   it("compares the full wiring finding set and surfaces every masked extra blocker", async () => {
@@ -94,6 +86,45 @@ describe("Codex and Claude runtime parity matrix", () => {
         (error: unknown) =>
           error instanceof RuntimeParityError && error.code === "runtime_parity_file_missing_or_unsafe",
       );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("reports drift without executing a hostile installed-core fixture", async () => {
+    const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "nutrition-runtime-hostile-core-")));
+    const marker = path.join(root, "executed-marker.txt");
+    const registryPrefix = `const runtimes = ${JSON.stringify({
+      codex: { runtime: { hostBehaviors: {}, hostIntegration: {}, sandboxTier: "codex-agent-sandbox", configFormat: "toml", writesSharedSettings: false } },
+      claude: { runtime: { hostBehaviors: {}, hostIntegration: {}, sandboxTier: "none", configFormat: "settings-json", writesSharedSettings: true } },
+    })};\n\nconst commandFamilies = {};\n`;
+    const files = {
+      VERSION: "1.7.0\n",
+      "bin/gsd-tools.cjs": "process.exit(0);\n",
+      "bin/lib/capability-registry.cjs": registryPrefix,
+      "bin/shared/config-schema.manifest.json": "{}\n",
+      "bin/shared/model-catalog.json": "{}\n",
+    };
+    const expected = Object.fromEntries(
+      Object.entries(files).map(([relative, contents]) => [
+        relative,
+        createHash("sha256").update(contents).digest("hex"),
+      ]),
+    );
+    files["bin/lib/capability-registry.cjs"] +=
+      `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "executed");\n`;
+    try {
+      for (const [relative, contents] of Object.entries(files)) {
+        const destination = path.join(root, relative);
+        await fs.mkdir(path.dirname(destination), { recursive: true });
+        await fs.writeFile(destination, contents);
+      }
+      const result = await inspectRuntimeCoreRoot(root, expected, "1.7.0");
+      assert.equal(result.status, "fail");
+      assert.deepEqual(result.findings, [
+        { code: "runtime_parity_core_digest_drift", file: "bin/lib/capability-registry.cjs" },
+      ]);
+      await assert.rejects(fs.access(marker));
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }

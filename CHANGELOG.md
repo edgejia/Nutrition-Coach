@@ -13,6 +13,9 @@
 - Source-attested build wrapper 現在只會發佈所選 committed snapshot 產生的 substantive client shell；無效輸出、取消、timeout 或 source drift 都會保留既有 publication，frozen adversarial matrix 也以精確註冊／執行計數和 missing／stale manifest timeout 變體形成可執行證據。
 - `release:check` 現在以 allowlisted structured receipt 保存第一個 failing gate 與實際 process termination，並以前後 workspace fingerprint 阻止 gate 執行期間的 evidence drift；raw child output、private path 與舊式 output-text locator 不會成為分類來源。
 - 新增 non-GSD workflow-hardening 工具與 contract，涵蓋 storage recovery、state／verification freshness、signed closeout journal、planning-proof lint、runtime lease／artifact provenance、parity 與 privacy-bounded telemetry；這些控制不會自行解除 Temporary GSD Maintenance Pause，也不授權 Phase 115、production、merge 或 deploy。
+- Workflow contract tests 不再讀取 Git ignored 的本機 runbook／skill，改由 tracked deployment、workflow、release-check、ignore policy、planning-proof 與 state-check source 提供 clean-clone 可重現的契約證據。
+- Runtime parity checker 不再執行或載入 installed GSD core，而是先驗證 single-link byte snapshot／closed digest manifest，再以 inert JSON literal parser 讀取 generated registry projection；activation 後的 planner/checker bindings 與空 finding baseline 也已更新至 tracked matrix。
+- `release:check` 的 full-test child 現在明確以 `NODE_ENV=test` 執行，避免 production-mode `.env` 把測試 fixture 誤判為 deployed runtime；其他 generated-doc 與 frontend build gates 仍保留既有 release 環境。
 - Deployment authority 現在一致固定為 PR-ready → human merge → post-merge local archive → separate runtime refresh，且 runtime lane 依序為 B01 recovery readiness → R05 migration → R06 build/start；Tunnel mutation 與 public smoke 仍是獨立 gate。
 
 ### 驗證
@@ -25,6 +28,7 @@
 - Phase 113.1 的 fresh verifier 通過 5/5 must-haves，focused source-wrapper 測試通過 43/43、demo contract 通過 27/27、TypeScript 檢查通過；ASVS Level 2 security audit 關閉 10/10 threats，`threats_open: 0`。
 - v3.4 milestone audit 通過 12/12 requirements、5/5 phases、13/13 integration connections 與 5/5 source flows；Phase 113 的歷史 `gaps_found` 由 Phase 113.1 的 BUILD-01 精確關閉，未改寫或豁免原始 verifier 證據。
 - Workflow-hardening focused fixtures 會拒絕 known receipt misclassification、frozen state drift、stale dependency seal、closeout recurrence／directory false-pass、planner proof false-pass、lease/provenance replay與 telemetry escape overclaim；核准的 exact ruleset canary behavioral proof 已於 2026-07-16 完成並清理，maintainer 同日以 exact R1 決策解除 Temporary GSD Maintenance Pause 並 reconcile `.planning` state；pilot、production migration、runtime refresh、Tunnel 與 public smoke 仍未執行。
+- Workflow integrity closure 的 hostile-core marker negative control、post-activation wiring check、live runtime parity、本機 full suite `2494/2494` 與 no-local clean-clone release gate 已通過；GitHub required check 仍以實際 PR gate 結果為準。
 
 ## v3.3 - 2026-07-05
 

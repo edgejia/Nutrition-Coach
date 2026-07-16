@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "kind": "nutrition_runtime_parity_matrix",
-  "observedAt": "2026-07-16T12:43:04+08:00",
+  "observedAt": "2026-07-16T17:10:10+08:00",
   "gsdVersion": "1.7.0",
   "coreFiles": {
     "VERSION": "2c1940937d13777dc0f2c5a890921ff13e98b91a9e9d443a42651d8d0d8b448d",
@@ -15,22 +15,11 @@
     "scripts/workflow/gsd-wiring.mjs": "c103563a6cc090826576c5a1e361e62ae380478ac9727da2aef813c54542b551",
     "scripts/workflow/plan-proof-lint.mjs": "09e910d5c258aedf39eaf48ae0cfe7654a6844ad7b188c1b1b88cf0ab998fce8",
     "scripts/workflow/project-scope.mjs": "531ecc672826842d44778f9ae6a09e0bdd146bd888a1f3a1baac0cc8bc4f4c8e",
-    "scripts/workflow/runtime-parity.mjs": "d6ecf617b0633e8c159b8580f3052db6cc0fe76b4b63c918b441777099742111",
+    "scripts/workflow/runtime-parity.mjs": "f0cf0c60feb68ad79a6d7d7394ac9b0635aad1b60683a829709d648c32f754e7",
     "scripts/workflow/state-check.mjs": "72a33a901e58fbf2be4be7c0f119682279af41c01befac482214b370457afaf4",
     "scripts/workflow/workflow-lease.mjs": "0de9539e06ee84998908bad10f9100e3e00c15354ce5a542c106df813385d613"
   },
-  "expectedWiringFindings": [
-    {
-      "code": "wiring_role_binding_missing",
-      "role": "gsd-plan-checker",
-      "skill": ".codex/skills/nutrition-planning-proof"
-    },
-    {
-      "code": "wiring_role_binding_missing",
-      "role": "gsd-planner",
-      "skill": ".codex/skills/nutrition-planning-proof"
-    }
-  ],
+  "expectedWiringFindings": [],
   "skillSurface": {
     "expectedGsdSkillCount": 71,
     "codexRoot": "~/.agents/skills",
@@ -187,7 +176,7 @@
   "projectInstructionFiles": {
     "codex": {
       "path": "AGENTS.md",
-      "sha256": "247af14691253d521805ddf7725543d388048ff6b1efae6d9b068f354c846b28"
+      "sha256": "3009a56aeea22eaab0efb9b22c0a6aa1b281177a315d35a6e285a0d09ab15fc8"
     },
     "claude": {
       "path": ".claude/CLAUDE.md",
@@ -195,7 +184,7 @@
     }
   },
   "sharedConfig": {
-    "sha256": "fc8996c602d12d09d6fed75d9055b6957af094dffbe394051921a8f93f0feceb",
+    "sha256": "245b3d9e6092166767b1e5931ed52ac7dee0d32b73d811c4ad156168a5d7bddc",
     "runtime": "codex",
     "hostIdentityAuthoritative": false
   },
@@ -221,7 +210,7 @@
     {
       "id": "core_identity",
       "status": "equivalent",
-      "proof": "live_file_digest",
+      "proof": "live_plain_file_digest_without_core_execution",
       "codex": "GSD 1.7.0 and five allowlisted core digests",
       "claude": "GSD 1.7.0 and the same five allowlisted core digests",
       "residualRisk": "Equal installed bytes do not prove equal host behavior."
@@ -237,15 +226,15 @@
     {
       "id": "project_instruction_bootstrap",
       "status": "equivalent",
-      "proof": "gsd_read_only_query_plus_plain_file",
-      "codex": "query resolves AGENTS.md",
-      "claude": "query resolves .claude/CLAUDE.md compatibility shim",
+      "proof": "pinned_generated_registry_bytes_inert_literal_parse_plus_plain_file",
+      "codex": "inert registry projection resolves AGENTS.md",
+      "claude": "inert registry projection resolves .claude/CLAUDE.md compatibility shim",
       "residualRisk": "The shim intentionally fails closed if the local boot contract is unavailable."
     },
     {
       "id": "shared_runtime_resolution",
       "status": "blocking",
-      "proof": "live_config_and_query",
+      "proof": "live_config_and_inert_registry_projection",
       "codex": "shared config resolves runtime codex",
       "claude": "the same shared config still resolves runtime codex",
       "residualRisk": "Shared config cannot identify the actual host; artifact writers must use lease provenance."
@@ -253,7 +242,7 @@
     {
       "id": "host_embedding_dispatch",
       "status": "intentional_difference",
-      "proof": "GSD_1.7_capability_registry",
+      "proof": "pinned_GSD_1.7_generated_registry_bytes_inert_literal_parse",
       "codex": "declarative, depth 1, background dispatch, Codex agent sandbox",
       "claude": "imperative, depth 5, no background dispatch, no GSD-declared sandbox tier",
       "acceptedRationale": "The GSD registry defines distinct host integration contracts; parity means explicit bounded behavior, not byte-identical orchestration.",
@@ -261,11 +250,11 @@
     },
     {
       "id": "planner_checker_skill_wiring",
-      "status": "blocking",
-      "proof": "read_only_config_digest_and_wiring_check",
-      "codex": "tracked skill exists but real config binding is absent during pause",
-      "claude": "same absent shared binding",
-      "residualRisk": "Actual project config activation is forbidden during the pause and needs a later maintainer decision."
+      "status": "equivalent",
+      "proof": "post_activation_config_digest_and_exact_read_only_wiring_check",
+      "codex": "real config binds both planner roles exactly to the tracked nutrition-planning-proof skill",
+      "claude": "the same shared bindings are present for both planner roles",
+      "residualRisk": "Config binding proves the checked project injection declaration, not physical host loading or governed entrypoint coverage."
     },
     {
       "id": "artifact_writer_provenance",

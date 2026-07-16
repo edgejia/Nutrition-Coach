@@ -26,6 +26,8 @@ Every remote claim must be queried again immediately before a decision. The trac
 
 ## Readiness matrix
 
+The matrix below preserves the evidence and decision state presented for bundle R1. Post-decision activation and workflow-integrity closure evidence is recorded separately after the consumed decision; it does not rewrite the historical basis of that decision.
+
 | Area | Deterministic evidence | Current decision state |
 | --- | --- | --- |
 | Wave 1.1 — source enforcement | Ruleset configuration/history/effective `main` rules read back as PR + strict App-bound check + deletion + non-fast-forward. The approved exact canary used temporary mirror ruleset ID `19028500`: a normal fast-forward push was rejected with GH013, deletion was rejected with HTTP 422, and failed-check PR #114 was `BLOCKED`. | **IMPLEMENTED AND BEHAVIORALLY VERIFIED WITH A CONTROLLED MIRROR; maintainer acceptance required.** The canary never pushed or merged `main`; non-fast-forward remains API-only because force-push is forbidden. A passing merge and same-PR workflow immutability were not proven. All disposable resources were identity-checked and removed. |
@@ -177,8 +179,17 @@ The required-check workflow is still source in the same repository that a pull r
 - Bundle `GSD-REENABLE-DECISION-20260716-R1` is now consumed; any future pause or resume decision requires a new bundle ID.
 - Post-decision, separately instructed in the same thread: the frozen `.planning` drift was reconciled and `yarn workflow:state-check` now passes on the live tree, superseding the historical exit-1 snapshot above as current state (the snapshot remains valid evidence of the pre-reconciliation fail-closed behavior).
 
+## Post-decision workflow closure update (2026-07-16)
+
+- A separately authorized activation transition bound both `gsd-planner` and `gsd-plan-checker` exactly to `.codex/skills/nutrition-planning-proof`. The read-only wiring check now passes with config digest `245b3d9e6092166767b1e5931ed52ac7dee0d32b73d811c4ad156168a5d7bddc` and no findings; `.planning/**` remains ignored and is not source-release content.
+- The tracked parity matrix now pins the post-activation empty wiring-finding set, current local instruction/config digests, and an equivalent planner/checker row. Live `yarn workflow:runtime-parity` returns `status: pass`, `readiness: not_ready`, four blocking rows, one deferred row, and no findings. The remaining rows still prevent any readiness overclaim.
+- The parity checker no longer imports, `require()`s, or launches installed GSD core code. It reads single-link file snapshots, checks the closed digest manifest, and parses only the generated registry's inert JSON literal. A hostile drift fixture containing marker-writing code is reported as digest drift without creating the marker.
+- The three tracked contract tests that previously depended on ignored local runbooks/skills now inspect tracked deployment, workflow, release-check, ignore-policy, planning-proof, and state-check sources. A no-local clone with those ignored sources absent installed the frozen lockfile and passed the full release check; the GitHub required-check result remains a separate gate.
+- The release checker now runs only its full-test child with `NODE_ENV=test`, so a production-mode local `.env` cannot turn test fixtures into deployed-runtime boots; the generated-doc and frontend-build children retain the release environment. The local full suite passes `2494/2494`, and the no-local clean-clone release check passes with a stable workspace fingerprint.
+- Issue #115 and PR #116 were created after the R1 cutoff. PR #116 remains unmerged; updating its source and obtaining a successful required `Release Check` are still required before any merge decision. No R03, production migration, runtime refresh, Tunnel, smoke, or tag action is authorized by this update.
+
 ## Side-effect and cleanup statement
 
-The only approved external-write bundle created two disposable refs, source marker commit `cc6755bdbf69f34157d3f6bf66af10c58be29402`, temporary ruleset ID `19028500`, and PR #114. The normal push and deletion probes were rejected; the PR was never merged. Cleanup closed the PR and removed the exact ruleset, refs, and scratch after identity checks. No temporary remote resource exists.
+The pre-decision canary bundle created two disposable refs, source marker commit `cc6755bdbf69f34157d3f6bf66af10c58be29402`, temporary ruleset ID `19028500`, and PR #114. The normal push and deletion probes were rejected; the PR was never merged. Cleanup closed the PR and removed the exact ruleset, refs, and scratch after identity checks. No temporary canary resource exists.
 
-There was no hardening-branch push, issue, merge, tag, production migration, restore, runtime refresh, Tunnel change, public smoke, or GSD mutation. The main SHA/ruleset/history were unchanged, the ignored collaborative handoff is not staged or committed, and the real `.planning/**` tree was not changed. The pause remains active unless the exact R1 resume line is received and live revalidation matches; the exact R1 continue-defer line keeps it active.
+At that pre-decision cutoff there was no hardening-branch push, issue, merge, tag, production migration, restore, runtime refresh, Tunnel change, public smoke, or GSD mutation. After the exact R1 resume and separate follow-up authorizations, the hardening branch was pushed, issue #115 and PR #116 were created, planning state was reconciled, and the two local role bindings were activated. Those later actions did not merge `main`, stage or commit `.planning/**` or the ignored collaborative handoff, move a tag, or perform any production, runtime, Tunnel, or smoke action.
