@@ -120,6 +120,15 @@ describe("workflow runtime governance docs", () => {
       "mergedAt: null",
       "same repository that a pull request can edit",
       "Explicitly choose **resume** or **continue-defer**",
+      "Decision bundle ID: `GSD-REENABLE-DECISION-20260716-R1`",
+      "CONTINUE-DEFER GSD-REENABLE-DECISION-20260716-R1",
+      "RESUME-WITH-LISTED-DEFERS GSD-REENABLE-DECISION-20260716-R1",
+      "It does not authorize any command or mutation",
+      "`.planning/**` repair or role-binding/entrypoint activation",
+      "B01/R05/B02/R06",
+      "A bare `RESUME`, bare `CONTINUE-DEFER`, modified bundle ID, or approximate wording is non-authorizing",
+      "any drift leaves the pause active pending a new review",
+      "invalidates bundle R1 and requires a new decision bundle ID",
       "No temporary remote resource exists",
     ]) {
       assert.ok(readiness.includes(claim), `missing readiness boundary: ${claim}`);
@@ -133,6 +142,13 @@ describe("workflow runtime governance docs", () => {
     ]) {
       assert.ok(readiness.includes(finding), `missing live frozen finding: ${finding}`);
     }
+    const continueDecision = "CONTINUE-DEFER GSD-REENABLE-DECISION-20260716-R1";
+    const resumeDecision = "RESUME-WITH-LISTED-DEFERS GSD-REENABLE-DECISION-20260716-R1";
+    const decisionLines = readiness
+      .split(/\r?\n/)
+      .filter((line) => line === continueDecision || line === resumeDecision);
+    assert.deepEqual(decisionLines, [continueDecision, resumeDecision]);
+    assert.doesNotMatch(readiness, /^(?:RESUME|CONTINUE-DEFER)$/m);
     assert.doesNotMatch(readiness, /Temporary GSD Maintenance Pause:\s*\*\*(?:INACTIVE|LIFTED|RESUMED)\*\*/i);
   });
 

@@ -143,7 +143,29 @@ Before the pause can be reconsidered, the maintainer must independently decide e
 2. Accept the non-production recovery contract and its named production residuals, or continue the pause pending stronger recovery authority/proof.
 3. Approve a post-pause activation transition for the two planning-proof role bindings and governed real entrypoints, or explicitly defer activation.
 4. Accept deferral of the external lease-ledger trust anchor, physical power-loss proof, detached-child/egress containment, representative telemetry, and routing reevaluation—or keep the pause active.
-5. Explicitly choose **resume** or **continue-defer** in the current thread. No prior approval, test result, canary result, or document edit substitutes for this final choice.
+5. Explicitly choose **resume** or **continue-defer** in the current thread by using one exact line from the decision grammar below. No prior approval, test result, canary result, document edit, or approximate wording substitutes for this final choice.
+
+## Exact maintainer decision grammar
+
+Decision bundle ID: `GSD-REENABLE-DECISION-20260716-R1`.
+
+Only one of these exact single-line responses counts as the maintainer's final decision for this report:
+
+```text
+CONTINUE-DEFER GSD-REENABLE-DECISION-20260716-R1
+```
+
+This keeps the Temporary GSD Maintenance Pause active and authorizes no write, workflow transition, or external action.
+
+```text
+RESUME-WITH-LISTED-DEFERS GSD-REENABLE-DECISION-20260716-R1
+```
+
+This explicitly accepts the bounded Wave 1.1 mirror residuals, the named production-recovery residuals, deferred real role-binding/entrypoint activation, and the Wave 4/pilot/telemetry residuals listed above. It lifts only the project-scoped Temporary GSD Maintenance Pause. It does not authorize any command or mutation.
+
+Even the exact resume response does not authorize v3.4.1 or Phase 115 work, R03 investigation/repair/retry, `.planning/**` repair or role-binding/entrypoint activation, source push/PR/merge/tag, B01/R05/B02/R06, production/runtime refresh, Tunnel/public smoke, or pilot execution. Each remains behind its own later current-thread authority.
+
+A bare `RESUME`, bare `CONTINUE-DEFER`, modified bundle ID, or approximate wording is non-authorizing. Before recording an exact resume decision, local and GitHub state must be revalidated against this report; any drift leaves the pause active pending a new review. Any later change to this report's readiness matrix, required decisions, or authority scope invalidates bundle R1 and requires a new decision bundle ID.
 
 The required-check workflow is still source in the same repository that a pull request can edit. Ruleset behavioral proof can establish branch/ruleset enforcement, but cannot prove that a future PR cannot weaken the `Release Check` implementation itself. Moving enforcement to an independently protected required workflow or equivalent immutable authority remains a governance defer decision.
 
@@ -151,4 +173,4 @@ The required-check workflow is still source in the same repository that a pull r
 
 The only approved external-write bundle created two disposable refs, source marker commit `cc6755bdbf69f34157d3f6bf66af10c58be29402`, temporary ruleset ID `19028500`, and PR #114. The normal push and deletion probes were rejected; the PR was never merged. Cleanup closed the PR and removed the exact ruleset, refs, and scratch after identity checks. No temporary remote resource exists.
 
-There was no hardening-branch push, issue, merge, tag, production migration, restore, runtime refresh, Tunnel change, public smoke, or GSD mutation. The main SHA/ruleset/history were unchanged, the ignored collaborative handoff is not staged or committed, and the real `.planning/**` tree was not changed. The pause remains active until the maintainer explicitly chooses `resume`; `continue-defer` keeps it active.
+There was no hardening-branch push, issue, merge, tag, production migration, restore, runtime refresh, Tunnel change, public smoke, or GSD mutation. The main SHA/ruleset/history were unchanged, the ignored collaborative handoff is not staged or committed, and the real `.planning/**` tree was not changed. The pause remains active unless the exact R1 resume line is received and live revalidation matches; the exact R1 continue-defer line keeps it active.
