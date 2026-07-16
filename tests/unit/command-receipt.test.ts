@@ -338,6 +338,8 @@ describe("structured command receipts", () => {
     const directory = await tempDir();
     await makeFakeYarn(directory);
     const logPath = path.join(directory, "timeout.log");
+    // The deadline must leave headroom for the fake-yarn shell to spawn and log
+    // on a loaded machine; 500ms raced the child start and flaked with ENOENT.
     const result = spawnSync(process.execPath, ["scripts/release-check.mjs", "--base=HEAD"], {
       cwd: process.cwd(),
       env: {
@@ -346,11 +348,11 @@ describe("structured command receipts", () => {
         PATH: `${directory}${path.delimiter}${process.env.PATH ?? ""}`,
         FAKE_YARN_FAIL: "never",
         FAKE_YARN_LOG: logPath,
-        FAKE_YARN_SLEEP: "5",
-        NUTRITION_RELEASE_CHECK_DEADLINE_MS: "500",
+        FAKE_YARN_SLEEP: "10",
+        NUTRITION_RELEASE_CHECK_DEADLINE_MS: "2000",
       },
       encoding: "utf8",
-      timeout: 5_000,
+      timeout: 15_000,
     });
     assert.equal(result.status, 1, `${result.stdout}${result.stderr}`);
     const receipt = loggedReceipt(result.stderr);
@@ -372,12 +374,12 @@ describe("structured command receipts", () => {
         PATH: `${directory}${path.delimiter}${process.env.PATH ?? ""}`,
         FAKE_YARN_FAIL: "never",
         FAKE_YARN_LOG: logPath,
-        FAKE_YARN_SLEEP: "5",
+        FAKE_YARN_SLEEP: "10",
         FAKE_YARN_IGNORE_SIGTERM: "1",
-        NUTRITION_RELEASE_CHECK_DEADLINE_MS: "500",
+        NUTRITION_RELEASE_CHECK_DEADLINE_MS: "2000",
       },
       encoding: "utf8",
-      timeout: 5_000,
+      timeout: 15_000,
     });
     assert.equal(result.status, 1, `${result.stdout}${result.stderr}`);
     const receipt = loggedReceipt(result.stderr);
@@ -430,11 +432,11 @@ describe("structured command receipts", () => {
         PATH: `${fixture.container}${path.delimiter}${process.env.PATH ?? ""}`,
         FAKE_YARN_FAIL: "never",
         FAKE_YARN_LOG: path.join(fixture.container, "postflight.log"),
-        NUTRITION_RELEASE_CHECK_DEADLINE_MS: "500",
-        NUTRITION_RELEASE_CHECK_POSTFLIGHT_DELAY_MS: "600",
+        NUTRITION_RELEASE_CHECK_DEADLINE_MS: "3000",
+        NUTRITION_RELEASE_CHECK_POSTFLIGHT_DELAY_MS: "3600",
       },
       encoding: "utf8",
-      timeout: 8_000,
+      timeout: 15_000,
     });
     assert.equal(result.status, 1, `${result.stdout}${result.stderr}`);
     const receipt = loggedReceipt(result.stderr);
