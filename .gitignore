@@ -1,9 +1,18 @@
 # Local agent/workflow state
 .worktrees/
 .codex/
+!.codex/
+.codex/*
+!.codex/skills/
+.codex/skills/*
+!.codex/skills/nutrition-planning-proof/
+!.codex/skills/nutrition-planning-proof/SKILL.md
 .claude/
+!.claude/
+.claude/*
 chatgpt/
 CLAUDE.md
+!.claude/CLAUDE.md
 AGENTS.md
 
 # Dependencies, build output, and runtime data

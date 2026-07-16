@@ -147,7 +147,7 @@ yarn verify:harness -- guest-session-hardening
 yarn verify:harness -- provider-auth-failure-localization
 ```
 
-`yarn release:check` verifies the `TZ=Asia/Taipei` runtime contract, TypeScript, the Node test suite, and frontend build. Tests use mocked or harness LLM providers; CI does not call the live OpenAI API.
+`yarn release:check` verifies the `TZ=Asia/Taipei` runtime contract, TypeScript, the Node test suite, capability / behavior matrix generated-doc drift, and the frontend build. Tests use mocked or harness LLM providers; CI does not call the live OpenAI API.
 
 `yarn native:check` is specialized native dependency evidence for Sharp upgrades, `better-sqlite3` upgrades, and v3.1 source-release review; it is not a replacement for `yarn release:check` and does not authorize production runtime refresh, Cloudflare Tunnel changes, public smoke, tag movement, or `main` promotion.
 
@@ -179,13 +179,22 @@ When `NODE_ENV=production`, `GUEST_SESSION_SECRET` must be present, non-default,
 
 Production mode serves the API and built frontend files from the same Fastify server.
 
-Build and start the same-origin runtime:
+The production order is: reach PR-ready state on a non-`main` branch → PR policy and `Release Check` → maintainer merge decision into `main` → post-merge local archive from updated `main` → separately approved runtime refresh. PRs, CI, and closeout never authorize production operations automatically; a paused GSD workflow cannot be bypassed by skipping or fabricating the archive.
+
+First run source preflight at the intentionally selected merged-source SHA in a clean, non-serving verification checkout. `release:check` runs the frontend build and rewrites `dist/client`, so it must never run in the active runtime checkout. The command blocks below define canonical ordering only; they are not one combined approval bundle:
 
 ```bash
+cd /absolute/path/to/clean-non-serving-verification-checkout
 yarn install --frozen-lockfile
+cp .env.example .env
 yarn release:check
-yarn build
+```
+
+Only after re-verifying the source SHA, PR merge, and post-merge archive may the active runtime checkout be selected separately. Before `yarn db:migrate` in that checkout, separately approve and complete the B01 quiesced backup and restore-readiness proof in [Production storage recovery](docs/deploy/production-recovery.md). R05 migration and R06 build/start retain separate approvals, and only R06 may rewrite the runtime checkout's `dist/client`.
+
+```bash
 yarn db:migrate
+yarn build
 yarn start
 ```
 
@@ -195,10 +204,11 @@ Cloudflare Tunnel procedure: [docs/deploy/cloudflare-tunnel.md](docs/deploy/clou
 
 - Split CI into clearer typecheck, tests, build, migration checks, and release policy jobs.
 - Add manually triggered provider smoke checks with scoped secrets and sanitized artifacts.
-- Improve observability around LLM failure categories without logging raw prompts or provider payloads.
+- Extend the allowlisted structured-receipt pattern already used by `release:check` to other high-risk workflows without logging raw prompts, child output, or provider payloads.
 
 ## Related Docs
 
 - [Architecture](docs/architecture.md)
+- [Production storage recovery](docs/deploy/production-recovery.md)
 - [Cloudflare Tunnel procedure](docs/deploy/cloudflare-tunnel.md)
 - [ADR](docs/adr/)

@@ -11,6 +11,9 @@
 - 新增公開 `docs/tour.md` 十站／30 分鐘 reviewer path，並同步 README 與 README-en 的三段式 portfolio narrative；這是既有 architecture 與 AI-safety 證據的導覽層，不是 runtime 或 safety-policy 變更。
 - Phase 113 新增 `docs/demo.md` 的 DEMO-02 named-tunnel runbook handoff 與 DEMO-04 五分鐘固定 script；這只記錄 source 文件，未表示已合併 `main`、刷新 runtime、變更 tunnel、通過 public smoke、關閉 #54 或通過 live semantic demo。
 - Source-attested build wrapper 現在只會發佈所選 committed snapshot 產生的 substantive client shell；無效輸出、取消、timeout 或 source drift 都會保留既有 publication，frozen adversarial matrix 也以精確註冊／執行計數和 missing／stale manifest timeout 變體形成可執行證據。
+- `release:check` 現在以 allowlisted structured receipt 保存第一個 failing gate 與實際 process termination，並以前後 workspace fingerprint 阻止 gate 執行期間的 evidence drift；raw child output、private path 與舊式 output-text locator 不會成為分類來源。
+- 新增 non-GSD workflow-hardening 工具與 contract，涵蓋 storage recovery、state／verification freshness、signed closeout journal、planning-proof lint、runtime lease／artifact provenance、parity 與 privacy-bounded telemetry；這些控制不會自行解除 Temporary GSD Maintenance Pause，也不授權 Phase 115、production、merge 或 deploy。
+- Deployment authority 現在一致固定為 PR-ready → human merge → post-merge local archive → separate runtime refresh，且 runtime lane 依序為 B01 recovery readiness → R05 migration → R06 build/start；Tunnel mutation 與 public smoke 仍是獨立 gate。
 
 ### 驗證
 
@@ -21,6 +24,7 @@
 - Phase 113 的 dependency-free demo contract 鎖定 named-tunnel SSE authority、固定 script 與上述 source-only non-claim boundary；focused contract 與 `yarn tsc --noEmit` 通過仍未表示已合併 `main`、刷新 runtime、變更 tunnel、通過 public smoke、關閉 #54 或通過 live semantic demo。
 - Phase 113.1 的 fresh verifier 通過 5/5 must-haves，focused source-wrapper 測試通過 43/43、demo contract 通過 27/27、TypeScript 檢查通過；ASVS Level 2 security audit 關閉 10/10 threats，`threats_open: 0`。
 - v3.4 milestone audit 通過 12/12 requirements、5/5 phases、13/13 integration connections 與 5/5 source flows；Phase 113 的歷史 `gaps_found` 由 Phase 113.1 的 BUILD-01 精確關閉，未改寫或豁免原始 verifier 證據。
+- Workflow-hardening focused fixtures 會拒絕 known receipt misclassification、frozen state drift、stale dependency seal、closeout recurrence／directory false-pass、planner proof false-pass、lease/provenance replay與 telemetry escape overclaim；真實 `.planning` 保持唯讀 frozen evidence，尚未執行 ruleset canary、pilot、production migration、runtime refresh、Tunnel 或 public smoke。
 
 ## v3.3 - 2026-07-05
 

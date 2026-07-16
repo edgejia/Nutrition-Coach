@@ -16,9 +16,9 @@ const EXPECTED_STAGE_TITLES = [
   "Yarn frozen install",
   "環境驗證",
   "release gate",
-  "build",
+  "recovery readiness",
   "migration",
-  "production-mode start",
+  "production-mode build and start",
   "stable named-tunnel handoff",
   "verification",
 ] as const;
@@ -56,6 +56,7 @@ const EXPECTED_AUTHORITY_FIELDS = [
   ["retry.cross_attempt_evidence_splicing", "forbidden：不得拼接不同 attempt 的證據"],
   ["retry.deterministic_evidence_substitution", "forbidden：deterministic safety evidence 不能取代失敗的 live run"],
   ["operator.source_prerequisites", "merged `main` 且 post-merge local closeout 已完成"],
+  ["operator.backup_approval", "B01 quiescence／backup／restore-readiness 需要 separate fresh exact-action approval"],
   ["operator.runtime_approval", "fresh exact-action approval required"],
   ["operator.pr_ci_closeout_authority", "none：這份文件、local checks、PR、CI 或 closeout 都不授權 runtime action"],
   ["operator.tunnel_configuration_approval", "tunnel configuration 需要 separate fresh exact-action approval"],
@@ -244,19 +245,21 @@ function assertAuthorityBearingSuffix(markdown: string) {
 
 function assertRuntimeProvenanceProcedure(markdown: string) {
   const stages = new Map(extractStages(markdown).map((stage) => [stage.id, stage.body]));
-  const build = stages.get("R04") ?? "";
-  const start = stages.get("R06") ?? "";
+  const recovery = stages.get("R04") ?? "";
+  const buildAndStart = stages.get("R06") ?? "";
   const verification = stages.get("R08") ?? "";
   assert.match(markdown, /`git rev-parse HEAD` 記錄 `INTENDED_SHA`/);
   assert.match(markdown, /lowercase 40-character full SHA \(`\^\[0-9a-f\]\{40\}\$`\)/);
-  assert.match(build, /normal SHA-injected entrypoint `yarn build`/);
-  assert.match(build, /`dist\/client\/source-revision\.json`/);
-  assert.match(build, /`INTENDED_SHA` 完全相同的 `sourceSha`/);
-  assert.match(start, /normal SHA-injected entrypoint `yarn start`/);
-  assert.match(start, /same origin.*`GET \/api\/runtime-provenance`/);
-  assert.match(start, /body\.sourceSha !== intended/);
-  assert.match(start, /observed `sourceSha` 與 `INTENDED_SHA` 完全相等/);
-  assert.match(start, /mismatch 必須 fail closed，禁止繼續 tunnel handoff/);
+  assert.match(recovery, /獨立 B01 approval/);
+  assert.match(recovery, /restore-readiness proof/);
+  assert.match(buildAndStart, /normal SHA-injected entrypoint `yarn build`/);
+  assert.match(buildAndStart, /`dist\/client\/source-revision\.json`/);
+  assert.match(buildAndStart, /`INTENDED_SHA` 完全相同的 `sourceSha`/);
+  assert.match(buildAndStart, /`yarn start`/);
+  assert.match(buildAndStart, /same origin.*`GET \/api\/runtime-provenance`/);
+  assert.match(buildAndStart, /body\.sourceSha !== intended/);
+  assert.match(buildAndStart, /observed `sourceSha` 與 `INTENDED_SHA` 完全相等/);
+  assert.match(buildAndStart, /mismatch 必須 fail closed，禁止繼續 tunnel handoff/);
   assert.match(verification, /exact public same origin.*`GET \/api\/runtime-provenance` exact comparison/);
   assert.match(verification, /public-origin observed `sourceSha` 與 `INTENDED_SHA` 完全相等/);
   assert.match(verification, /provenance mismatch 必須 fail closed/);
@@ -352,7 +355,7 @@ describe("public demo runbook contract", () => {
     assert.doesNotMatch(source, /^export\s/m);
   });
 
-  it("uses existing unit and release discovery without package or script edits", async () => {
+  it("uses unit discovery and receipt-aware release wiring", async () => {
     const [packageSource, releaseSource] = await Promise.all([
       readFile("package.json", "utf8"),
       readFile("scripts/release-check.mjs", "utf8"),
@@ -360,7 +363,7 @@ describe("public demo runbook contract", () => {
     const packageJson = JSON.parse(packageSource) as { scripts: Record<string, string> };
     assert.match(packageJson.scripts.test, /tests\/unit\/\*\.test\.ts/);
     assert.match(packageJson.scripts["test:unit"], /tests\/unit\/\*\.test\.ts/);
-    assert.match(releaseSource, /runStep\("Full test suite", \["test"\]\)/);
+    assert.match(releaseSource, /await runStep\("Full test suite", "full_test_suite", \["test"\]\);/);
     await assert.doesNotReject(stat(CONTRACT_PATH));
   });
 });

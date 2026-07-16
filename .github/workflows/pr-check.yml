@@ -4,13 +4,6 @@ on:
   pull_request:
     branches:
       - main
-  workflow_dispatch:
-    inputs:
-      base_ref:
-        description: Base ref used for release-check diff context.
-        required: false
-        default: main
-        type: string
 
 permissions:
   contents: read
@@ -23,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      RELEASE_BASE_REF: ${{ github.event_name == 'pull_request' && github.base_ref || inputs.base_ref || 'main' }}
+      RELEASE_BASE_REF: ${{ github.base_ref }}
 
     steps:
       - name: Checkout
@@ -38,7 +31,6 @@ jobs:
           cache: yarn
 
       - name: Run PR policy
-        if: github.event_name == 'pull_request'
         run: yarn pr:policy
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -50,4 +42,4 @@ jobs:
         run: cp .env.example .env
 
       - name: Run release gate
-        run: yarn release:check --base=origin/${RELEASE_BASE_REF}
+        run: yarn release:check --base="origin/${RELEASE_BASE_REF}"

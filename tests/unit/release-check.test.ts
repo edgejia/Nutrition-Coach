@@ -71,11 +71,23 @@ describe("release:check timezone contract", () => {
   test("normal path still includes TypeScript, test, generated-doc drift, and build gates", () => {
     const script = fs.readFileSync(new URL("../../scripts/release-check.mjs", import.meta.url), "utf8");
 
-    assert.match(script, /runStep\("TypeScript gate", \["tsc", "--noEmit"\]\);/);
-    assert.match(script, /runStep\("Full test suite", \["test"\]\);/);
-    assert.match(script, /runStep\("Capability matrix generated doc drift", \["matrix:gen:check"\]\);/);
-    assert.match(script, /runStep\("Behavior matrix generated doc drift", \["behavior-matrix:gen:check"\]\);/);
-    assert.match(script, /runStep\("Frontend build", \["build"\]\);/);
+    assert.match(script, /await runStep\("TypeScript gate", "typescript_gate", \["tsc", "--noEmit"\]\);/);
+    assert.match(script, /await runStep\("Full test suite", "full_test_suite", \["test"\]\);/);
+    assert.match(script, /await runStep\("Capability matrix generated doc drift", "capability_matrix", \["matrix:gen:check"\]\);/);
+    assert.match(script, /await runStep\("Behavior matrix generated doc drift", "behavior_matrix", \["behavior-matrix:gen:check"\]\);/);
+    assert.match(script, /await runStep\("Frontend build", "frontend_build", \["build"\]\);/);
+    assert.match(script, /publishFailedCommandReceipt/);
+    assert.match(script, /publishPassedCommandReceipt/);
+    assert.match(script, /--workflow-token=/);
+    assert.match(script, /--workflow-runtime=/);
+    assert.match(script, /signed receipts require both/);
+    assert.match(script, /MAX_RELEASE_DURATION_MS = 18 \* 60 \* 1000/);
+    assert.match(script, /spawn\(YARN_BIN, args/);
+    assert.match(script, /signalChildGroup\(child, "SIGTERM"\)/);
+    assert.match(script, /signalChildGroup\(child, "SIGKILL"\)/);
+    assert.match(script, /result\.error \|\| result\.status !== 0/);
+    assert.match(script, /--no-replace-objects/);
+    assert.match(script, /cwd: projectRoot/);
   });
 
   test("test and harness scripts run through the timezone wrapper", () => {

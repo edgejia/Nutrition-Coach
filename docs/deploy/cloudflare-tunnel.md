@@ -4,11 +4,14 @@ This is the current production runtime path while Railway is unavailable. The de
 
 Source release and runtime refresh are separate gates:
 
-1. GSD milestone branch is verified and closed out.
-2. A PR merges the source release into `main`.
-3. The user explicitly approves production runtime refresh.
-4. The local production-mode server is built, migrated, restarted, and exposed through Cloudflare Tunnel.
-5. Public-domain smoke passes against the tunnel hostname.
+1. Work reaches PR-ready source state on a non-`main` branch. Pre-merge audit and verification keep active planning artifacts available; they do not perform the post-merge archive.
+2. A PR targets `main`, and repository policy plus the required `Release Check` report source readiness.
+3. The maintainer separately decides whether to merge the PR into `main`.
+4. After merge, local post-merge planning archive/closeout runs from updated `main` when the GSD workflow is active. If that workflow is paused, stop instead of inventing or skipping the archive.
+5. The maintainer separately selects the merged source SHA and explicitly approves production runtime refresh.
+6. The approved B01 recovery gate quiesces writes, creates an off-checkout storage backup, and proves restore readiness before migration.
+7. Separately approved R05 migration and R06 build/start gates refresh the local production-mode server.
+8. Any Cloudflare Tunnel change and the public-domain smoke retain their own separate approvals.
 
 Do not treat GSD closeout, PR creation, CI success, localhost checks, or frontend build success as proof that production runtime has been refreshed.
 
@@ -33,13 +36,20 @@ OPENAI_ORCHESTRATOR_MODEL=<model>
 
 ## Build and Start
 
-Run from a source checkout that is intentionally selected for production runtime refresh, normally `main` after the source release PR has merged.
+Run source preflight at the selected merged-source SHA in a clean, non-serving verification checkout. `yarn release:check` includes the frontend build and rewrites `dist/client`; never run it in the checkout serving the active production runtime. These commands are an ordering reference, not a combined approval bundle.
 
 ```bash
+cd /absolute/path/to/clean-non-serving-verification-checkout
 yarn install --frozen-lockfile
+cp .env.example .env
 yarn release:check
-yarn build
+```
+
+After independently re-verifying the source SHA, merge, and completed post-merge archive, select the active runtime checkout separately. Before `yarn db:migrate` there, follow [Production Storage Recovery](production-recovery.md): obtain B01 approval, quiesce writes, create and verify the bound backup, then obtain a separate R05 migration approval. Only a later R06 approval may build `dist/client` in that runtime checkout and start or restart the server.
+
+```bash
 yarn db:migrate
+yarn build
 yarn start
 ```
 
@@ -70,7 +80,7 @@ References:
 
 ## Manual Smoke Checklist
 
-Run this checklist from the Cloudflare Tunnel public hostname before marking production runtime refreshed. Public-domain smoke stays runtime-gated, so do not treat localhost-only build smoke as equivalent.
+Run this checklist from the Cloudflare Tunnel public hostname only after the separately approved R06 runtime refresh. Record public-domain smoke as its own outcome; it does not authorize, redefine, or stand in for the runtime refresh. Do not treat localhost-only build smoke as equivalent.
 
 1. Open the public tunnel hostname and send a same-origin text chat request. Confirm the page, API calls, and SSE stream all stay on the same public origin.
 2. Send one image-backed request. Confirm the image is accepted and the response/history references the stored asset.
@@ -83,6 +93,7 @@ Run this checklist from the Cloudflare Tunnel public hostname before marking pro
 Stop the refresh or smoke and report the blocker if any of these happen:
 
 - `yarn release:check`, `yarn build`, or `yarn db:migrate` fails.
+- B01 backup verification, restore-readiness verification, or the post-migration storage assessment fails or becomes stale.
 - Boot logs show `[nutrition-coach] Invalid TZ configuration:`.
 - Runtime rejects `GUEST_SESSION_SECRET`.
 - The tunnel hostname routes to the wrong port, Vite dev server, localhost-only URL, or stale process.
@@ -93,4 +104,5 @@ Stop the refresh or smoke and report the blocker if any of these happen:
 - Keep SQLite, durable assets, and uploads staging on stable local storage.
 - Keep the frontend build output in `dist/client` so Fastify serves the same-origin app shell.
 - Treat production runtime refresh as a manual operation after source release, not as a side effect of GSD closeout, PR creation, or tag creation.
+- Keep PR-ready pre-merge work, human merge, post-merge local archive, runtime-refresh approval, B01 backup, R05 migration, R06 start, Tunnel mutation, and public smoke as distinct gates.
 - Do not expose secrets, cookies, raw user data, or local debug artifacts in smoke evidence.
