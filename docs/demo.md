@@ -28,28 +28,28 @@
 - **完成條件：** release gate 完整成功，只有 command outcome 與 full SHA 進入 metadata evidence。
 - **停止條件：** 任一步失敗、結果不是來自目前 checkout，或有人把綠燈解讀成後續 operator approval。
 
-### R04 · build
+### R04 · recovery readiness
 
-- **動作：** 從記錄 `INTENDED_SHA` 的同一 clean checkout 執行 normal SHA-injected entrypoint `yarn build`，產生由 Fastify 同源提供的 `dist/client` shell。
-- **完成條件：** production client build 成功，且 successful build 的 `dist/client/source-revision.json` 只含與 `INTENDED_SHA` 完全相同的 `sourceSha`；輸出可供同一 Fastify origin 使用。
-- **停止條件：** build 失敗、缺少 shell/manifest、manifest 不是 lowercase 40-character full SHA、manifest 與 `INTENDED_SHA` 不完全相等，或流程改用 Vite dev server 當作 public origin。
+- **動作：** 依 canonical [Production storage recovery](deploy/production-recovery.md) 取得獨立 B01 approval，停止 runtime writes，建立綁定 `INTENDED_SHA` 與 stable storage identity 的 off-checkout backup，並在保持 quiesced 的狀態下完成 integrity 與 restore-readiness proof。
+- **完成條件：** B01 private manifest／metadata-only public receipt 已完整發布，backup 可重新驗證，DB、assets、uploads staging 的 prestate identity 可解釋，且 exact restore target／decision tree 已準備。B01 不授權 R05 migration、B02 restore 或 R06 build/start。
+- **停止條件：** B01 未精確核准、寫入無法停止、backup path／identity／source SHA 不明、integrity 或 restore readiness 失敗、private evidence 會落入 checkout，或任何人把 B01 視為 migration／restore／start 授權。
 
 ### R05 · migration
 
-- **動作：** 只有在 exact runtime action 已獲批准後，對已證明的 stable database path 執行 `yarn db:migrate`。
-- **完成條件：** migration 成功且既有 durable SQLite、assets 與 uploads staging 均保留。
-- **停止條件：** 尚未取得精確批准、目標 path 不明、migration 失敗，或動作會刪除、替換或重建 production data。
+- **動作：** 重新驗證 R04 的 B01 receipt、backup identity 與 quiescence 仍 fresh；只有在另一個 exact R05 approval 已取得時，才對已證明的 stable database path 執行 `yarn db:migrate`。
+- **完成條件：** migration 成功，post-migration storage assessment 能安全分類與 B01 prestate 的差異，且 durable SQLite、assets 與 uploads staging 均保持可解釋狀態。B01／R05 都不授權 B02 restore 或 R06 start。
+- **停止條件：** B01 未核准／未完成／已 stale、寫入已恢復、backup identity 或 restore readiness 不明、R05 尚未精確批准、目標 path 不明、migration 失敗，或 storage assessment 無法證明 integrity／journal／content boundary。不得因假設 transaction rollback 而自行略過 recovery decision。
 
-### R06 · production-mode start
+### R06 · production-mode build and start
 
-- **動作：** 依 canonical 文件的 [Build and Start](deploy/cloudflare-tunnel.md#build-and-start) 以 normal SHA-injected entrypoint `yarn start` 啟動或重啟 production-mode Fastify process。把正在檢查的 local Fastify origin 設為 `CHECK_ORIGIN`，然後從該 same origin 讀取 `GET /api/runtime-provenance` 並執行下列 exact comparison；不得從另一個 process、checkout 或 hostname 代填 observed SHA。
+- **動作：** 依 canonical 文件的 [Build and Start](deploy/cloudflare-tunnel.md#build-and-start)，先從記錄 `INTENDED_SHA` 的同一 clean checkout 執行 normal SHA-injected entrypoint `yarn build`，驗證 `dist/client/source-revision.json`，再以 `yarn start` 啟動或重啟 production-mode Fastify process。把正在檢查的 local Fastify origin 設為 `CHECK_ORIGIN`，然後從該 same origin 讀取 `GET /api/runtime-provenance` 並執行下列 exact comparison；不得從另一個 process、checkout 或 hostname 代填 observed SHA。
 
   ```bash
   node --input-type=module --eval 'const [intended, origin] = process.argv.slice(1); if (!/^[0-9a-f]{40}$/.test(intended)) throw new Error("invalid intended provenance"); const response = await fetch(new URL("/api/runtime-provenance", origin), { cache: "no-store" }); if (!response.ok) throw new Error("runtime provenance unavailable"); const body = await response.json(); if (Object.keys(body).length !== 1 || !/^[0-9a-f]{40}$/.test(body.sourceSha) || body.sourceSha !== intended) throw new Error("runtime provenance mismatch");' "$INTENDED_SHA" "$CHECK_ORIGIN"
   ```
 
-- **完成條件：** successful build manifest 已在 boot 時綁定 process，Fastify 以 `CHECK_ORIGIN` 同源提供 shell、API、protected assets 與 cookie-backed SSE，且 observed `sourceSha` 與 `INTENDED_SHA` 完全相等。
-- **停止條件：** boot error、invalid timezone/secret、endpoint unavailable、response shape/full-SHA invalid、exact comparison mismatch、wrong port/stale process，或只有另一個 origin/Vite 的證據；任何 mismatch 必須 fail closed，禁止繼續 tunnel handoff。
+- **完成條件：** production client build 成功，`dist/client/source-revision.json` 只含與 `INTENDED_SHA` 完全相同的 `sourceSha`，successful build manifest 已在 boot 時綁定 process，Fastify 以 `CHECK_ORIGIN` 同源提供 shell、API、protected assets 與 cookie-backed SSE，且 observed `sourceSha` 與 `INTENDED_SHA` 完全相等。
+- **停止條件：** build／boot error、缺少 shell/manifest、manifest 或 endpoint 不是 lowercase 40-character full SHA、invalid timezone/secret、exact comparison mismatch、wrong port/stale process、流程改用 Vite dev server，或只有另一個 origin 的證據；任何 mismatch 必須 fail closed，禁止繼續 tunnel handoff。
 
 ### R07 · stable named-tunnel handoff
 
@@ -104,6 +104,7 @@
 | `retry.cross_attempt_evidence_splicing` | forbidden：不得拼接不同 attempt 的證據 |
 | `retry.deterministic_evidence_substitution` | forbidden：deterministic safety evidence 不能取代失敗的 live run |
 | `operator.source_prerequisites` | merged `main` 且 post-merge local closeout 已完成 |
+| `operator.backup_approval` | B01 quiescence／backup／restore-readiness 需要 separate fresh exact-action approval |
 | `operator.runtime_approval` | fresh exact-action approval required |
 | `operator.pr_ci_closeout_authority` | none：這份文件、local checks、PR、CI 或 closeout 都不授權 runtime action |
 | `operator.tunnel_configuration_approval` | tunnel configuration 需要 separate fresh exact-action approval |

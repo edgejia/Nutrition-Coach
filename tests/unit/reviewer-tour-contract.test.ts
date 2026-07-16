@@ -658,7 +658,7 @@ describe("reviewer tour contract", () => {
     }
   });
 
-  it("uses existing unit discovery and release wiring without script changes", async () => {
+  it("uses unit discovery and receipt-aware release wiring", async () => {
     const [packageSource, releaseSource] = await Promise.all([
       readFile("package.json", "utf8"),
       readFile("scripts/release-check.mjs", "utf8"),
@@ -666,9 +666,18 @@ describe("reviewer tour contract", () => {
     const packageJson = JSON.parse(packageSource) as { scripts: Record<string, string> };
     assert.match(packageJson.scripts.test, /tests\/unit\/\*\.test\.ts/);
     assert.match(packageJson.scripts["test:unit"], /tests\/unit\/\*\.test\.ts/);
-    assert.match(releaseSource, /runStep\("Full test suite", \["test"\]\)/);
-    assert.match(releaseSource, /runStep\("Capability matrix generated doc drift", \["matrix:gen:check"\]\)/);
-    assert.match(releaseSource, /runStep\("Behavior matrix generated doc drift", \["behavior-matrix:gen:check"\]\)/);
+    assert.match(
+      releaseSource,
+      /await runStep\("Full test suite", "full_test_suite", \["test"\], \{ NODE_ENV: "test" \}\);/,
+    );
+    assert.match(
+      releaseSource,
+      /await runStep\("Capability matrix generated doc drift", "capability_matrix", \["matrix:gen:check"\]\);/,
+    );
+    assert.match(
+      releaseSource,
+      /await runStep\("Behavior matrix generated doc drift", "behavior_matrix", \["behavior-matrix:gen:check"\]\);/,
+    );
     await assert.doesNotReject(stat("tests/unit/reviewer-tour-contract.test.ts"));
   });
 });

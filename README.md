@@ -179,13 +179,22 @@ yarn verify:harness -- provider-auth-failure-localization
 
 Production-mode 會由同一個 Fastify server 提供 API 與建置後的前端檔案。
 
-建置並啟動 same-origin runtime：
+正式更新順序是：non-`main` branch 達到 PR-ready → PR policy／`Release Check` → maintainer 決定 merge 到 `main` → 從更新後的 `main` 完成 post-merge local archive → 另行核准 runtime refresh。PR、CI 或 closeout 都不會自動授權 production 操作；若 GSD workflow 暫停，不能跳過或偽造 archive。
+
+先在與刻意選定 merged source 相同 SHA、乾淨且未承載服務的 verification checkout 完成 source preflight；`release:check` 會執行 frontend build 並改寫 `dist/client`，所以不得在 active runtime checkout 執行。以下 command block 只表示 canonical ordering，不是合併的 approval bundle：
 
 ```bash
+cd /absolute/path/to/clean-non-serving-verification-checkout
 yarn install --frozen-lockfile
+cp .env.example .env
 yarn release:check
-yarn build
+```
+
+只有 source SHA、PR merge 與 post-merge archive 都重新驗證後，才可另行選定 active runtime checkout。在該 checkout 執行 `yarn db:migrate` 前，必須依 [Production storage recovery](docs/deploy/production-recovery.md) 另行核准並完成 B01 quiesced backup／restore-readiness proof；R05 migration 與 R06 build/start 仍各自需要獨立核准，且 R06 才能改寫 runtime checkout 的 `dist/client`。
+
+```bash
 yarn db:migrate
+yarn build
 yarn start
 ```
 
@@ -195,10 +204,11 @@ Cloudflare Tunnel 流程：[docs/deploy/cloudflare-tunnel.md](docs/deploy/cloudf
 
 - 將 CI 拆成更清楚的 typecheck、tests、build、migration checks 和 release policy jobs。
 - 加入 manually triggered provider smoke checks，使用 scoped secrets 和 sanitized artifacts。
-- 改善 LLM failure categories 的 observability，同時避免記錄 raw prompts 或 provider payloads。
+- 將 `release:check` 已採用的 allowlisted structured receipt 模式擴展到其他高風險流程；仍不記錄 raw prompts、child output 或 provider payloads。
 
 ## 相關文件
 
 - [架構](docs/architecture.md)
+- [Production storage recovery](docs/deploy/production-recovery.md)
 - [Cloudflare Tunnel 流程](docs/deploy/cloudflare-tunnel.md)
 - [ADR](docs/adr/)
