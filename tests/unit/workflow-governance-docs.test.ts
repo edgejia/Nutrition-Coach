@@ -93,9 +93,12 @@ describe("workflow runtime governance docs", () => {
   it("keeps the tracked re-enable report evidence-bound and non-authorizing", async () => {
     const readiness = await readFile(readinessPath, "utf8");
     for (const claim of [
-      "Decision status: **DECISION_REQUIRED — pause remains active**",
-      "Temporary GSD Maintenance Pause: **ACTIVE**",
+      "Decision status: **RESUME-WITH-LISTED-DEFERS recorded 2026-07-16 — pause lifted with listed defers**",
+      "Temporary GSD Maintenance Pause: **LIFTED 2026-07-16 (listed defers accepted)**",
       "does not lift the pause",
+      "## Recorded decision (2026-07-16)",
+      "No other authority was granted",
+      "is now consumed; any future pause or resume decision requires a new bundle ID",
       "060734d393db36d2241d42d46ad340b8c8a8cb33",
       "a84370bf0c207b2d3305156ce5baf13c0335f02e",
       "ruleset history | version ID `43165861`",
@@ -149,7 +152,7 @@ describe("workflow runtime governance docs", () => {
       .filter((line) => line === continueDecision || line === resumeDecision);
     assert.deepEqual(decisionLines, [continueDecision, resumeDecision]);
     assert.doesNotMatch(readiness, /^(?:RESUME|CONTINUE-DEFER)$/m);
-    assert.doesNotMatch(readiness, /Temporary GSD Maintenance Pause:\s*\*\*(?:INACTIVE|LIFTED|RESUMED)\*\*/i);
+    assert.doesNotMatch(readiness, /Temporary GSD Maintenance Pause:\s*\*\*ACTIVE\*\*/);
   });
 
   it("keeps closeout source exceptions exact and binds state checks to project root", async () => {

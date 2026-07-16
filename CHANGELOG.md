@@ -24,7 +24,7 @@
 - Phase 113 的 dependency-free demo contract 鎖定 named-tunnel SSE authority、固定 script 與上述 source-only non-claim boundary；focused contract 與 `yarn tsc --noEmit` 通過仍未表示已合併 `main`、刷新 runtime、變更 tunnel、通過 public smoke、關閉 #54 或通過 live semantic demo。
 - Phase 113.1 的 fresh verifier 通過 5/5 must-haves，focused source-wrapper 測試通過 43/43、demo contract 通過 27/27、TypeScript 檢查通過；ASVS Level 2 security audit 關閉 10/10 threats，`threats_open: 0`。
 - v3.4 milestone audit 通過 12/12 requirements、5/5 phases、13/13 integration connections 與 5/5 source flows；Phase 113 的歷史 `gaps_found` 由 Phase 113.1 的 BUILD-01 精確關閉，未改寫或豁免原始 verifier 證據。
-- Workflow-hardening focused fixtures 會拒絕 known receipt misclassification、frozen state drift、stale dependency seal、closeout recurrence／directory false-pass、planner proof false-pass、lease/provenance replay與 telemetry escape overclaim；真實 `.planning` 保持唯讀 frozen evidence，尚未執行 ruleset canary、pilot、production migration、runtime refresh、Tunnel 或 public smoke。
+- Workflow-hardening focused fixtures 會拒絕 known receipt misclassification、frozen state drift、stale dependency seal、closeout recurrence／directory false-pass、planner proof false-pass、lease/provenance replay與 telemetry escape overclaim；核准的 exact ruleset canary behavioral proof 已於 2026-07-16 完成並清理，maintainer 同日以 exact R1 決策解除 Temporary GSD Maintenance Pause 並 reconcile `.planning` state；pilot、production migration、runtime refresh、Tunnel 與 public smoke 仍未執行。
 
 ## v3.3 - 2026-07-05
 

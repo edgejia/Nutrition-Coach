@@ -1,8 +1,8 @@
 # GSD Re-enable Readiness Report
 
-- Decision status: **DECISION_REQUIRED — pause remains active**
+- Decision status: **RESUME-WITH-LISTED-DEFERS recorded 2026-07-16 — pause lifted with listed defers**
 - Evidence cutoff: **2026-07-16 Asia/Taipei**
-- Temporary GSD Maintenance Pause: **ACTIVE**
+- Temporary GSD Maintenance Pause: **LIFTED 2026-07-16 (listed defers accepted)**
 - Hardening implementation commit: `060734d393db36d2241d42d46ad340b8c8a8cb33`
 
 This report is a maintainer decision aid. It does not lift the pause, resume v3.4.1 or Phase 115, repair `.planning/**`, authorize a source merge, or authorize production, migration, runtime refresh, Tunnel, or public-smoke work. A tool pass is evidence for the bounded claim named below, not automatic authority for a later workflow step.
@@ -168,6 +168,14 @@ Even the exact resume response does not authorize v3.4.1 or Phase 115 work, R03 
 A bare `RESUME`, bare `CONTINUE-DEFER`, modified bundle ID, or approximate wording is non-authorizing. Before recording an exact resume decision, local and GitHub state must be revalidated against this report; any drift leaves the pause active pending a new review. Any later change to this report's readiness matrix, required decisions, or authority scope invalidates bundle R1 and requires a new decision bundle ID.
 
 The required-check workflow is still source in the same repository that a pull request can edit. Ruleset behavioral proof can establish branch/ruleset enforcement, but cannot prove that a future PR cannot weaken the `Release Check` implementation itself. Moving enforcement to an independently protected required workflow or equivalent immutable authority remains a governance defer decision.
+
+## Recorded decision (2026-07-16)
+
+- Received: `RESUME-WITH-LISTED-DEFERS GSD-REENABLE-DECISION-20260716-R1` (exact single line, current thread, 2026-07-16).
+- Pre-recording revalidation matched this report with no drift: `origin/main` at `a84370bf0c207b2d3305156ce5baf13c0335f02e`; ruleset `18989827` active with the four rules, no bypass actors, and history version `43165861`; no open PR; no canary or remote `codex/*` refs; clean tree at `45c89e269ae0c8faa277f272a247985d26ab986a`.
+- Effect: the project-scoped Temporary GSD Maintenance Pause is lifted. The listed defers — bounded Wave 1.1 residuals, production adoption of the recovery contract, real role-binding/entrypoint activation, and the Wave 4/pilot/telemetry residuals — are accepted as open maintainer decisions, not completed work. No other authority was granted; each action named in the grammar section still needs its own current-thread approval.
+- Bundle `GSD-REENABLE-DECISION-20260716-R1` is now consumed; any future pause or resume decision requires a new bundle ID.
+- Post-decision, separately instructed in the same thread: the frozen `.planning` drift was reconciled and `yarn workflow:state-check` now passes on the live tree, superseding the historical exit-1 snapshot above as current state (the snapshot remains valid evidence of the pre-reconciliation fail-closed behavior).
 
 ## Side-effect and cleanup statement
 
