@@ -50,9 +50,22 @@ function sseEvents(raw: string) {
     });
 }
 
+function hasSentinelValue(value: unknown, sentinel: string): boolean {
+  const numericSentinel = sentinel.trim() === "" ? undefined : Number(sentinel);
+  if (typeof value === "string") return value.includes(sentinel);
+  if (typeof value === "number") {
+    return numericSentinel !== undefined && Number.isFinite(numericSentinel) && value === numericSentinel;
+  }
+  if (Array.isArray(value)) return value.some((item) => hasSentinelValue(item, sentinel));
+  if (value !== null && typeof value === "object") {
+    return Object.values(value as Record<string, unknown>).some((item) => hasSentinelValue(item, sentinel));
+  }
+  return false;
+}
+
 function assertSentinelAbsent(channel: string, key: string, value: unknown, sentinel: string) {
-  const count = JSON.stringify(value).split(sentinel).length - 1;
-  assert.equal(count, 0, `channel=${channel} key=${key} count=${count}`);
+  const found = hasSentinelValue(value, sentinel);
+  assert.equal(found, false, `channel=${channel} key=${key} found=${found}`);
 }
 
 async function createHarness(mockLLM: MockLLMProvider) {
@@ -77,6 +90,29 @@ async function createHarness(mockLLM: MockLLMProvider) {
 }
 
 describe("Phase 126 routine observability privacy negative controls", () => {
+  it("does not confuse a numeric substring collision with real string or numeric leaks", () => {
+    const sentinel = "396";
+    const latencyRecord = [{ event: "chat_turn_completed", latencyMs: 1396 }];
+    const legacySubstringCount = JSON.stringify(latencyRecord).split(sentinel).length - 1;
+
+    assert.equal(legacySubstringCount, 1, "the old matcher must reproduce the latencyMs collision");
+    assert.doesNotThrow(() => assertSentinelAbsent("json", "routine_metadata", latencyRecord, sentinel));
+    assert.doesNotThrow(() => assertSentinelAbsent(
+      "json",
+      "routine_metadata",
+      [{ metadata: { latencyMs: 13960 } }],
+      sentinel,
+    ));
+    assert.throws(
+      () => assertSentinelAbsent("json", "routine_metadata", [{ metadata: { note: "prefix-396-suffix" } }], sentinel),
+      /found=true/,
+    );
+    assert.throws(
+      () => assertSentinelAbsent("json", "routine_metadata", [{ metadata: { calories: 396 } }], sentinel),
+      /found=true/,
+    );
+  });
+
   it("keeps JSON provider failures metadata-only without changing the fallback contract", async () => {
     const mockLLM = new MockLLMProvider();
     const providerMetadata: ProviderErrorMetadata = {
@@ -212,8 +248,7 @@ describe("Phase 126 routine observability privacy negative controls", () => {
         ["protein_source", "396"],
         ["assistant_text", "assistant-final-sentinel-5f92"],
       ] as const) {
-        const count = JSON.stringify(routineRecords).split(sentinel).length - 1;
-        assert.equal(count, 0, `channel=sse key=routine_metadata label=${label} count=${count}`);
+        assertSentinelAbsent("sse", `routine_metadata.${label}`, routineRecords, sentinel);
       }
 
       const history = await harness.services?.chatService.getHistory(harness.deviceId, 20);
