@@ -1,5 +1,18 @@
 # 更新日誌
 
+## v3.5 - Unreleased
+
+### 變更
+
+- 完成 Repository Integrity Remediation 的 126–128 三個 phase、15 個 plan，將使用者輸入、營養安全、狀態生命週期、metadata-only harness 證據與 source release boundary 收斂為可重跑的 deterministic contract。
+- 將 v3.5 的 readiness 明確限制在 committed source SHA 與 source/release checks；NC-COR-07、NC-COR-08、NC-CLI-01 保留為具體的 future follow-up，不把 NC-TST-02 或 NC-REL-03 誤列為已完成。
+- 保留 PR-ready → maintainer merge → post-merge local archive → separately approved runtime refresh 的發布順序；本次收尾不包含 `main` merge、tag、production runtime、Cloudflare Tunnel 或 public smoke。
+
+### 驗證
+
+- Phase 126：6/6 requirements verified；Phase 127：15/15 success criteria passed；Phase 128：16/16 executed-scope criteria passed，25-entry disposition map 為 20 CLOSED / 3 DEFERRED / 2 OUT-OF-SCOPE。
+- `yarn workflow:state-check`、active planning artifact provenance/seal checks，以及 source wrap 後重新執行的 `yarn release:check` 共同綁定最終 committed source SHA；測試僅使用 mocked 或 harness providers，不宣稱 live-provider、Docker、production 或主觀視覺品質 readiness。
+
 ## v3.4 - Unreleased
 
 ### 變更

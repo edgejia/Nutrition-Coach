@@ -149,6 +149,8 @@ yarn verify:harness -- provider-auth-failure-localization
 
 `yarn release:check` verifies the `TZ=Asia/Taipei` runtime contract, TypeScript, the Node test suite, capability / behavior matrix generated-doc drift, and the frontend build. Tests use mocked or harness LLM providers; CI does not call the live OpenAI API.
 
+For v3.5, source/release evidence is bound to the committed source SHA; `workflow:state-check`, active planning artifact provenance/seals, and `yarn release:check` do not imply production/runtime, Cloudflare Tunnel, public-smoke, or subjective visual readiness.
+
 `yarn native:check` is specialized native dependency evidence for Sharp upgrades, `better-sqlite3` upgrades, and v3.1 source-release review; it is not a replacement for `yarn release:check` and does not authorize production runtime refresh, Cloudflare Tunnel changes, public smoke, tag movement, or `main` promotion.
 
 ## Environment Variables
