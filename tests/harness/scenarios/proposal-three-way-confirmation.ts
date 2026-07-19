@@ -19,6 +19,7 @@ import {
 } from "../policy-assertions.js";
 import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
+import { buildPositiveScenarioResult } from "../positive-metadata.js";
 import type {
   VerificationScenario,
   ScenarioContext,
@@ -77,7 +78,7 @@ interface ChatBody {
 
 interface ActionBody {
   ok: boolean;
-  status: "approved" | "rejected" | "stale";
+  status: "approved" | "rejected" | "stale" | "idempotent";
   didMutateMeal: boolean;
   dailyTargets?: ChatBody["dailyTargets"];
   dailySummary?: ChatBody["dailySummary"];
@@ -154,13 +155,15 @@ function failResult(
   failedStepName: string,
   artifacts: Record<string, unknown>,
 ): ScenarioResult {
-  return {
-    ok: false,
-    failedStep: failedStepName,
-    steps,
-    artifacts,
-    consoleSummary: `FAIL ${SCENARIO_NAME} ${failedStepName}`,
-  };
+  return buildPositiveScenarioResult(SCENARIO_NAME, false, steps, failedStepName, {
+    counts: {
+      expectedStepCount: STEP_NAMES.length,
+      recordedEvidenceCount: Array.isArray(artifacts.evidence) ? artifacts.evidence.length : 0,
+    },
+    assertions: {
+      detailedChecksCompleted: Array.isArray(artifacts.evidence) && artifacts.evidence.length > 0,
+    },
+  });
 }
 
 function evidenceArtifacts() {
@@ -941,7 +944,7 @@ const scenario: VerificationScenario = {
       assert.equal(duplicateFirst.body.ok, true);
       assert.equal(duplicateSecond.status, 200);
       assert.equal(duplicateSecond.body.ok, false);
-      assert.equal(duplicateSecond.body.status, "stale");
+      assert.equal(duplicateSecond.body.status, "idempotent");
       assert.equal(duplicateSecond.body.didMutateMeal, false);
       assert.equal(duplicateSecond.body.proposalCard?.status, "approved");
       assert.equal(toMealCount(duplicateMealsAfter), toMealCount(duplicateMealsBefore));
@@ -955,6 +958,7 @@ const scenario: VerificationScenario = {
         duplicateAction: {
           ok: duplicateSecond.body.ok,
           status: duplicateSecond.body.status,
+          zeroMutationReplay: duplicateSecond.body.status === "idempotent",
           card: summarizeCard(duplicateSecond.body.proposalCard),
           hasNoActionEvent: duplicateSecond.body.proposalActionEvent === undefined,
         },
@@ -984,12 +988,10 @@ const scenario: VerificationScenario = {
       addEvidence(artifacts, metadataEvidence);
       steps.push(pass(metadataStep, metadataEvidence));
 
-      return {
-        ok: true,
-        steps,
-        artifacts,
-        consoleSummary: `PASS ${SCENARIO_NAME} ${steps.length}/${STEP_NAMES.length}`,
-      };
+      return buildPositiveScenarioResult(SCENARIO_NAME, true, steps, undefined, {
+        counts: { expectedStepCount: STEP_NAMES.length, recordedEvidenceCount: artifacts.evidence.length },
+        assertions: { allCasesPassed: true, detailedChecksCompleted: true },
+      });
     } catch (error) {
       const failedStepName = STEP_NAMES[steps.length] ?? "unknown";
       steps.push(fail(

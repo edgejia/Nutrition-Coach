@@ -36,20 +36,6 @@ const GENERATED_ARTIFACT_FILES = [
   "tests/harness/artifacts/guest-session-hardening/latest/summary.json",
 ] as const;
 
-const EXPECTED_REPRESENTATIVE_RAW_SELECTOR_ROUTES = [
-  "chat_history",
-  "asset_read",
-  "sse",
-  "history_meals",
-  "device_goals",
-] as const;
-
-const EXPECTED_MISSING_COOKIE_RAW_SELECTOR_ROUTES = [
-  "chat_history",
-  "asset_read",
-  "sse",
-] as const;
-
 const EXPECTED_REVOCATION_STEP_NAMES = [
   "copied_token_valid_until_logout",
   "logout_reset_revokes_copies",
@@ -548,71 +534,56 @@ export async function assertGeneratedArtifactsAreMetadataOnly() {
   assert.deepEqual(failures, [], "Generated guest-session-hardening artifacts must remain metadata-only");
 }
 
-async function assertGuestSessionHardeningRawSelectorArtifacts() {
+async function assertGuestSessionHardeningPositiveMetadataArtifacts() {
   const snapshots = JSON.parse(
     await readProjectFile("tests/harness/artifacts/guest-session-hardening/latest/snapshots.json"),
   ) as {
-    raw_selector_fail_closed?: {
-      routeCoverageScope?: unknown;
-      exhaustiveCoverageOwner?: unknown;
-      validCookieRawSelectorsRejected?: unknown;
-      validCookieRawSelectorStatuses?: unknown;
-      missingCookieRawSelectorStatuses?: unknown;
-      validCookieForeignSelectors?: unknown;
-    };
+    assertions?: Record<string, unknown>;
+    counts?: Record<string, unknown>;
   };
-  const rawSelector = snapshots.raw_selector_fail_closed;
-  assert.ok(rawSelector, "guest-session-hardening snapshots must include raw_selector_fail_closed");
-  assert.equal(rawSelector.routeCoverageScope, "representative_end_to_end");
-  assert.equal(rawSelector.exhaustiveCoverageOwner, "route_local_integration_tests_95_02_through_95_05");
-  assert.equal(rawSelector.validCookieRawSelectorsRejected, true);
-  assert.equal(rawSelector.validCookieForeignSelectors, undefined, "old ignored-success foreign selector artifact must be removed");
+  assert.deepEqual(snapshots.assertions, {
+    metadataOnly: true,
+    rawEvidenceExcluded: true,
+    allRevocationStepsPassed: true,
+  });
+  assert.deepEqual(snapshots.counts, {
+    stepCount: 10,
+    passedStepCount: 10,
+    expectedStepCount: 10,
+  });
 
-  assert.ok(Array.isArray(rawSelector.validCookieRawSelectorStatuses));
-  assert.deepEqual(
-    rawSelector.validCookieRawSelectorStatuses.map((item) => item.route),
-    [...EXPECTED_REPRESENTATIVE_RAW_SELECTOR_ROUTES],
-  );
-  assert.deepEqual(
-    rawSelector.validCookieRawSelectorStatuses.map((item) => item.status),
-    EXPECTED_REPRESENTATIVE_RAW_SELECTOR_ROUTES.map(() => 400),
-  );
-
-  assert.ok(Array.isArray(rawSelector.missingCookieRawSelectorStatuses));
-  assert.deepEqual(
-    rawSelector.missingCookieRawSelectorStatuses.map((item) => item.route),
-    [...EXPECTED_MISSING_COOKIE_RAW_SELECTOR_ROUTES],
-  );
-  assert.deepEqual(
-    rawSelector.missingCookieRawSelectorStatuses.map((item) => item.status),
-    EXPECTED_MISSING_COOKIE_RAW_SELECTOR_ROUTES.map(() => 401),
-  );
+  const steps = JSON.parse(
+    await readProjectFile("tests/harness/artifacts/guest-session-hardening/latest/steps.json"),
+  ) as Array<{ name?: unknown; status?: unknown; actual?: unknown }>;
+  const rawSelectorStep = steps.find((step) => step.name === "raw_selector_fail_closed");
+  assert.equal(rawSelectorStep?.status, "pass");
+  assert.equal(rawSelectorStep?.actual, undefined, "positive guest artifacts must not persist raw selector evidence");
 }
 
 async function assertGuestSessionHardeningRevocationArtifacts() {
   const steps = JSON.parse(
     await readProjectFile("tests/harness/artifacts/guest-session-hardening/latest/steps.json"),
-  ) as Array<{ name?: unknown; ok?: unknown; actual?: unknown }>;
+  ) as Array<{ name?: unknown; status?: unknown; actual?: unknown }>;
   const summary = JSON.parse(
     await readProjectFile("tests/harness/artifacts/guest-session-hardening/latest/summary.json"),
-  ) as { stepNames?: unknown; totalSteps?: unknown; passedSteps?: unknown };
+  ) as {
+    scenarioId?: unknown;
+    status?: unknown;
+    counts?: { stepCount?: unknown; passedStepCount?: unknown };
+  };
 
   const stepNames = steps.map((step) => step.name);
   for (const stepName of EXPECTED_REVOCATION_STEP_NAMES) {
     assert.ok(stepNames.includes(stepName), `guest-session-hardening steps must include ${stepName}`);
     const step = steps.find((item) => item.name === stepName);
-    assert.equal(step?.ok, true, `${stepName} must be marked ok`);
+    assert.equal(step?.status, "pass", `${stepName} must be marked pass`);
+    assert.equal(step?.actual, undefined, `${stepName} must not persist detailed evidence`);
   }
 
-  const summaryStepNames = summary.stepNames;
-  assert.ok(Array.isArray(summaryStepNames), "guest-session-hardening summary must list step names");
-  assert.deepEqual(
-    EXPECTED_REVOCATION_STEP_NAMES.map((stepName) => summaryStepNames.includes(stepName)),
-    EXPECTED_REVOCATION_STEP_NAMES.map(() => true),
-    "guest-session-hardening summary must include every revocation step",
-  );
-  assert.equal(summary.totalSteps, 10);
-  assert.equal(summary.passedSteps, 10);
+  assert.equal(summary.scenarioId, "guest-session-hardening");
+  assert.equal(summary.status, "pass");
+  assert.equal(summary.counts?.stepCount, 10);
+  assert.equal(summary.counts?.passedStepCount, 10);
 }
 
 test("protected route modules no longer resolve guest sessions manually", async () => {
@@ -627,8 +598,8 @@ test("client protected transports do not send raw ownership selectors", async ()
   await assertClientDoesNotSendRawProtectedSelectors();
 });
 
-test("guest-session-hardening artifacts prove representative raw selector fail-closed behavior", async () => {
-  await assertGuestSessionHardeningRawSelectorArtifacts();
+test("guest-session-hardening artifacts retain the raw-selector check as positive metadata", async () => {
+  await assertGuestSessionHardeningPositiveMetadataArtifacts();
 });
 
 test("guest-session-hardening artifacts prove guest-session revocation behavior", async () => {

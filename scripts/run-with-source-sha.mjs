@@ -26,6 +26,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { parseSourceRevision } from "../server/lib/source-revision.js";
+import { runAuthoritativeGit } from "./git-authority.mjs";
 
 const ARGUMENT_ERROR = "Source revision wrapper arguments are invalid.";
 const COMMAND_ERROR = "Source revision child command could not be started.";
@@ -33,6 +34,13 @@ const SOURCE_INPUT_ERROR = "Source repository inputs are not clean.";
 const SOURCE_DRIFT_ERROR = "Source repository changed during the build.";
 const BUILD_OUTPUT_ERROR = "Source revision build output is unavailable.";
 const MANIFEST_PATH_ERROR = "Source revision manifest path is invalid.";
+
+const RUNTIME_PATH_DEFAULTS = {
+  DB_PATH: "./data/nutrition.db",
+  ASSETS_DIR: "./data/assets",
+  UPLOADS_STAGING_DIR: "./data/uploads-staging",
+  CLIENT_DIST_DIR: "./dist/client",
+};
 
 class WrapperCancellationError extends Error {
   constructor() {
@@ -64,7 +72,7 @@ function parseArguments(argv) {
 }
 
 function resolveSourceSha(checkoutRoot = process.cwd()) {
-  const output = execFileSync("git", ["rev-parse", "HEAD"], {
+  const output = runAuthoritativeGit(["rev-parse", "HEAD"], {
     cwd: checkoutRoot,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"],
@@ -75,8 +83,7 @@ function resolveSourceSha(checkoutRoot = process.cwd()) {
 function assertCleanSourceInputs(checkoutRoot = process.cwd()) {
   let output;
   try {
-    output = execFileSync(
-      "git",
+    output = runAuthoritativeGit(
       ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
       { cwd: checkoutRoot, stdio: ["ignore", "pipe", "ignore"] },
     );
@@ -91,7 +98,7 @@ function assertCleanSourceInputs(checkoutRoot = process.cwd()) {
 
 function listTrackedPaths(checkoutRoot) {
   try {
-    const output = execFileSync("git", ["ls-files", "-z"], {
+    const output = runAuthoritativeGit(["ls-files", "-z"], {
       cwd: checkoutRoot,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
@@ -359,6 +366,7 @@ function runChildWithSignalForwarding(
   sourceSha,
   cwd,
   cancellationController,
+  env = process.env,
 ) {
   return new Promise((resolve, reject) => {
     let child;
@@ -366,7 +374,7 @@ function runChildWithSignalForwarding(
       child = spawn(command, commandArgs, {
         cwd,
         stdio: "inherit",
-        env: { ...process.env, SOURCE_SHA: sourceSha },
+        env: { ...env, SOURCE_SHA: sourceSha },
       });
       cancellationController.attachChild(child);
     } catch {
@@ -404,8 +412,7 @@ async function materializeCommittedSnapshot(checkoutRoot, sourceSha, transaction
   const archivePath = path.join(transactionRoot, "source.tar");
   const snapshotRoot = path.join(transactionRoot, "snapshot");
   await mkdir(snapshotRoot);
-  execFileSync(
-    "git",
+  runAuthoritativeGit(
     ["archive", "--format=tar", `--output=${archivePath}`, sourceSha],
     { cwd: checkoutRoot, stdio: ["ignore", "ignore", "ignore"] },
   );
@@ -414,6 +421,64 @@ async function materializeCommittedSnapshot(checkoutRoot, sourceSha, transaction
   });
   await linkInstalledDependencies(checkoutRoot, snapshotRoot);
   return { archivePath, snapshotRoot };
+}
+
+function resolveCheckoutRuntimePath(checkoutRoot, variableName, fallback) {
+  const configured = process.env[variableName] ?? fallback;
+  if (
+    path.isAbsolute(configured) ||
+    (variableName === "DB_PATH" && configured === ":memory:")
+  ) {
+    return configured;
+  }
+  return path.resolve(checkoutRoot, configured);
+}
+
+function createSnapshotRuntimeEnvironment(checkoutRoot) {
+  // The source cwd moves to the snapshot; mutable runtime data and built output do not.
+  return Object.fromEntries(
+    Object.entries(RUNTIME_PATH_DEFAULTS).map(([variableName, fallback]) => [
+      variableName,
+      resolveCheckoutRuntimePath(checkoutRoot, variableName, fallback),
+    ]),
+  );
+}
+
+async function runNonManifestFromCommittedSnapshot({
+  checkoutRoot,
+  command,
+  commandArgs,
+  sourceSha,
+  cancellationController,
+  resourceState,
+}) {
+  let transactionRoot;
+  try {
+    transactionRoot = await mkdtemp(
+      path.join(process.env.TMPDIR || tmpdir(), "nutrition-source-wrapper-"),
+    );
+    resourceState.transactionRoot = transactionRoot;
+    cancellationController.throwIfCancelled();
+    const snapshot = await materializeCommittedSnapshot(
+      checkoutRoot,
+      sourceSha,
+      transactionRoot,
+    );
+    cancellationController.throwIfCancelled();
+    return await runChildWithSignalForwarding(
+      command,
+      commandArgs,
+      sourceSha,
+      snapshot.snapshotRoot,
+      cancellationController,
+      { ...process.env, ...createSnapshotRuntimeEnvironment(checkoutRoot) },
+    );
+  } finally {
+    if (transactionRoot) {
+      await rm(transactionRoot, { recursive: true, force: true });
+    }
+    resourceState.transactionRoot = undefined;
+  }
 }
 
 function assertSubstantiveClientOutput(snapshotOutput) {
@@ -659,13 +724,14 @@ async function main() {
         resourceState,
       });
     } else {
-      result = await runChildWithSignalForwarding(
+      result = await runNonManifestFromCommittedSnapshot({
+        checkoutRoot,
         command,
         commandArgs,
         sourceSha,
-        checkoutRoot,
         cancellationController,
-      );
+        resourceState,
+      });
       cancellationController.throwIfCancelled();
     }
   } catch (error) {
@@ -719,6 +785,7 @@ try {
       SOURCE_DRIFT_ERROR,
       BUILD_OUTPUT_ERROR,
       MANIFEST_PATH_ERROR,
+      "ambient Git authority environment is forbidden",
     ].includes(
       error.message,
     )

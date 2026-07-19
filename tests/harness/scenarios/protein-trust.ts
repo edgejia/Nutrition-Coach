@@ -5,6 +5,7 @@ import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import { validJpegBytes } from "../../fixtures/image-bytes.js";
+import { buildPositiveScenarioResult } from "../positive-metadata.js";
 import type {
   VerificationScenario,
   ScenarioContext,
@@ -76,13 +77,10 @@ function failResult(
   failedStepName: string,
   artifacts: Record<string, unknown>,
 ): ScenarioResult {
-  return {
-    ok: false,
-    failedStep: failedStepName,
-    steps,
-    artifacts,
-    consoleSummary: `FAIL ${scenarioName} ${failedStepName}`,
-  };
+  return buildPositiveScenarioResult(scenarioName, false, steps, failedStepName, {
+    counts: { expectedCaseCount: STEP_NAMES.length, recordedCaseCount: Object.keys(artifacts).length - 1 },
+    assertions: { detailedChecksCompleted: Object.keys(artifacts).length > 1 },
+  });
 }
 
 function makeJpegBytes(): ArrayBuffer {
@@ -386,12 +384,10 @@ const scenario: VerificationScenario = {
         }
       }
 
-      return {
-        ok: true,
-        steps,
-        artifacts,
-        consoleSummary: `PASS protein-trust ${steps.filter((step) => step.ok).length}/${steps.length}`,
-      };
+      return buildPositiveScenarioResult("protein-trust", true, steps, undefined, {
+        counts: { expectedCaseCount: STEP_NAMES.length, recordedCaseCount: cases.length },
+        assertions: { allCasesPassed: true, detailedChecksCompleted: true },
+      });
     } finally {
       await fixture.close();
       await rm(path.resolve(__dirname, "..", "tmp", "protein-trust"), {

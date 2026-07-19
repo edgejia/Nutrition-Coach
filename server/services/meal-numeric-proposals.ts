@@ -1,5 +1,5 @@
 import type { AppDatabase } from "../db/client.js";
-import { createTurnStateService } from "./turn-state.js";
+import { createTurnStateService, type SyncTransactionClient } from "./turn-state.js";
 
 export const MEAL_NUMERIC_PROPOSAL_KIND = "meal_numeric_correction_proposal";
 export const MEAL_NUMERIC_PROPOSAL_TTL_MS = 30 * 60 * 1000;
@@ -103,6 +103,20 @@ export function createMealNumericProposalService(db: AppDatabase) {
       return payload as MealNumericProposalPayload | undefined;
     },
 
+    getLatestSync({
+      deviceId,
+      sessionId,
+    }: {
+      deviceId: string;
+      sessionId: string;
+    }, client?: SyncTransactionClient): MealNumericProposalPayload | undefined {
+      return turnStateService.getStateSync<MealNumericProposalPayload>({
+        deviceId,
+        sessionId,
+        kind: MEAL_NUMERIC_PROPOSAL_KIND,
+      }, client);
+    },
+
     async consumeLatest({
       deviceId,
       sessionId,
@@ -124,6 +138,26 @@ export function createMealNumericProposalService(db: AppDatabase) {
       return payload as MealNumericProposalPayload | undefined;
     },
 
+    consumeLatestSync({
+      deviceId,
+      sessionId,
+      proposalId,
+      expectedMealRevisionId,
+    }: {
+      deviceId: string;
+      sessionId: string;
+      proposalId: string;
+      expectedMealRevisionId: string;
+    }, client?: SyncTransactionClient): MealNumericProposalPayload | undefined {
+      return turnStateService.consumeStateSync<MealNumericProposalPayload>({
+        deviceId,
+        sessionId,
+        kind: MEAL_NUMERIC_PROPOSAL_KIND,
+        proposalId,
+        expectedMealRevisionId,
+      }, client);
+    },
+
     async clear({
       deviceId,
       sessionId,
@@ -136,6 +170,17 @@ export function createMealNumericProposalService(db: AppDatabase) {
         sessionId,
         kind: MEAL_NUMERIC_PROPOSAL_KIND,
       });
+    },
+
+    clearSync({ deviceId, sessionId }: {
+      deviceId: string;
+      sessionId: string;
+    }, client?: SyncTransactionClient): void {
+      turnStateService.clearStateSync({
+        deviceId,
+        sessionId,
+        kind: MEAL_NUMERIC_PROPOSAL_KIND,
+      }, client);
     },
   };
 }

@@ -1,9 +1,21 @@
 import type { DailyTargets } from "../services/device.js";
+import { stripToolLikeRegions } from "./source-text-guard.js";
 
 export const NUTRITION_SAFETY_CALORIE_FLOOR = 1200;
 export const UNSAFE_CALORIE_FLOOR_REASON = "unsafe_calorie_floor";
 
 export type NutritionSafetyFailureReason = typeof UNSAFE_CALORIE_FLOOR_REASON;
+
+export interface NutritionSafetyBoundaryDecision {
+  safe: boolean;
+  canonicalText: string;
+  reason?: "unsafe_nutrition_guidance";
+}
+
+export interface BufferedNutritionReply {
+  reply: string;
+  usedFallback: boolean;
+}
 
 export type NutritionSafetyTargetCheckResult =
   | { ok: true }
@@ -52,6 +64,25 @@ const UNSAFE_NUTRITION_PUNITIVE_EXERCISE_PATTERNS = [
   { id: "exercise_to_offset_eating", pattern: /(?:吃太多|罪惡|內疚).{0,18}(?:跑步|運動|少吃|禁食)/g },
 ] as const;
 
+const SAFETY_DIGIT_MAP: Record<string, string> = {
+  "０": "0", "１": "1", "２": "2", "３": "3", "４": "4",
+  "５": "5", "６": "6", "７": "7", "８": "8", "９": "9",
+  "٠": "0", "١": "1", "٢": "2", "٣": "3", "٤": "4",
+  "٥": "5", "٦": "6", "٧": "7", "٨": "8", "٩": "9",
+  "۰": "0", "۱": "1", "۲": "2", "۳": "3", "۴": "4",
+  "۵": "5", "۶": "6", "۷": "7", "۸": "8", "۹": "9",
+};
+
+/** Canonicalize only bounded numeric/spacing variants; preserve user language. */
+export function canonicalizeNutritionSafetyText(answer: string): string {
+  return (answer ?? "")
+    .normalize("NFKC")
+    .replace(/[０-９٠-٩۰-۹]/g, (digit) => SAFETY_DIGIT_MAP[digit] ?? digit)
+    .replace(/[，﹐]/g, ",")
+    .replace(/[．﹒]/g, ".")
+    .replace(/[\u2000-\u200B\u202F\u205F\u3000]/g, " ");
+}
+
 export interface UnsafeNutritionGuidanceAnalysis {
   matchedHarmfulTargetIds: string[];
   matchedRestrictivePlanIds: string[];
@@ -88,25 +119,26 @@ export function checkNutritionSafetyTargets(targets: Partial<DailyTargets>): Nut
 }
 
 export function analyzeUnsafeNutritionGuidance(answer: string): UnsafeNutritionGuidanceAnalysis {
+  const canonicalAnswer = canonicalizeNutritionSafetyText(answer);
   const matchedHarmfulTargetIds = [
-    ...matchedUnsafeCalorieGuidanceIds(answer),
-    ...matchedUnsafeMealSlotPlanIds(answer),
-    ...matchedUnsafeNutritionPatternIds(answer, UNSAFE_NUTRITION_HARMFUL_TARGET_PATTERNS),
+    ...matchedUnsafeCalorieGuidanceIds(canonicalAnswer),
+    ...matchedUnsafeMealSlotPlanIds(canonicalAnswer),
+    ...matchedUnsafeNutritionPatternIds(canonicalAnswer, UNSAFE_NUTRITION_HARMFUL_TARGET_PATTERNS),
   ];
   const matchedRestrictivePlanIds = matchedUnsafeNutritionPatternIds(
-    answer,
+    canonicalAnswer,
     UNSAFE_NUTRITION_RESTRICTIVE_PLAN_PATTERNS,
   );
   const matchedRapidLossTargetIds = matchedUnsafeNutritionPatternIds(
-    answer,
+    canonicalAnswer,
     UNSAFE_NUTRITION_RAPID_LOSS_PATTERNS,
   );
   const matchedPunitiveExerciseIds = matchedUnsafeNutritionPatternIds(
-    answer,
+    canonicalAnswer,
     UNSAFE_NUTRITION_PUNITIVE_EXERCISE_PATTERNS,
   );
-  const hasSupportiveRedirect = /不能|不會|無法|不要|暫時不會|較安全|安全的|改回|調回|先把/.test(answer);
-  const hasProfessionalSupport = /醫師|醫生|營養師|合格專業|專業人員/.test(answer);
+  const hasSupportiveRedirect = /不能|不會|無法|不要|暫時不會|較安全|安全的|改回|調回|先把|cannot|can't|can\s*not|do\s*not|not\s+able|safer|sustainable|recommend\s+professional/i.test(canonicalAnswer);
+  const hasProfessionalSupport = /醫師|醫生|營養師|合格專業|專業人員|doctor|dietitian|qualified\s+professional|healthcare\s+professional/i.test(canonicalAnswer);
   const hasUnsafeNutritionGuidance =
     matchedHarmfulTargetIds.length > 0 ||
     matchedRestrictivePlanIds.length > 0 ||
@@ -126,6 +158,39 @@ export function analyzeUnsafeNutritionGuidance(answer: string): UnsafeNutritionG
     hasProfessionalSupport,
     hasUnsafeNutritionGuidance,
     hasSafeBoundaryRedirect: !hasUnsafeNutritionGuidance && hasSupportiveRedirect && hasProfessionalSupport,
+  };
+}
+
+/**
+ * Shared decision used by JSON, SSE, and planning paths.  Callers must make
+ * the fallback choice only after this function has seen the complete reply.
+ */
+export function decideNutritionSafetyBoundary(answer: string): NutritionSafetyBoundaryDecision {
+  const canonicalText = canonicalizeNutritionSafetyText(answer);
+  const unsafe = hasUnsafeNutritionGuidance(canonicalText);
+  return unsafe
+    ? { safe: false, canonicalText, reason: "unsafe_nutrition_guidance" }
+    : { safe: true, canonicalText };
+}
+
+/**
+ * Apply the complete-reply decision shared by JSON, SSE, and planning-facing
+ * callers.  The fallback is supplied by the caller so this policy module does
+ * not own user-facing copy, and the model text is never returned when unsafe.
+ */
+export function resolveBufferedNutritionReply(input: {
+  userMessage?: string;
+  reply: string;
+  fallbackText: string;
+}): BufferedNutritionReply {
+  const responseDecision = decideNutritionSafetyBoundary(input.reply);
+  const userText = stripToolLikeRegions(canonicalizeNutritionSafetyText(input.userMessage ?? ""));
+  const userUnsafe = hasUnsafeNutritionGuidance(userText);
+  const responseIsSafeBoundary = hasSafeUnsafeNutritionBoundaryReply(responseDecision.canonicalText);
+  const needsFallback = !responseDecision.safe || (userUnsafe && !responseIsSafeBoundary);
+  return {
+    reply: needsFallback ? input.fallbackText : responseDecision.canonicalText,
+    usedFallback: needsFallback,
   };
 }
 
@@ -162,7 +227,8 @@ function matchedUnsafeCalorieGuidanceIds(answer: string): string[] {
           return true;
         }
         return !isCalorieAdjustmentDeltaContext(answer, valueStart)
-          && !isPerMacroCalorieBreakdownContext(answer, valueStart);
+          && !isPerMacroCalorieBreakdownContext(answer, valueStart)
+          && !isLoggedCalorieFactContext(answer, valueStart);
       })
       .map(() => "sub_floor_calorie_guidance")
   );
@@ -181,6 +247,12 @@ function isPerMacroCalorieBreakdownContext(answer: string, valueStart: number): 
     return false;
   }
   return !/[。！？\n]/.test(tail) && !/(?:共|總|合計)/.test(tail);
+}
+
+function isLoggedCalorieFactContext(answer: string, valueStart: number): boolean {
+  const prefix = answer.slice(Math.max(0, valueStart - 40), valueStart);
+  return /(?:已記錄|記錄了|紀錄|今日攝取|今天攝取|共\s*[0-9]+\s*餐|logged|recorded|consumed|total)/i.test(prefix)
+    && !/(?:只吃|only|limit|設定|設成|改成|目標每天|daily\s+target)/i.test(prefix);
 }
 
 function matchedUnsafeMealSlotPlanIds(answer: string): string[] {
@@ -203,8 +275,7 @@ function matchedUnsafeMealSlotPlanIds(answer: string): string[] {
 }
 
 function normalizeNumericToken(value: string): number {
-  const ascii = value
-    .replace(/[０-９]/g, (digit) => String.fromCharCode(digit.charCodeAt(0) - 0xfee0))
+  const ascii = canonicalizeNutritionSafetyText(value)
     .replace(/．/g, ".")
     .replace(/[,，]/g, "");
   return Number(ascii);
@@ -215,5 +286,5 @@ function isUnsafeNutritionLocallyNegated(answer: string, matchIndex: number): bo
   if (/[。！？；\n]|但|可是|不過/.test(prefix)) {
     return false;
   }
-  return /不會|不能|無法|拒絕|不要|不是|不可|不應|避免/.test(prefix);
+  return /不會|不能|無法|拒絕|不要|不是|不可|不應|避免|不建議|do\s+not\s+recommend|not\s+recommend|cannot\s+recommend|don't\s+recommend/i.test(prefix);
 }

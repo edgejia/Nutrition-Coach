@@ -3,6 +3,7 @@ import type {
   ScenarioStepResult,
   VerificationScenario,
 } from "../scenario-types.js";
+import { buildPositiveScenarioResult } from "../positive-metadata.js";
 import {
   type BehaviorCaseId,
   type BehaviorMatrixCaseId,
@@ -311,23 +312,22 @@ const behaviorMatrixScenario: VerificationScenario = {
     const counts = statusCounts(outcomes);
     const ok = firstFailedStep === undefined;
 
-    return {
+    return buildPositiveScenarioResult(
+      "behavior-matrix",
       ok,
-      ...(firstFailedStep ? { failedStep: firstFailedStep } : {}),
       steps,
-      artifacts: {
-        outcomes: outcomes.map(artifactOutcome),
-        statusCounts: counts,
-        expectedFailures: outcomes.flatMap((outcome) =>
-          (outcome.expectedFailures ?? []).map((failure) => ({
-            caseId: outcome.caseId,
-            ...failure,
-          }))
-        ),
-        caseIds,
+      firstFailedStep,
+      {
+        counts: {
+          ...counts,
+          caseCount: caseIds.length,
+        },
+        assertions: {
+          registryMatches: errors.missingRunnerIds.length === 0 && errors.extraRunnerIds.length === 0,
+          allCasesPassed: ok,
+        },
       },
-      consoleSummary: consoleSummary(counts, ok),
-    };
+    );
   },
 };
 

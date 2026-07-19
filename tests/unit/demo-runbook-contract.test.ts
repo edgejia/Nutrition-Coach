@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import { readFile, stat } from "node:fs/promises";
 import { describe, it } from "node:test";
 
-const DEMO_PATH = "docs/demo.md";
-const TUNNEL_PATH = "docs/deploy/cloudflare-tunnel.md";
+const DEMO_PATH = "docs/demo-runbook.md";
+const TUNNEL_PATH = "docs/deploy/production-runtime.md";
+const POSTMORTEM_PATH = "docs/deploy/archive/v3.4.1-postmortem.md";
 const CHANGELOG_PATH = "CHANGELOG.md";
 const CONTRACT_PATH = "tests/unit/demo-runbook-contract.test.ts";
 const CHANGELOG_CHANGE_ENTRY =
-  "- Phase 113 新增 `docs/demo.md` 的 DEMO-02 named-tunnel runbook handoff 與 DEMO-04 五分鐘固定 script；這只記錄 source 文件，未表示已合併 `main`、刷新 runtime、變更 tunnel、通過 public smoke、關閉 #54 或通過 live semantic demo。";
+  "- Phase 113 新增 `docs/demo-runbook.md` 的 DEMO-02 named-tunnel runbook handoff 與 DEMO-04 五分鐘固定 script；這只記錄 source 文件，未表示已合併 `main`、刷新 runtime、變更 tunnel、通過 public smoke、關閉 #54 或通過 live semantic demo。";
 const CHANGELOG_VERIFICATION_ENTRY =
   "- Phase 113 的 dependency-free demo contract 鎖定 named-tunnel SSE authority、固定 script 與上述 source-only non-claim boundary；focused contract 與 `yarn tsc --noEmit` 通過仍未表示已合併 `main`、刷新 runtime、變更 tunnel、通過 public smoke、關閉 #54 或通過 live semantic demo。";
 const EXPECTED_PARTS = ["第一部分：乾淨 checkout 重建與 operator 檢查", "第二部分：五分鐘固定 presenter script"] as const;
@@ -285,7 +286,7 @@ function assertDemoContract(markdown: string, tunnelMarkdown: string, changelog:
   assertExactUniqueSet(extractMarkerValues(markdown, "SMOKE"), EXPECTED_SMOKE_OUTCOMES, "smoke outcomes");
   assertExactUniqueSet(extractMarkerValues(markdown, "SEMANTIC"), EXPECTED_SEMANTIC_OUTCOMES, "semantic outcomes");
 
-  assert.match(markdown, /\[Cloudflare Tunnel production runtime\]\(deploy\/cloudflare-tunnel\.md\)/);
+  assert.match(markdown, /\[Cloudflare Tunnel production runtime\]\(deploy\/production-runtime\.md\)/);
   assert.doesNotMatch(markdown, /cloudflared tunnel (?:login|create|route|run)/);
   assert.match(tunnelMarkdown, /required public smoke must use the stable named tunnel/);
   assert.match(tunnelMarkdown, /temporary Quick Tunnel \(including a `trycloudflare\.com` URL\) cannot preserve this app's required same-origin SSE proof/);
@@ -341,6 +342,14 @@ function mutateCanonical(
 }
 
 describe("public demo runbook contract", () => {
+  it("keeps the historical v3.4.1 termination boundary explicit", async () => {
+    const markdown = await readFile(DEMO_PATH, "utf8");
+    const postmortem = await readFile(POSTMORTEM_PATH, "utf8");
+    assert.match(markdown, /v3\.4\.1 原五階段計畫已終止/);
+    assert.match(markdown, /不恢復或繼續 Phase 114–118/);
+    assert.match(postmortem, /not authorization to merge|not authorization/i);
+  });
+
   it("validates the complete canonical contract through one real-document entrypoint", () => {
     assertDemoContract(
       canonicalDocuments.markdown,

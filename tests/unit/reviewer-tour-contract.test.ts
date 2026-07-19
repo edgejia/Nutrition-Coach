@@ -3,7 +3,7 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-const TOUR_PATH = "docs/tour.md";
+const TOUR_PATH = "docs/reviewer-tour.md";
 const README_PATHS = ["README.md", "README-en.md"] as const;
 const EXPECTED_STOP_IDS = Array.from(
   { length: 10 },
@@ -13,11 +13,11 @@ const EXPECTED_STOP_MINUTES = [3, 6, 1, 1, 2, 2, 1, 10, 2, 2] as const;
 const CHECKPOINT_FIELD_LABELS = ["為何讀", "精讀範圍", "讀完應能回答", "下一站"] as const;
 const REQUIRED_SOURCE_TARGETS = [
   "../README.md#為什麼做這個專案",
-  "architecture.md#總覽",
-  "architecture.md#主要元件",
-  "architecture.md#meal-logging",
-  "architecture.md#llm-boundary",
-  "architecture.md#data-model",
+  "system-architecture.md#總覽",
+  "system-architecture.md#主要元件",
+  "system-architecture.md#meal-logging",
+  "system-architecture.md#llm-boundary",
+  "system-architecture.md#data-model",
   "capability-matrix.md#capability-matrix",
   "adr/0001-metadata-only-llm-failure-localization.md#context",
   "adr/0001-metadata-only-llm-failure-localization.md#decision",
@@ -33,12 +33,12 @@ const REQUIRED_SOURCE_TARGETS = [
   "adr/0010-nutrition-safety-product-floor.md#context",
   "adr/0010-nutrition-safety-product-floor.md#decision",
   "adr/0010-nutrition-safety-product-floor.md#verification",
-  "ai-safety.md#threat-model-trust-and-authority-boundaries",
-  "ai-safety.md#deterministic-safety-cases",
-  "ai-safety.md#the-1200-kcal-product-safety-floor",
-  "ai-safety.md#what-the-evidencedoesand-does-notprove",
-  "ai-safety.md#known-limitations-and-future-eval-questions",
-  "ai-safety.md#conclusion",
+  "ai-safety-case.md#threat-model-trust-and-authority-boundaries",
+  "ai-safety-case.md#deterministic-safety-cases",
+  "ai-safety-case.md#the-1200-kcal-product-safety-floor",
+  "ai-safety-case.md#what-the-evidencedoesand-does-notprove",
+  "ai-safety-case.md#known-limitations-and-future-eval-questions",
+  "ai-safety-case.md#conclusion",
   "../tests/harness/behavior-matrix.md#cases",
   "../tests/harness/behavior-matrix.md#risk-coverage-distribution",
   "../tests/harness/behavior-matrix.md#risk-to-assertion-coverage",
@@ -50,11 +50,11 @@ const REQUIRED_SOURCE_TARGETS = [
 ] as const;
 const REQUIRED_SOURCE_HEADINGS = new Map<string, string>([
   ["../README.md#為什麼做這個專案", "## 為什麼做這個專案"],
-  ["architecture.md#總覽", "## 總覽"],
-  ["architecture.md#主要元件", "## 主要元件"],
-  ["architecture.md#meal-logging", "### Meal Logging"],
-  ["architecture.md#llm-boundary", "## LLM Boundary"],
-  ["architecture.md#data-model", "## Data Model"],
+  ["system-architecture.md#總覽", "## 總覽"],
+  ["system-architecture.md#主要元件", "## 主要元件"],
+  ["system-architecture.md#meal-logging", "### Meal Logging"],
+  ["system-architecture.md#llm-boundary", "## LLM Boundary"],
+  ["system-architecture.md#data-model", "## Data Model"],
   ["capability-matrix.md#capability-matrix", "# Capability Matrix"],
   ["adr/0001-metadata-only-llm-failure-localization.md#context", "## Context"],
   ["adr/0001-metadata-only-llm-failure-localization.md#decision", "## Decision"],
@@ -74,20 +74,20 @@ const REQUIRED_SOURCE_HEADINGS = new Map<string, string>([
   ["adr/0010-nutrition-safety-product-floor.md#decision", "## Decision"],
   ["adr/0010-nutrition-safety-product-floor.md#verification", "## Verification"],
   [
-    "ai-safety.md#threat-model-trust-and-authority-boundaries",
+    "ai-safety-case.md#threat-model-trust-and-authority-boundaries",
     "## Threat model: trust and authority boundaries",
   ],
-  ["ai-safety.md#deterministic-safety-cases", "## Deterministic safety cases"],
-  ["ai-safety.md#the-1200-kcal-product-safety-floor", "## The 1200 kcal product safety floor"],
+  ["ai-safety-case.md#deterministic-safety-cases", "## Deterministic safety cases"],
+  ["ai-safety-case.md#the-1200-kcal-product-safety-floor", "## The 1200 kcal product safety floor"],
   [
-    "ai-safety.md#what-the-evidencedoesand-does-notprove",
+    "ai-safety-case.md#what-the-evidencedoesand-does-notprove",
     "## What the evidence does—and does not—prove",
   ],
   [
-    "ai-safety.md#known-limitations-and-future-eval-questions",
+    "ai-safety-case.md#known-limitations-and-future-eval-questions",
     "## Known limitations and future eval questions",
   ],
-  ["ai-safety.md#conclusion", "## Conclusion"],
+  ["ai-safety-case.md#conclusion", "## Conclusion"],
   ["../tests/harness/behavior-matrix.md#cases", "## Cases"],
   ["../tests/harness/behavior-matrix.md#risk-coverage-distribution", "## Risk Coverage Distribution"],
   ["../tests/harness/behavior-matrix.md#risk-to-assertion-coverage", "## Risk To Assertion Coverage"],
@@ -117,11 +117,11 @@ const QUESTION_CONTRACT = [
       "validated backend/committed state authority",
     ],
     directTargets: [
-      "architecture.md#總覽",
-      "architecture.md#主要元件",
-      "architecture.md#meal-logging",
-      "architecture.md#llm-boundary",
-      "architecture.md#data-model",
+      "system-architecture.md#總覽",
+      "system-architecture.md#主要元件",
+      "system-architecture.md#meal-logging",
+      "system-architecture.md#llm-boundary",
+      "system-architecture.md#data-model",
     ],
   },
   {
@@ -206,7 +206,7 @@ const QUESTION_CONTRACT = [
     ],
     directTargets: [
       "adr/0010-nutrition-safety-product-floor.md#decision",
-      "ai-safety.md#the-1200-kcal-product-safety-floor",
+      "ai-safety-case.md#the-1200-kcal-product-safety-floor",
     ],
   },
   {
@@ -220,7 +220,7 @@ const QUESTION_CONTRACT = [
       "preserved integrity",
       "unresolved conversational quality",
     ],
-    directTargets: ["ai-safety.md#known-limitations-and-future-eval-questions"],
+    directTargets: ["ai-safety-case.md#known-limitations-and-future-eval-questions"],
   },
   {
     id: "Q10",
@@ -251,7 +251,7 @@ const README_NARRATIVE_CONTRACT = [
     bulletAnchors: [
       ["文字或照片", "飲食紀錄"],
       ["可信賴的 LLM 應用工程", "typed contracts", "confirm-first proposals", "backend authority", "committed receipts", "deterministic evidence"],
-      ["30 分鐘", "docs/tour.md"],
+      ["30 分鐘", "docs/reviewer-tour.md"],
     ],
   },
   {
@@ -261,7 +261,7 @@ const README_NARRATIVE_CONTRACT = [
     bulletAnchors: [
       ["text or photos", "meal logging"],
       ["trustworthy LLM application engineering", "typed contracts", "confirm-first proposals", "backend authority", "committed receipts", "deterministic evidence"],
-      ["30-minute", "docs/tour.md"],
+      ["30-minute", "docs/reviewer-tour.md"],
     ],
   },
 ] as const;
@@ -486,12 +486,12 @@ function mutateTourContract(
   if (mutation === "remove_stop") fixture.stopIds.pop();
   if (mutation === "alter_minute") fixture.minutes[4] += 1;
   if (mutation === "omit_field") fixture.fields[3].pop();
-  if (mutation === "indirect_source") fixture.directTargets.set("Q07", ["ai-safety.md#deterministic-safety-cases"]);
+  if (mutation === "indirect_source") fixture.directTargets.set("Q07", ["ai-safety-case.md#deterministic-safety-cases"]);
   if (mutation === "exceed_hop") fixture.hops.set("Q01", 3);
   if (mutation === "change_readme_role") fixture.readmeRoles[1] = "product_feature_list";
   if (mutation === "swap_support_state") fixture.supportStates.set("cross-device continuity", "supported");
   if (mutation === "remove_case_assertion") fixture.caseAssertions.set("CASE-11", ["assertNoUnauthorizedMutation"]);
-  if (mutation === "break_fragment_heading") fixture.headings.set("architecture.md#llm-boundary", "## Model Boundary");
+  if (mutation === "break_fragment_heading") fixture.headings.set("system-architecture.md#llm-boundary", "## Model Boundary");
   if (mutation === "escaping_link") fixture.links.push("../../outside.md");
   if (mutation === "private_root") fixture.publicText = [".", ["plan", "ning"].join("")].join("");
   if (mutation === "overclaim") fixture.proofScope = "deterministic cases prove universal model safety and universal medical suitability";
@@ -536,15 +536,15 @@ describe("reviewer tour contract", () => {
     }
     const stopSourceJobs = [
       ["../README.md#為什麼做這個專案"],
-      ["architecture.md#總覽", "architecture.md#主要元件", "architecture.md#meal-logging", "architecture.md#llm-boundary", "architecture.md#data-model"],
+      ["system-architecture.md#總覽", "system-architecture.md#主要元件", "system-architecture.md#meal-logging", "system-architecture.md#llm-boundary", "system-architecture.md#data-model"],
       ["capability-matrix.md#capability-matrix"],
       ["adr/0001-metadata-only-llm-failure-localization.md#context", "adr/0001-metadata-only-llm-failure-localization.md#decision", "adr/0001-metadata-only-llm-failure-localization.md#consequences"],
       ["adr/0003-structured-boundaries-and-authoritative-state.md#context", "adr/0003-structured-boundaries-and-authoritative-state.md#decision", "adr/0003-structured-boundaries-and-authoritative-state.md#consequences"],
       ["adr/0006-agent-side-effect-policy-taxonomy.md#context", "adr/0006-agent-side-effect-policy-taxonomy.md#decision", "adr/0006-agent-side-effect-policy-taxonomy.md#consequences", "../server/orchestrator/tool-contract.ts"],
       ["adr/0010-nutrition-safety-product-floor.md#context", "adr/0010-nutrition-safety-product-floor.md#decision", "adr/0010-nutrition-safety-product-floor.md#verification"],
-      ["ai-safety.md#threat-model-trust-and-authority-boundaries", "ai-safety.md#deterministic-safety-cases", "ai-safety.md#the-1200-kcal-product-safety-floor"],
+      ["ai-safety-case.md#threat-model-trust-and-authority-boundaries", "ai-safety-case.md#deterministic-safety-cases", "ai-safety-case.md#the-1200-kcal-product-safety-floor"],
       ["../tests/harness/behavior-matrix.md#cases", "../tests/harness/behavior-matrix.md#risk-coverage-distribution", "../tests/harness/behavior-matrix.md#risk-to-assertion-coverage", "../tests/harness/cases/case-11-malicious-tool-json.ts", "../tests/harness/cases/case-12-unauthorized-goal-update.ts"],
-      ["ai-safety.md#known-limitations-and-future-eval-questions", "capability-matrix.md#capability-matrix"],
+      ["ai-safety-case.md#known-limitations-and-future-eval-questions", "capability-matrix.md#capability-matrix"],
     ] as const;
     for (let index = 0; index < stops.length; index += 1) {
       const stopTargets = extractMarkdownLinks(stops[index].body).map(({ target }) => target);
@@ -585,8 +585,8 @@ describe("reviewer tour contract", () => {
           assert.ok(bullets[index].includes(anchor), `${contract.path} bullet ${index + 1} missing ${anchor}`);
         }
       }
-      const tourLinks = extractMarkdownLinks(section).filter(({ target }) => target === "docs/tour.md");
-      assert.equal(tourLinks.length, 1, `${contract.path} narrative needs one docs/tour.md link`);
+      const tourLinks = extractMarkdownLinks(section).filter(({ target }) => target === "docs/reviewer-tour.md");
+      assert.equal(tourLinks.length, 1, `${contract.path} narrative needs one docs/reviewer-tour.md link`);
     });
   }
 
@@ -790,9 +790,9 @@ describe("contract mutation resistance", () => {
 
   it("mutation resistance: rejects reference links, bare URLs, and inline HTML", () => {
     for (const markdown of [
-      "[answer][source]\n[source]: architecture.md",
+      "[answer][source]\n[source]: system-architecture.md",
       "https://example.invalid/evidence",
-      '<a href="architecture.md">answer</a>',
+      '<a href="system-architecture.md">answer</a>',
     ]) {
       assert.throws(
         () => assertPublicMarkdownSurface(markdown, "docs/synthetic.md", true),

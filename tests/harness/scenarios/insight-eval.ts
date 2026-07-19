@@ -8,6 +8,7 @@ import {
 } from "../insight-fixtures.js";
 import { evaluateInsightAnswer, type InsightAssertionResult } from "../insight-assertions.js";
 import { buildInsightTraceArtifact } from "../llm-trace.js";
+import { buildPositiveScenarioResult } from "../positive-metadata.js";
 import type {
   VerificationScenario,
   ScenarioContext,
@@ -50,13 +51,7 @@ function failResult(
   failedStepName: string,
   artifacts: Record<string, unknown>,
 ): ScenarioResult {
-  return {
-    ok: false,
-    failedStep: failedStepName,
-    steps,
-    artifacts,
-    consoleSummary: `FAIL ${scenarioName} ${failedStepName}`,
-  };
+  return buildPositiveScenarioResult(scenarioName, false, steps, failedStepName);
 }
 
 function firstFailedAssertion(assertions: InsightAssertionResult[]): InsightAssertionResult | undefined {
@@ -178,12 +173,10 @@ const scenario: VerificationScenario = {
         }
       }
 
-      return {
-        ok: true,
-        steps,
-        artifacts,
-        consoleSummary: `PASS insight-eval ${steps.filter((step) => step.ok).length}/${steps.length}`,
-      };
+      return buildPositiveScenarioResult(scenarioName, true, steps, undefined, {
+        counts: { caseCount: cases.length },
+        assertions: { allCasesPassed: true },
+      });
     } finally {
       await fixture.close();
     }

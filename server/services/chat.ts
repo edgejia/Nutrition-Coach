@@ -30,6 +30,7 @@ import {
   type ProposalKind,
   type ProposalLane,
 } from "./proposal-cards.js";
+import type { SyncTransactionClient } from "./turn-state.js";
 
 type ChatMessageStatus = "complete" | "stopped" | "error";
 type ChatMessageRole = "user" | "assistant" | "tool" | string;
@@ -105,6 +106,142 @@ function formatToolSummary(toolName: string, content: string): string | undefine
 
 export function createChatService(db: AppDatabase) {
   const proposalCardService = createProposalCardService(db);
+
+  function saveAssistantReplyWithReceiptSync(
+    input: SaveAssistantReplyWithReceiptInput,
+    client: SyncTransactionClient = db.$client,
+  ): SavedChatMessage {
+    const id = crypto.randomUUID();
+    const createdAt = new Date().toISOString();
+    const outcomeFactInput = input.mutationOutcomeFact ?? input.outcomeFact;
+    client
+      .prepare(
+        `
+          INSERT INTO chat_messages (
+            id, device_id, role, content, tool_name, image_path, created_at, status
+          ) VALUES (?, ?, 'assistant', ?, NULL, NULL, ?, ?)
+        `,
+      )
+      .run(id, input.deviceId, input.content, createdAt, input.status ?? "complete");
+
+    if (input.receipt) {
+      client
+        .prepare(
+          `
+            INSERT INTO chat_meal_receipts (
+              id, device_id, assistant_message_id, tool_message_id,
+              meal_transaction_id, meal_revision_id, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+          `,
+        )
+        .run(
+          crypto.randomUUID(),
+          input.deviceId,
+          id,
+          input.receipt.toolMessageId ?? null,
+          input.receipt.mealTransactionId,
+          input.receipt.mealRevisionId,
+          createdAt,
+        );
+    }
+
+    if (outcomeFactInput !== undefined) {
+      const outcomeFact = validateChatMutationOutcomeFact(outcomeFactInput);
+      if (!outcomeFact) {
+        throw new Error("Invalid structured mutation outcome fact");
+      }
+      const outcome = mutationOutcomeFactToRow(outcomeFact);
+      client
+        .prepare(
+          `
+            INSERT INTO chat_mutation_outcomes (
+              id, device_id, assistant_message_id, tool_message_id,
+              action, affected_date, food_name, calories, protein, carbs, fat,
+              goal_calories, goal_protein, goal_carbs, goal_fat,
+              updated_goal_fields, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `,
+        )
+        .run(
+          crypto.randomUUID(),
+          input.deviceId,
+          id,
+          input.receipt?.toolMessageId ?? null,
+          outcome.action,
+          outcome.affectedDate,
+          outcome.foodName,
+          outcome.calories,
+          outcome.protein,
+          outcome.carbs,
+          outcome.fat,
+          outcome.goalCalories,
+          outcome.goalProtein,
+          outcome.goalCarbs,
+          outcome.goalFat,
+          outcome.updatedGoalFields,
+          createdAt,
+        );
+    }
+
+    return { id, createdAt };
+  }
+
+  function saveMessageSync(
+    deviceId: string,
+    role: ChatMessageRole,
+    content: string,
+    opts: { toolName?: string; imagePath?: string; status?: ChatMessageStatus } | undefined,
+    client: SyncTransactionClient = db.$client,
+  ): SavedChatMessage {
+    const id = crypto.randomUUID();
+    const createdAt = new Date().toISOString();
+    const imageAssetId = parseAssetRef(opts?.imagePath);
+    if (imageAssetId) {
+      const asset = client
+        .prepare("SELECT id FROM assets WHERE id = ? LIMIT 1")
+        .get(imageAssetId) as { id: string } | undefined;
+      if (!asset) {
+        client
+          .prepare(
+            `
+              INSERT INTO assets (id, device_id, storage_key, mime_type, byte_size, created_at)
+              VALUES (?, ?, ?, 'application/octet-stream', 0, ?)
+            `,
+          )
+          .run(imageAssetId, deviceId, `unresolved/${imageAssetId}`, createdAt);
+      }
+    }
+    client
+      .prepare(
+        `
+          INSERT INTO chat_messages (
+            id, device_id, role, content, tool_name, image_path, created_at, status
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        id,
+        deviceId,
+        role,
+        content,
+        opts?.toolName ?? null,
+        opts?.imagePath ?? null,
+        createdAt,
+        opts?.status ?? "complete",
+      );
+    if (imageAssetId) {
+      client
+        .prepare(
+          `
+            INSERT INTO asset_references (
+              id, asset_id, device_id, owner_type, owner_id, created_at
+            ) VALUES (?, ?, ?, 'chat_message', ?, ?)
+          `,
+        )
+        .run(`chat_message:${id}:${imageAssetId}`, imageAssetId, deviceId, id, createdAt);
+    }
+    return { id, createdAt };
+  }
 
   function deriveReceiptStatus(input: {
     deletedAt: string | null;
@@ -390,55 +527,26 @@ export function createChatService(db: AppDatabase) {
 
     getMealReceiptForAssistantMessage,
 
-    async saveAssistantReplyWithReceipt(input: SaveAssistantReplyWithReceiptInput): Promise<SavedChatMessage> {
-      const id = crypto.randomUUID();
-      const createdAt = new Date().toISOString();
-      const receiptId = crypto.randomUUID();
-      const outcomeFactInput = input.mutationOutcomeFact ?? input.outcomeFact;
-
-      return db.transaction((tx) => {
-        tx.insert(chatMessages).values({
-          id,
-          deviceId: input.deviceId,
-          role: "assistant",
-          content: input.content,
-          toolName: null,
-          imagePath: null,
-          createdAt,
-          status: input.status ?? "complete",
-        }).run();
-
-        if (input.receipt) {
-          tx.insert(chatMealReceipts).values({
-            id: receiptId,
-            deviceId: input.deviceId,
-            assistantMessageId: id,
-            toolMessageId: input.receipt.toolMessageId ?? null,
-            mealTransactionId: input.receipt.mealTransactionId,
-            mealRevisionId: input.receipt.mealRevisionId,
-            createdAt,
-          }).run();
+    saveAssistantReplyWithReceipt(input: SaveAssistantReplyWithReceiptInput): Promise<SavedChatMessage> {
+      if (db.$client.inTransaction) {
+        try {
+          return saveAssistantReplyWithReceiptSync(input, db.$client) as unknown as Promise<SavedChatMessage>;
+        } catch (error) {
+          return Promise.reject(error);
         }
-
-        if (outcomeFactInput !== undefined) {
-          const outcomeFact = validateChatMutationOutcomeFact(outcomeFactInput);
-          if (!outcomeFact) {
-            throw new Error("Invalid structured mutation outcome fact");
-          }
-
-          tx.insert(chatMutationOutcomes).values({
-            id: crypto.randomUUID(),
-            deviceId: input.deviceId,
-            assistantMessageId: id,
-            toolMessageId: input.receipt?.toolMessageId ?? null,
-            ...mutationOutcomeFactToRow(outcomeFact),
-            createdAt,
-          }).run();
-        }
-
-        return { id, createdAt };
-      });
+      }
+      db.$client.prepare("BEGIN").run();
+      try {
+        const saved = saveAssistantReplyWithReceiptSync(input, db.$client);
+        db.$client.prepare("COMMIT").run();
+        return Promise.resolve(saved);
+      } catch (error) {
+        db.$client.prepare("ROLLBACK").run();
+        return Promise.reject(error);
+      }
     },
+
+    saveAssistantReplyWithReceiptSync,
 
     async saveMessage(
       deviceId: string,
@@ -500,6 +608,16 @@ export function createChatService(db: AppDatabase) {
 
         return { id, createdAt };
       });
+    },
+
+    saveMessageSync(
+      deviceId: string,
+      role: ChatMessageRole,
+      content: string,
+      opts?: { toolName?: string; imagePath?: string; status?: ChatMessageStatus },
+      client?: SyncTransactionClient,
+    ) {
+      return saveMessageSync(deviceId, role, content, opts, client);
     },
 
     async getHistory(

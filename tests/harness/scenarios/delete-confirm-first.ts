@@ -20,6 +20,7 @@ import {
 } from "../policy-assertions.js";
 import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
+import { buildPositiveScenarioResult } from "../positive-metadata.js";
 import type {
   VerificationScenario,
   ScenarioContext,
@@ -75,13 +76,7 @@ function failResult(
   failedStepName: string,
   artifacts: Record<string, unknown>,
 ): ScenarioResult {
-  return {
-    ok: false,
-    failedStep: failedStepName,
-    steps,
-    artifacts,
-    consoleSummary: `FAIL ${SCENARIO_NAME} ${failedStepName}`,
-  };
+  return buildPositiveScenarioResult(SCENARIO_NAME, false, steps, failedStepName);
 }
 
 function summarizePolicyFact(fact: Record<string, unknown>): PolicyEvidence {
@@ -1132,12 +1127,10 @@ const scenario: VerificationScenario = {
       assert.equal(steps.length, STEP_NAMES.length, "negative delete controls not implemented");
       assertPolicyEvidenceHasNoForbiddenFields(artifacts);
 
-      return {
-        ok: true,
-        steps,
-        artifacts,
-        consoleSummary: `PASS ${SCENARIO_NAME} ${steps.length}/${STEP_NAMES.length}`,
-      };
+      return buildPositiveScenarioResult(SCENARIO_NAME, true, steps, undefined, {
+        counts: { expectedStepCount: STEP_NAMES.length },
+        assertions: { policyEvidenceValidated: true, metadataOnly: true },
+      });
     } catch (error) {
       const failedStep = STEP_NAMES.find((stepName) => !steps.some((step) => step.name === stepName)) ?? SCENARIO_NAME;
       steps.push(fail(failedStep, error instanceof Error ? error.message : String(error)));

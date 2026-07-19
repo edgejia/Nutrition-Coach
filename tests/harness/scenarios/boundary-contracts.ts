@@ -20,6 +20,7 @@ import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import { validJpegBytes } from "../../fixtures/image-bytes.js";
+import { buildPositiveScenarioResult } from "../positive-metadata.js";
 import { RealtimePublisher } from "../../../server/realtime/publisher.js";
 import type { createScenarioApp as createScenarioAppFn } from "../app-fixture.js";
 import type {
@@ -56,13 +57,7 @@ function failResult(
   failedStepName: string,
   artifacts: Record<string, unknown>,
 ): ScenarioResult {
-  return {
-    ok: false,
-    failedStep: failedStepName,
-    steps,
-    artifacts,
-    consoleSummary: `FAIL ${scenarioName} ${failedStepName}`,
-  };
+  return buildPositiveScenarioResult(scenarioName, false, steps, failedStepName);
 }
 
 function makeJpegBytes(): ArrayBuffer {
@@ -281,12 +276,7 @@ async function runUploadCleanup(): Promise<ScenarioResult> {
       return failResult(scenarioName, steps, "verify_upload_cleanup", artifacts);
     }
 
-    return {
-      ok: true,
-      steps,
-      artifacts,
-      consoleSummary: `PASS ${scenarioName} ${steps.filter((step) => step.ok).length}/${steps.length}`,
-    };
+    return buildPositiveScenarioResult(scenarioName, true, steps, undefined);
   } finally {
     await reader?.cancel().catch(() => {});
     await fixture.close();
@@ -394,12 +384,7 @@ async function runUploadCleanupFailure(): Promise<ScenarioResult> {
       return failResult(scenarioName, steps, "verify_upload_cleanup_on_failure", artifacts);
     }
 
-    return {
-      ok: true,
-      steps,
-      artifacts,
-      consoleSummary: `PASS ${scenarioName} ${steps.filter((step) => step.ok).length}/${steps.length}`,
-    };
+    return buildPositiveScenarioResult(scenarioName, true, steps, undefined);
   } finally {
     await reader?.cancel().catch(() => {});
     await fixture.close();
@@ -480,12 +465,7 @@ async function runStalePublisher(): Promise<ScenarioResult> {
   artifacts.writeLog = writeLog;
   steps.push(pass("verify_stale_removed", { totalWrites }));
 
-  return {
-    ok: true,
-    steps,
-    artifacts,
-    consoleSummary: `PASS ${scenarioName} ${steps.filter((step) => step.ok).length}/${steps.length}`,
-  };
+  return buildPositiveScenarioResult(scenarioName, true, steps, undefined);
 }
 
 const scenario: VerificationScenario = {
@@ -516,12 +496,7 @@ const scenario: VerificationScenario = {
       return failResult("boundary-contracts", steps, `stale-publisher:${stalePublisherResult.failedStep ?? "unknown"}`, artifacts);
     }
 
-    return {
-      ok: true,
-      steps,
-      artifacts,
-      consoleSummary: `PASS boundary-contracts ${steps.filter((step) => step.ok).length}/${steps.length}`,
-    };
+    return buildPositiveScenarioResult("boundary-contracts", true, steps, undefined);
   },
 };
 

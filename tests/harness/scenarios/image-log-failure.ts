@@ -21,6 +21,7 @@ import { LLMProviderError } from "../../../server/llm/errors.js";
 import type { ProviderErrorMetadata } from "../../../server/llm/types.js";
 import { createLlmTraceRecorder, type LlmTraceArtifact, type LlmTraceRecorder } from "../../../server/orchestrator/llm-trace.js";
 import { FAILED_RECOGNITION_NO_SAVE_REPLY } from "../../../server/orchestrator/tools.js";
+import { buildPositiveScenarioResult } from "../positive-metadata.js";
 import type { createSummaryService, DailySummary } from "../../../server/services/summary.js";
 import type { VerificationScenario, ScenarioContext, ScenarioResult, ScenarioStepResult } from "../scenario-types.js";
 
@@ -153,18 +154,32 @@ function buildResult(
   failedStep: string | undefined,
   steps: ScenarioStepResult[],
   artifacts: Record<string, unknown>,
-  llmTrace?: LlmTraceArtifact,
+  metadata?: Parameters<typeof buildPositiveScenarioResult>[4],
 ): ScenarioResult {
-  const passed = steps.filter((s) => s.ok).length;
-  const total = steps.length;
-  const consoleSummary = ok
-    ? `PASS image-log-failure ${passed}/${total}`
-    : `FAIL image-log-failure ${failedStep ?? "unknown"}`;
-  const result: ScenarioResult = { ok, failedStep, steps, artifacts, consoleSummary };
-  if (llmTrace !== undefined) {
-    result.llmTrace = llmTrace as unknown as Record<string, unknown>;
+  if (!ok) {
+    return buildPositiveScenarioResult("image-log-failure", false, steps, failedStep);
   }
-  return result;
+  return buildPositiveScenarioResult("image-log-failure", true, steps, undefined, metadata);
+}
+
+function buildSafeTraceMetadata(trace: LlmTraceArtifact): NonNullable<import("../scenario-types.js").ScenarioMetadata["trace"]> {
+  const eventNames = [...new Set(trace.timeline.map((event) => {
+    if (event.type === "llm_error") return "error";
+    if (event.type === "route_completion") return "done";
+    if (event.type === "orchestrator_fallback" || event.type === "route_fallback") return "error";
+    return "scenario";
+  }))];
+  const safeCount = (value: number): number => Number.isSafeInteger(value) && value >= 0 ? value : 0;
+  return {
+    eventNames,
+    counts: {
+      timelineEventCount: trace.timeline.length,
+      roundCount: safeCount(trace.summary.roundCount),
+      toolCount: safeCount(trace.summary.toolCount),
+      fallbackCount: safeCount(trace.summary.fallbackCount),
+      providerErrorCount: safeCount(trace.summary.providerErrorCount),
+    },
+  };
 }
 
 async function fetchHistory(address: string, cookieHeader: string): Promise<Array<{ role: string; content: string }>> {
@@ -869,7 +884,77 @@ const scenario: VerificationScenario = {
 
     allArtifacts.stepContract = { stepNames: [...STEP_NAMES] };
 
-    return buildResult(true, undefined, allSteps, allArtifacts, subALlmTrace);
+    const subAEvidence = allArtifacts.sub_a_analysis_fail as {
+      liveChunkEvidence?: { nonEmptyChunkBeforeDone?: boolean; nonEmptyChunkCount?: number };
+      falseLogChunkClaim?: boolean;
+      assistantCount?: number;
+      fallbackMatchedFriendly?: boolean;
+      mealCount?: number;
+    };
+    const subBEvidence = allArtifacts.sub_b_tool_fail as {
+      liveChunkEvidence?: { nonEmptyChunkBeforeDone?: boolean; nonEmptyChunkCount?: number };
+      falseLogChunkClaim?: boolean;
+      assistantCount?: number;
+      fallbackMatchedUnified?: boolean;
+      mealCount?: number;
+    };
+    const subCEvidence = allArtifacts.sub_c_reply_fail as {
+      donePayload?: { didLogMeal?: boolean; dailySummary?: unknown };
+      projectedReplyMatched?: boolean;
+      projectedReplyTextLength?: number;
+      mealKept?: boolean;
+      mealCount?: number;
+    };
+    const subDEvidence = allArtifacts.sub_d_failed_recognition_small as {
+      donePayload?: { didLogMeal?: boolean; didMutateMeal?: boolean };
+      mealCount?: number;
+    };
+    const subEEvidence = allArtifacts.sub_e_failed_recognition_large as {
+      donePayload?: { didLogMeal?: boolean; didMutateMeal?: boolean };
+      mealCount?: number;
+    };
+    const cleanupVerified = [
+      "sub_a_analysis_fail_route_upload_cleanup",
+      "sub_b_tool_fail_route_upload_cleanup",
+      "sub_c_reply_fail_route_upload_cleanup",
+      "sub_d_failed_recognition_small_route_upload_cleanup",
+      "sub_e_failed_recognition_large_route_upload_cleanup",
+    ].every((key) => {
+      const evidence = allArtifacts[key] as { filesAfterRouteCleanup?: unknown[]; cleanupLogSeen?: boolean } | undefined;
+      return evidence?.cleanupLogSeen === true && (evidence.filesAfterRouteCleanup?.length ?? 0) === 0;
+    });
+
+    return buildResult(true, undefined, allSteps, allArtifacts, {
+      counts: {
+        subScenarioCount: 5,
+        subAChunkCount: subAEvidence.liveChunkEvidence?.nonEmptyChunkCount ?? 0,
+        subBChunkCount: subBEvidence.liveChunkEvidence?.nonEmptyChunkCount ?? 0,
+        subCMealCount: subCEvidence.mealCount ?? 0,
+        subDMealCount: subDEvidence.mealCount ?? 0,
+        subEMealCount: subEEvidence.mealCount ?? 0,
+        subCReplyTextLength: subCEvidence.projectedReplyTextLength ?? 0,
+      },
+      assertions: {
+        subAChunkBeforeDone: subAEvidence.liveChunkEvidence?.nonEmptyChunkBeforeDone === true,
+        subAFalseLogChunkClaim: subAEvidence.falseLogChunkClaim === false,
+        subAFallbackFriendly: subAEvidence.fallbackMatchedFriendly === true,
+        subANoMeal: subAEvidence.mealCount === 0,
+        subBChunkBeforeDone: subBEvidence.liveChunkEvidence?.nonEmptyChunkBeforeDone === true,
+        subBFalseLogChunkClaim: subBEvidence.falseLogChunkClaim === false,
+        subBFallbackUnified: subBEvidence.fallbackMatchedUnified === true,
+        subBNoMeal: subBEvidence.mealCount === 0,
+        subCDidLogMeal: subCEvidence.donePayload?.didLogMeal === true,
+        subCDailySummaryPreserved: subCEvidence.donePayload?.dailySummary !== undefined,
+        subCProjectedReplyMatched: subCEvidence.projectedReplyMatched === true,
+        subCMealKept: subCEvidence.mealKept === true,
+        subDDidNotMutateMeal: subDEvidence.donePayload?.didLogMeal === false && subDEvidence.donePayload?.didMutateMeal === false,
+        subEDidNotMutateMeal: subEEvidence.donePayload?.didLogMeal === false && subEEvidence.donePayload?.didMutateMeal === false,
+        allUploadCleanupVerified: cleanupVerified,
+        fallbackTraceContractVerified: true,
+        rawEvidenceExcluded: true,
+      },
+      trace: buildSafeTraceMetadata(subALlmTrace),
+    });
   },
 };
 

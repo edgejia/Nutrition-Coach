@@ -26,6 +26,8 @@ export interface ParsedDependencyAudit {
 
 export interface DependencyAuditSummary {
   status: string;
+  evidenceState: "scanner_success" | "advisory_bitmask" | "endpoint_failure" | "error_record" | "incomplete" | "malformed";
+  clean: boolean;
   scope: string;
   command: string;
   args: string[];
@@ -45,7 +47,18 @@ export function parseYarnAuditJsonLines(
 
 export function summarizeAudit(
   parsed: ParsedDependencyAudit,
-  options?: { args?: string[]; exitStatus?: number; executionError?: unknown },
+  options?: { args?: string[]; exitStatus?: number; executionError?: unknown; endpointStatus?: number },
+): DependencyAuditSummary;
+
+export function classifyAuditEvidence(
+  stdout: string,
+  options?: {
+    args?: string[];
+    exitStatus?: number;
+    executionError?: unknown;
+    endpointStatus?: number;
+    dependencyGroups?: DependencyAuditGroups | null;
+  },
 ): DependencyAuditSummary;
 
 export function renderAuditReport(summary: DependencyAuditSummary): string;

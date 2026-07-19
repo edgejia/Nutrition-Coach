@@ -4,12 +4,8 @@ import { recordHomeCtaOptionSent } from "../api.js";
 import { getCoachAdvice, getCoachCTA } from "../coach-advice.js";
 import { createClientId } from "../lib/clientId.js";
 import { isNavigationEntryTrigger, type HomeNutritionSnapshot } from "../lib/home-animation-intent.js";
-import {
-  easeShared,
-  frameAt,
-  HOME_TIMELINE_DURATION_MS,
-  zeroEndpoints,
-} from "../lib/home-animation-timeline.js";
+import { zeroEndpoints } from "../lib/home-animation-timeline.js";
+import { runHomeAnimationEffect } from "../lib/home-animation-lifecycle.js";
 import type { HomeTimelineEndpoints, HomeTimelineFrame } from "../lib/home-animation-timeline.js";
 import { formatLocalDate } from "../lib/time.js";
 import { buildMealEditPayloadIfComplete } from "../meal-edit-payload.js";
@@ -190,7 +186,12 @@ function getSnapshotTimelineEndpoints(
   );
 }
 
-function useHomeNutritionTimeline(enabled: boolean): HomeTimelineFrame {
+type HomeNutritionTimeline = {
+  frame: HomeTimelineFrame;
+  running: boolean;
+};
+
+function useHomeNutritionTimeline(enabled: boolean): HomeNutritionTimeline {
   const dailySummary = useStore((s) => s.dailySummary);
   const dailyTargets = useStore((s) => s.dailyTargets);
   const pendingIntent = useStore((s) => s.homeAnimation.pendingIntent);
@@ -201,91 +202,41 @@ function useHomeNutritionTimeline(enabled: boolean): HomeTimelineFrame {
   );
   const [frame, setFrame] = useState<HomeTimelineFrame>(end);
   const [running, setRunning] = useState(false);
-  const frameRequestRef = useRef<number | null>(null);
-  const activeRunRef = useRef(0);
-  const lastStartedIntentTokenRef = useRef<number | null>(null);
   const runningRef = useRef(false);
+  const intentToken = pendingIntent?.token ?? null;
 
   useEffect(() => {
-    if (!enabled) {
-      return;
-    }
-
-    const intentToken = pendingIntent?.token ?? null;
-    const hasNewIntent = pendingIntent !== null && lastStartedIntentTokenRef.current !== intentToken;
-
-    if (!hasNewIntent) {
-      return;
-    }
-
-    if (intentToken !== null) {
-      lastStartedIntentTokenRef.current = intentToken;
-    }
+    if (!enabled || pendingIntent === null || intentToken === null) return;
 
     const start =
       pendingIntent?.kind === "delta" && pendingIntent.from
         ? getSnapshotTimelineEndpoints(pendingIntent.from, dailyTargets)
         : zeroEndpoints(end);
-    activeRunRef.current += 1;
-    const runId = activeRunRef.current;
+    const scheduler =
+      typeof requestAnimationFrame === "function" && typeof cancelAnimationFrame === "function"
+        ? { request: requestAnimationFrame.bind(window), cancel: cancelAnimationFrame.bind(window) }
+        : null;
+    const cleanup = runHomeAnimationEffect({
+      start,
+      end,
+      intentToken,
+      reducedMotion: prefersReducedMotion(),
+      scheduler,
+      onFrame: (nextFrame) => setFrame(nextFrame),
+      onRunningChange: (nextRunning) => {
+        runningRef.current = nextRunning;
+        setRunning(nextRunning);
+      },
+      onConsumeIntent: () => consumeHomeAnimationIntent(intentToken),
+    });
+    return cleanup;
+  }, [consumeHomeAnimationIntent, enabled, intentToken]);
 
-    if (frameRequestRef.current !== null) {
-      cancelAnimationFrame(frameRequestRef.current);
-      frameRequestRef.current = null;
-    }
-
-    const finishImmediately =
-      prefersReducedMotion() ||
-      typeof requestAnimationFrame !== "function" ||
-      typeof cancelAnimationFrame !== "function";
-
-    setFrame(finishImmediately ? end : frameAt(start, end, 0));
-    runningRef.current = !finishImmediately;
-    setRunning(!finishImmediately);
-    if (intentToken !== null) {
-      consumeHomeAnimationIntent(intentToken);
-    }
-
-    if (finishImmediately) {
-      return;
-    }
-
-    let startTime: number | null = null;
-    const step = (timestamp: number) => {
-      if (activeRunRef.current !== runId) {
-        return;
-      }
-
-      startTime ??= timestamp;
-      const progress = Math.min(1, (timestamp - startTime) / HOME_TIMELINE_DURATION_MS);
-      setFrame(frameAt(start, end, easeShared(progress)));
-
-      if (progress < 1) {
-        frameRequestRef.current = requestAnimationFrame(step);
-        return;
-      }
-
-      frameRequestRef.current = null;
-      runningRef.current = false;
-      setFrame(end);
-      setRunning(false);
-    };
-
-    frameRequestRef.current = requestAnimationFrame(step);
-  }, [consumeHomeAnimationIntent, dailyTargets, enabled, end, pendingIntent]);
-
-  useEffect(() => {
-    return () => {
-      activeRunRef.current += 1;
-      runningRef.current = false;
-      if (frameRequestRef.current !== null) {
-        cancelAnimationFrame(frameRequestRef.current);
-        frameRequestRef.current = null;
-      }
-    };
-  }, []);
-
-  return running || runningRef.current ? frame : end;
+  const animationRunning = enabled && (running || runningRef.current);
+  return {
+    frame: animationRunning ? frame : end,
+    running: animationRunning,
+  };
 }
 
 export function getMealMacroSummary(meal: Pick<MealEntry, "protein" | "carbs" | "fat">): string {
@@ -413,17 +364,23 @@ function CalorieHero({
   dailySummary,
   dailyTargets,
   frame,
+  animationRunning,
 }: {
   dailySummary: DailySummary | null;
   dailyTargets: DailyTargets | null;
   frame: HomeTimelineFrame;
+  animationRunning: boolean;
 }) {
   const display = getHomeCalorieDisplay(dailySummary, dailyTargets);
   const macros = getHomeMacroDisplays(dailySummary, dailyTargets);
 
   return (
     <>
-      <SportCard className="home-sport-hero" variant="glow">
+      <SportCard
+        className="home-sport-hero"
+        data-home-animation-state={animationRunning ? "running" : "complete"}
+        variant="glow"
+      >
         <div className="home-sport-hero-main">
           <div className="home-sport-calorie-copy">
             <div className="sp-label" style={{ marginBottom: 8 }}>
@@ -591,7 +548,8 @@ export function HomeScreen({ onRefreshToday, refreshingToday, refreshTodayError 
   const homeScrollRef = useRef<HTMLElement | null>(null);
   const lastNavigationScrollTokenRef = useRef<number | null>(null);
   const homeAnimationEnabled = secondaryScreen === null;
-  const frame = useHomeNutritionTimeline(homeAnimationEnabled);
+  const nutritionTimeline = useHomeNutritionTimeline(homeAnimationEnabled);
+  const frame = nutritionTimeline.frame;
 
   useEffect(() => {
     setCoachAdvice(coachAdvice);
@@ -644,7 +602,12 @@ export function HomeScreen({ onRefreshToday, refreshingToday, refreshTodayError 
           ariaLabel="下拉重新整理今日資料"
         >
           <main ref={homeScrollRef} className="screen-scroll home-sport-scroll">
-            <CalorieHero dailySummary={dailySummary} dailyTargets={dailyTargets} frame={frame} />
+            <CalorieHero
+              dailySummary={dailySummary}
+              dailyTargets={dailyTargets}
+              frame={frame}
+              animationRunning={nutritionTimeline.running}
+            />
             <CoachAdviceCard advice={coachAdvice} cta={cta} onTaskOptionClick={handleTaskOptionClick} disabled={sending} />
             <MealRows meals={meals} todayDateKey={todayDateKey} openMealEdit={openMealEdit} onEmptyChatClick={handleEmptyChatClick} />
           </main>

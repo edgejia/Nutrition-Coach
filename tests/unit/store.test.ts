@@ -65,6 +65,7 @@ function initialHomeAnimation() {
   return {
     baseline: null,
     unseenTodayMutation: false,
+    lastIssuedToken: 0,
     pendingIntent: null,
     homeVisibleMutationBaseline: null,
   };
@@ -459,6 +460,7 @@ describe("AppStore", () => {
       homeAnimation: {
         baseline: frozenBaseline,
         unseenTodayMutation: false,
+        lastIssuedToken: 0,
         pendingIntent: null,
         homeVisibleMutationBaseline: null,
       },
@@ -501,6 +503,7 @@ describe("AppStore", () => {
       homeAnimation: {
         baseline: frozenBaseline,
         unseenTodayMutation: true,
+        lastIssuedToken: 0,
         pendingIntent: null,
         homeVisibleMutationBaseline: null,
       },
@@ -539,6 +542,7 @@ describe("AppStore", () => {
           targets: dailyTargets,
         },
         unseenTodayMutation: false,
+        lastIssuedToken: 0,
         pendingIntent: null,
         homeVisibleMutationBaseline: null,
       },
@@ -567,6 +571,7 @@ describe("AppStore", () => {
       homeAnimation: {
         baseline: null,
         unseenTodayMutation: false,
+        lastIssuedToken: pendingIntent.token,
         pendingIntent,
         homeVisibleMutationBaseline: null,
       },
@@ -892,6 +897,7 @@ describe("AppStore", () => {
       homeAnimation: {
         baseline: frozenBaseline,
         unseenTodayMutation: true,
+        lastIssuedToken: 0,
         pendingIntent: null,
         homeVisibleMutationBaseline: null,
       },
@@ -916,12 +922,27 @@ describe("AppStore", () => {
     assert.equal(useStore.getState().homeAnimation.pendingIntent?.origin, "nav_from_history");
   });
 
+  it("keeps home animation tokens monotonic after the pending intent is consumed", () => {
+    useStore.setState({ activeScreen: "home", dailyTargets, homeAnimation: initialHomeAnimation() });
+    useStore.getState().setMeals(sampleMeals);
+
+    const firstToken = useStore.getState().homeAnimation.pendingIntent?.token;
+    assert.equal(firstToken, 1);
+    useStore.getState().consumeHomeAnimationIntent(firstToken);
+    assert.equal(useStore.getState().homeAnimation.pendingIntent, null);
+
+    useStore.getState().requestHomeEntryAnimation("nav_from_history");
+
+    assert.equal(useStore.getState().homeAnimation.pendingIntent?.token, firstToken + 1);
+  });
+
   it("goBack from an overlay does not create or consume home animation intent", () => {
     useStore.setState({
       activeScreen: "home",
       homeAnimation: {
         baseline: null,
         unseenTodayMutation: false,
+        lastIssuedToken: 0,
         pendingIntent: null,
         homeVisibleMutationBaseline: null,
       },
@@ -957,6 +978,7 @@ describe("AppStore", () => {
           targets: dailyTargets,
         },
         unseenTodayMutation: false,
+        lastIssuedToken: 0,
         pendingIntent: null,
         homeVisibleMutationBaseline: null,
       },
@@ -989,6 +1011,7 @@ describe("AppStore", () => {
       homeAnimation: {
         baseline,
         unseenTodayMutation: true,
+        lastIssuedToken: 0,
         pendingIntent: null,
         homeVisibleMutationBaseline: null,
       },
@@ -1025,6 +1048,7 @@ describe("AppStore", () => {
       homeAnimation: {
         baseline: oldBaseline,
         unseenTodayMutation: true,
+        lastIssuedToken: 0,
         pendingIntent: null,
         homeVisibleMutationBaseline: null,
       },
@@ -1074,6 +1098,7 @@ describe("AppStore", () => {
       homeAnimation: {
         baseline: oldBaseline,
         unseenTodayMutation: false,
+        lastIssuedToken: 0,
         pendingIntent: null,
         homeVisibleMutationBaseline: null,
       },
@@ -1119,6 +1144,7 @@ describe("AppStore", () => {
       homeAnimation: {
         baseline: oldBaseline,
         unseenTodayMutation: false,
+        lastIssuedToken: 0,
         pendingIntent: null,
         homeVisibleMutationBaseline: null,
       },
@@ -1169,6 +1195,7 @@ describe("AppStore", () => {
       homeAnimation: {
         baseline: currentBaseline,
         unseenTodayMutation: false,
+        lastIssuedToken: pendingIntent.token,
         pendingIntent,
         homeVisibleMutationBaseline: null,
       },
@@ -1191,6 +1218,7 @@ describe("AppStore", () => {
       homeAnimation: {
         baseline: null,
         unseenTodayMutation: false,
+        lastIssuedToken: pendingIntent.token,
         pendingIntent,
         homeVisibleMutationBaseline: null,
       },

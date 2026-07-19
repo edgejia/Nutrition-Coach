@@ -410,6 +410,8 @@ export async function reserveCommandReceiptPath(receiptPath, options) {
       expectedRuntime: options.expectedRuntime,
       purpose: "maintenance_check",
       maxDurationSeconds: options.maxDurationSeconds ?? 30,
+      fenceId: options.fenceId,
+      nestedCapability: options.nestedCapability,
       now: options.now,
     },
     async (holder) => {
@@ -518,6 +520,8 @@ async function finalizeCommandReceipt(options, receipt) {
       expectedRuntime: options.expectedRuntime,
       purpose: "maintenance_check",
       maxDurationSeconds: options.maxDurationSeconds ?? 30,
+      fenceId: options.fenceId,
+      nestedCapability: options.nestedCapability,
       now: options.now,
     },
     async (holder) => {

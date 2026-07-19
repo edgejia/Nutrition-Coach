@@ -742,8 +742,8 @@ describe("proposal action API", () => {
     const targets = { calories: 1400, protein: 125, carbs: 130, fat: 45 };
     const { proposalId } = await createGoalCard(targets);
     const goalReply = renderGoalUpdateReceipt(targets);
-    const originalSaveAssistantReplyWithReceipt = services.chatService.saveAssistantReplyWithReceipt;
-    services.chatService.saveAssistantReplyWithReceipt = async () => {
+    const originalSaveAssistantReplyWithReceipt = services.chatService.saveAssistantReplyWithReceiptSync;
+    services.chatService.saveAssistantReplyWithReceiptSync = () => {
       throw new Error("injected structured outcome persistence failure");
     };
 
@@ -768,7 +768,7 @@ describe("proposal action API", () => {
       proposalId,
     }))?.status, "active");
 
-    services.chatService.saveAssistantReplyWithReceipt = originalSaveAssistantReplyWithReceipt;
+    services.chatService.saveAssistantReplyWithReceiptSync = originalSaveAssistantReplyWithReceipt;
     const recovered = await app.inject({
       method: "POST",
       url: "/api/proposals/actions",

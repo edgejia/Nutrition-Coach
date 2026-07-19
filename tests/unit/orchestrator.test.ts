@@ -3713,13 +3713,13 @@ describe("Orchestrator - didLogMeal", () => {
     let clearPendingSelectionCalls = 0;
     const trackedMealCorrectionService = {
       ...mealCorrectionService,
-      async deleteMeal(...args: Parameters<typeof mealCorrectionService.deleteMeal>) {
+      deleteMealSync(...args: Parameters<typeof mealCorrectionService.deleteMealSync>) {
         deleteCalls.push({ mealId: args[1], expectedMealRevisionId: args[2] });
-        return mealCorrectionService.deleteMeal(...args);
+        return mealCorrectionService.deleteMealSync(...args);
       },
-      async clearPendingSelection(...args: Parameters<typeof mealCorrectionService.clearPendingSelection>) {
+      clearPendingSelectionSync(...args: Parameters<typeof mealCorrectionService.clearPendingSelectionSync>) {
         clearPendingSelectionCalls += 1;
-        return mealCorrectionService.clearPendingSelection(...args);
+        return mealCorrectionService.clearPendingSelectionSync(...args);
       },
     };
     const trackedProposalActionService = createProposalActionService({
@@ -3830,9 +3830,9 @@ describe("Orchestrator - didLogMeal", () => {
     let deleteCalls = 0;
     const authorityFailureMealCorrectionService = {
       ...mealCorrectionService,
-      async deleteMeal(...args: Parameters<typeof mealCorrectionService.deleteMeal>) {
+      deleteMealSync(...args: Parameters<typeof mealCorrectionService.deleteMealSync>) {
         deleteCalls += 1;
-        return mealCorrectionService.deleteMeal(...args);
+        return mealCorrectionService.deleteMealSync(...args);
       },
     };
     const authorityFailureMealDeleteProposalService = {
@@ -3840,7 +3840,7 @@ describe("Orchestrator - didLogMeal", () => {
       async getLatest() {
         return proposal;
       },
-      async consumeLatest() {
+      consumeLatestSync(..._args: Parameters<typeof mealDeleteProposalService.consumeLatestSync>) {
         return undefined;
       },
     };

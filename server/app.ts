@@ -26,9 +26,14 @@ import { createRecentMealLogStateService } from "./services/turn-state.js";
 import { createOrchestrator } from "./orchestrator/index.js";
 import { renderProposalInactiveCopy } from "./orchestrator/mutation-receipts.js";
 import { createTargetGenerationService } from "./services/target-generation.js";
+import {
+  createAdmissionLimiter,
+  type AdmissionLimiter,
+  type AdmissionLimiterOptions,
+} from "./services/admission-limiter.js";
 import { RealtimePublisher } from "./realtime/publisher.js";
 import { registerDeviceRoutes } from "./routes/device.js";
-import { registerChatRoutes } from "./routes/chat.js";
+import { registerChatRoutes, type ChatLifecycleTestHooks } from "./routes/chat.js";
 import { registerMealRoutes } from "./routes/meals.js";
 import { registerDaySnapshotRoutes } from "./routes/day-snapshot.js";
 import { registerHistoryRoutes } from "./routes/history.js";
@@ -76,9 +81,11 @@ export function getCorsRegistrationPolicy(input: {
 }
 
 export interface AppServices {
+  admissionLimiter: AdmissionLimiter;
   assetService: ReturnType<typeof createAssetService>;
   chatService: ReturnType<typeof createChatService>;
   db: AppDatabase;
+  deviceService: ReturnType<typeof createDeviceService>;
   foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   goalProposalService: ReturnType<typeof createGoalProposalService>;
   guestSessionService: ReturnType<typeof createGuestSessionService>;
@@ -97,6 +104,9 @@ export interface AppServices {
 export interface AppOptions {
   dbPath?: string;
   llmProvider: LLMProvider;
+  /** Optional injected admission limiter; tests may provide an injected clock and budgets. */
+  admissionLimiter?: AdmissionLimiter;
+  admissionLimiterOptions?: AdmissionLimiterOptions;
   /**
    * Override the directory where uploaded files are stored.
    * When omitted the route uses `config.uploadsStagingDir`. Pass a temp
@@ -121,6 +131,8 @@ export interface AppOptions {
   llmTraceRecorderFactory?: () => LlmTraceRecorder | undefined;
   /** Test harness observer for in-process service access. Does not expose an HTTP surface. */
   onServicesReady?: (services: AppServices) => void;
+  /** Test-only observer for exercising wired SSE response/stream lifecycle signals. */
+  chatLifecycleTestHooks?: ChatLifecycleTestHooks;
   /** Test-only proposal action failure hooks. Not exposed through HTTP. */
   proposalActionTestHooks?: ProposalActionTestHooks;
 }
@@ -188,7 +200,8 @@ export async function buildApp(opts: AppOptions) {
 
   const db = createDb(opts.dbPath ?? config.dbPath);
   const deviceService = createDeviceService(db);
-  const targetGenerationService = createTargetGenerationService(llmProvider, app.log);
+  const admissionLimiter = opts.admissionLimiter ?? createAdmissionLimiter(opts.admissionLimiterOptions);
+  const targetGenerationService = createTargetGenerationService(llmProvider, app.log, admissionLimiter);
   const foodLoggingService = createFoodLoggingService(db);
   const guestSessionService = createGuestSessionService({
     secret: config.guestSessionSecret,
@@ -253,9 +266,11 @@ export async function buildApp(opts: AppOptions) {
   });
 
   opts.onServicesReady?.({
+    admissionLimiter,
     assetService,
     chatService,
     db,
+    deviceService,
     foodLoggingService,
     goalProposalService,
     guestSessionService,
@@ -281,7 +296,7 @@ export async function buildApp(opts: AppOptions) {
   await app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024 } });
 
   registerProtectedRouteSupport(app);
-  registerDeviceRoutes(app, { deviceService, guestSessionService, targetGenerationService });
+  registerDeviceRoutes(app, { deviceService, guestSessionService, targetGenerationService, admissionLimiter });
   registerChatRoutes(app, {
     orchestrator,
     chatService,
@@ -295,6 +310,8 @@ export async function buildApp(opts: AppOptions) {
     publisher,
     uploadsDir: opts.uploadsDir,
     llmTraceRecorderFactory: opts.llmTraceRecorderFactory,
+    admissionLimiter,
+    lifecycleTestHooks: opts.chatLifecycleTestHooks,
   });
   registerMealRoutes(app, { foodLoggingService, summaryService, deviceService, guestSessionService, assetService, publisher });
   registerProposalActionRoutes(app, { proposalActionService, deviceService, guestSessionService });

@@ -19,6 +19,11 @@ import {
 } from "../observability/events.js";
 import type { Goal, IntakeFields, DailyTargets } from "./device.js";
 import { getGoalDefaults } from "./device.js";
+import {
+  AdmissionRejectedError,
+  type AdmissionLimiter,
+  type AdmissionSubject,
+} from "./admission-limiter.js";
 
 export const TARGET_GENERATION_METADATA_CONTEXT = "target_generation";
 export const TARGET_GENERATION_MAX_COACH_EXPLANATION_CHARS = 160;
@@ -85,6 +90,17 @@ interface TargetGenerationResult {
   dailyTargets: DailyTargets;
   coachExplanation: string;
   usedFallback: boolean;
+}
+
+export const MIN_ADULT_AGE = 18;
+export const MAX_INTAKE_AGE = 120;
+
+export function isAdultIntakeAge(age: number) {
+  return Number.isFinite(age) && age >= MIN_ADULT_AGE && age <= MAX_INTAKE_AGE;
+}
+
+export interface TargetGenerationOptions extends LLMCallOptions {
+  admissionSubject?: AdmissionSubject;
 }
 
 const CALORIE_BOUNDS: Record<Goal, { min: number; max: number }> = {
@@ -346,46 +362,67 @@ function logFallback(
   });
 }
 
-export function createTargetGenerationService(llmProvider: LLMProvider, log?: FastifyBaseLogger) {
+export function createTargetGenerationService(
+  llmProvider: LLMProvider,
+  log?: FastifyBaseLogger,
+  admissionLimiter?: AdmissionLimiter,
+) {
   return {
-    async generateTargets(goal: Goal, intake: IntakeFields, opts?: LLMCallOptions): Promise<TargetGenerationResult> {
-      const messages = buildMessages(goal, intake);
-
-      let finalFailure: TargetGenerationFailureSummary | undefined;
-
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        try {
-          const response = await llmProvider.generateObject(messages, buildTargetGenerationRequest(), opts);
-          if (!response.ok) {
-            finalFailure = classifyProviderFailure(response);
-            logAttemptFailure(log, attempt, finalFailure);
-            continue;
-          }
-
-          const domainResult = validateTargetDomain(goal, response.value);
-          if (!domainResult.ok) {
-            finalFailure = domainResult.failure;
-            logAttemptFailure(log, attempt, finalFailure);
-            continue;
-          }
-
-          return {
-            dailyTargets: domainResult.dailyTargets,
-            coachExplanation: response.value.coachExplanation,
-            usedFallback: false,
-          };
-        } catch (error) {
-          finalFailure = classifyThrownFailure(error);
-          logAttemptFailure(log, attempt, finalFailure);
-        }
+    async generateTargets(goal: Goal, intake: IntakeFields, opts?: TargetGenerationOptions): Promise<TargetGenerationResult> {
+      if (!isAdultIntakeAge(intake.age)) {
+        throw new Error("Adult intake is required");
       }
 
-      logFallback(log, 2, finalFailure ?? {
-        providerReason: "provider_error",
-        targetReason: "provider_error",
-        metadataContext: TARGET_GENERATION_METADATA_CONTEXT,
-      });
-      return getFallbackResult(goal);
+      const admission = admissionLimiter?.tryAcquire("provider", opts?.admissionSubject);
+      if (admission && !admission.ok) {
+        throw new AdmissionRejectedError(admission);
+      }
+      const permit = admission?.permit;
+
+      try {
+        const messages = buildMessages(goal, intake);
+        let finalFailure: TargetGenerationFailureSummary | undefined;
+
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          try {
+            const response = await llmProvider.generateObject(
+              messages,
+              buildTargetGenerationRequest(),
+              opts?.signal ? { signal: opts.signal } : undefined,
+            );
+            if (!response.ok) {
+              finalFailure = classifyProviderFailure(response);
+              logAttemptFailure(log, attempt, finalFailure);
+              continue;
+            }
+
+            const domainResult = validateTargetDomain(goal, response.value);
+            if (!domainResult.ok) {
+              finalFailure = domainResult.failure;
+              logAttemptFailure(log, attempt, finalFailure);
+              continue;
+            }
+
+            return {
+              dailyTargets: domainResult.dailyTargets,
+              coachExplanation: response.value.coachExplanation,
+              usedFallback: false,
+            };
+          } catch (error) {
+            finalFailure = classifyThrownFailure(error);
+            logAttemptFailure(log, attempt, finalFailure);
+          }
+        }
+
+        logFallback(log, 2, finalFailure ?? {
+          providerReason: "provider_error",
+          targetReason: "provider_error",
+          metadataContext: TARGET_GENERATION_METADATA_CONTEXT,
+        });
+        return getFallbackResult(goal);
+      } finally {
+        permit?.release();
+      }
     },
   };
 }

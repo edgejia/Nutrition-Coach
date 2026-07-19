@@ -138,6 +138,17 @@ const UNSAFE_PROVIDER_METADATA_LABEL_FRAGMENTS = [
   "token",
   "upload",
 ] as const;
+export const PROVIDER_ERROR_CATEGORIES = [
+  "aborted",
+  "auth",
+  "rate_limited",
+  "invalid_request",
+  "timeout",
+  "server_error",
+  "network",
+  "unknown",
+] as const;
+export type ProviderErrorCategory = (typeof PROVIDER_ERROR_CATEGORIES)[number];
 export type IntakeObservabilityField = (typeof INTAKE_FIELDS)[number];
 export type GoalUpdateField = (typeof GOAL_UPDATE_FIELDS)[number];
 export type OwnershipBypassBlockedReason = (typeof OWNERSHIP_BYPASS_BLOCKED_REASONS)[number];
@@ -385,7 +396,33 @@ function sanitizeProviderOperation(operation: ProviderErrorMetadata["operation"]
   return SAFE_PROVIDER_OPERATIONS.has(operation) ? operation : "chat";
 }
 
-function sanitizeProviderMetadataLabel(value: string): string {
+const SAFE_PROVIDER_ERROR_NAMES = new Set([
+  "Error",
+  "APIUserAbortError",
+  "AuthenticationError",
+  "InternalServerError",
+  "OpenAINoChoicesError",
+  "PermissionDeniedError",
+  "RateLimitError",
+]);
+const SAFE_PROVIDER_ERROR_TYPES = new Set([
+  "invalid_request_error",
+  "permission_error",
+  "rate_limit_error",
+  "rate_limit_exceeded",
+  "server_error",
+]);
+const SAFE_PROVIDER_ERROR_CODES = new Set([
+  "forbidden",
+  "internal_error",
+  "invalid_api_key",
+  "rate_limit",
+  "rate_limit_exceeded",
+  "stream_failed",
+  "upstream_failed",
+]);
+
+function sanitizeProviderMetadataLabel(value: string, kind: "model" | "providerRequestId" | "errorName" | "errorType" | "errorCode"): string {
   const normalized = value.toLowerCase();
   if (
     !/^[A-Za-z0-9_.:-]+$/.test(value)
@@ -393,14 +430,52 @@ function sanitizeProviderMetadataLabel(value: string): string {
   ) {
     return "redacted";
   }
+  if (kind === "model" && !/^(?:gpt-[A-Za-z0-9_.:-]{1,64}|mock)$/.test(value)) return "redacted";
+  if (kind === "providerRequestId" && !/^req_[A-Za-z0-9_.:-]{1,80}$/.test(value)) return "redacted";
+  if (kind === "errorName" && !SAFE_PROVIDER_ERROR_NAMES.has(value)) return "redacted";
+  if (kind === "errorType" && !SAFE_PROVIDER_ERROR_TYPES.has(value)) return "redacted";
+  if (kind === "errorCode" && !SAFE_PROVIDER_ERROR_CODES.has(value)) return "redacted";
   return value;
 }
 
-function sanitizeProviderMetadata(metadata: ProviderErrorMetadata): ProviderErrorMetadata {
+export function classifyProviderErrorCategory(
+  metadata: Partial<ProviderErrorMetadata>,
+): ProviderErrorCategory {
+  if (metadata.aborted === true) {
+    return "aborted";
+  }
+
+  const labels = [metadata.errorName, metadata.errorType, metadata.errorCode]
+    .filter((label): label is string => typeof label === "string")
+    .join(" ")
+    .toLowerCase();
+
+  if (metadata.status === 401 || metadata.status === 403 || /auth|unauthoriz|forbidden|invalid_api_key/.test(labels)) {
+    return "auth";
+  }
+  if (metadata.status === 429 || /rate.?limit|too_many_requests/.test(labels)) {
+    return "rate_limited";
+  }
+  if (/timeout|timed.?out/.test(labels)) {
+    return "timeout";
+  }
+  if (metadata.status === 400 || /invalid.?request|bad.?request/.test(labels)) {
+    return "invalid_request";
+  }
+  if (metadata.status !== undefined && metadata.status >= 500 || /server.?error|internal.?error/.test(labels)) {
+    return "server_error";
+  }
+  if (/network|connection|econn|dns/.test(labels)) {
+    return "network";
+  }
+  return "unknown";
+}
+
+export function sanitizeProviderMetadata(metadata: ProviderErrorMetadata): ProviderErrorMetadata {
   const sanitized: ProviderErrorMetadata = {
-    provider: "openai",
+    provider: metadata.provider === "mock" ? "mock" : "openai",
     operation: sanitizeProviderOperation(metadata.operation),
-    model: sanitizeProviderMetadataLabel(metadata.model),
+    model: sanitizeProviderMetadataLabel(metadata.model, "model"),
     aborted: metadata.aborted,
   };
 
@@ -408,16 +483,16 @@ function sanitizeProviderMetadata(metadata: ProviderErrorMetadata): ProviderErro
     sanitized.status = metadata.status;
   }
   if (metadata.providerRequestId !== undefined) {
-    sanitized.providerRequestId = sanitizeProviderMetadataLabel(metadata.providerRequestId);
+    sanitized.providerRequestId = sanitizeProviderMetadataLabel(metadata.providerRequestId, "providerRequestId");
   }
   if (metadata.errorName !== undefined) {
-    sanitized.errorName = sanitizeProviderMetadataLabel(metadata.errorName);
+    sanitized.errorName = sanitizeProviderMetadataLabel(metadata.errorName, "errorName");
   }
   if (metadata.errorType !== undefined) {
-    sanitized.errorType = sanitizeProviderMetadataLabel(metadata.errorType);
+    sanitized.errorType = sanitizeProviderMetadataLabel(metadata.errorType, "errorType");
   }
   if (metadata.errorCode !== undefined) {
-    sanitized.errorCode = sanitizeProviderMetadataLabel(metadata.errorCode);
+    sanitized.errorCode = sanitizeProviderMetadataLabel(metadata.errorCode, "errorCode");
   }
 
   return sanitized;

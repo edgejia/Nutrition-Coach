@@ -70,6 +70,20 @@ export interface MealTransactionUpdateResult {
   items: MealTransactionItemInput[];
 }
 
+export interface MealTransactionSnapshot {
+  header: {
+    id: string;
+    deviceId: string;
+    loggedAt: string;
+    mealPeriod: MealPeriod | null;
+    currentRevisionId: string;
+    currentRevisionNumber: number;
+    deletedAt: string | null;
+    createdAt: string;
+  };
+  items: Array<MealTransactionItemInput & { revisionId: string }>;
+}
+
 interface MealTransactionRow {
   id: string;
   deviceId: string;
@@ -116,7 +130,10 @@ export class MealRevisionPreconditionError extends Error {
   }
 }
 
-export function createMealTransactionsService(db: AppDatabase) {
+export function createMealTransactionsService(
+  db: AppDatabase,
+  options: { afterHeaderRead?: () => void } = {},
+) {
   function normalizeItems(items: MealTransactionItemInput[]) {
     if (items.length === 0) {
       throw new Error("MEAL_ITEMS_REQUIRED");
@@ -298,6 +315,43 @@ export function createMealTransactionsService(db: AppDatabase) {
       }
 
       return items;
+    },
+
+    async getCurrentSnapshotForMutation(
+      deviceId: string,
+      transactionId: string,
+      expectedMealRevisionId?: string | null,
+    ): Promise<MealTransactionSnapshot> {
+      return db.transaction((tx) => {
+        const existing = getTransactionByDeviceAndIdFromReader(tx, deviceId, transactionId);
+
+        if (!existing) {
+          throw new Error("MEAL_NOT_FOUND");
+        }
+
+        assertMutableExpectedRevision(existing, expectedMealRevisionId);
+        options.afterHeaderRead?.();
+
+        const items = tx
+          .select({
+            revisionId: mealRevisionItems.revisionId,
+            foodName: mealRevisionItems.foodName,
+            calories: mealRevisionItems.calories,
+            protein: mealRevisionItems.protein,
+            carbs: mealRevisionItems.carbs,
+            fat: mealRevisionItems.fat,
+          })
+          .from(mealRevisionItems)
+          .where(eq(mealRevisionItems.revisionId, existing.currentRevisionId))
+          .orderBy(asc(mealRevisionItems.position))
+          .all();
+
+        if (items.length === 0) {
+          throw new Error("MEAL_ITEMS_REQUIRED");
+        }
+
+        return { header: existing, items };
+      });
     },
 
     async getMealMutationGuard(

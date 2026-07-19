@@ -70,8 +70,11 @@ import {
 import { isGoalProposalCancel, isGoalProposalConsent, stripToolLikeRegions } from "./source-text-guard.js";
 import {
   NUTRITION_SAFETY_CALORIE_FLOOR,
+  canonicalizeNutritionSafetyText,
+  decideNutritionSafetyBoundary,
   hasSafeUnsafeNutritionBoundaryReply,
   hasUnsafeNutritionGuidance,
+  resolveBufferedNutritionReply,
 } from "./nutrition-safety-policy.js";
 import { isRelativeLowerGoalAdjustmentIntent } from "./goal-adjustment-policy.js";
 import {
@@ -80,6 +83,7 @@ import {
 } from "./summary-history-renderer.js";
 export type { SummaryHistoryFacts } from "./summary-history-renderer.js";
 import {
+  bufferPlanningAdvice,
   composePlanningReply,
   derivePlanningFacts,
   guardPlanningAdvice,
@@ -407,9 +411,7 @@ function hasExplicitNumericGoalValue(message: string): boolean {
 }
 
 function normalizeNumericToken(value: string): number {
-  const ascii = value
-    .replace(/[０-９]/g, (digit) => String.fromCharCode(digit.charCodeAt(0) - 0xfee0))
-    .replace(/．/g, ".")
+  const ascii = canonicalizeNutritionSafetyText(value)
     .replace(/[,，]/g, "");
   return Number(ascii);
 }
@@ -506,9 +508,10 @@ function hasExplicitUnsafeCalorieGoalValue(message: string, previousAssistantMes
 }
 
 function needsUnsafeNutritionBoundaryReply(userMessage: string, reply: string): boolean {
-  const conversationalMessage = stripToolLikeRegions(userMessage);
-  return hasUnsafeNutritionGuidance(reply)
-    || (hasUnsafeNutritionGuidance(conversationalMessage) && !hasSafeUnsafeNutritionBoundaryReply(reply));
+  const conversationalMessage = stripToolLikeRegions(canonicalizeNutritionSafetyText(userMessage));
+  const replyDecision = decideNutritionSafetyBoundary(reply);
+  return !replyDecision.safe
+    || (hasUnsafeNutritionGuidance(conversationalMessage) && !hasSafeUnsafeNutritionBoundaryReply(replyDecision.canonicalText));
 }
 
 function buildRelativeLowerGoalAdjustmentContext(targets: DailyTargets): ChatMessage {
@@ -928,7 +931,15 @@ function finalizePlanningReply(
 ):
   | { kind: "reply"; reply: string; finalReplySource: LlmTraceFinalReplySource }
   | { kind: "repair"; messages: ChatMessage[] } {
-  const guarded = guardPlanningAdvice(advice, facts, {
+  const buffered = bufferPlanningAdvice(advice, facts);
+  if (buffered.usedFallback) {
+    return {
+      kind: "reply",
+      reply: buffered.reply,
+      finalReplySource: "fallback",
+    };
+  }
+  const guarded = guardPlanningAdvice(buffered.reply, facts, {
     repairAttempted: options.repairAttempted,
   });
   if (guarded.status === "needs_repair") {
@@ -964,43 +975,83 @@ async function collectStreamText(stream: AsyncGenerator<string>): Promise<string
 async function* guardUnsafeNutritionStream(
   userMessage: string,
   stream: AsyncGenerator<string>,
-  options: { onFallback?: () => void; bufferWholeReply?: boolean } = {},
+  options: { onFallback?: () => void; bufferWholeReply?: boolean; signal?: AbortSignal } = {},
 ): AsyncGenerator<string> {
-  // Goal-context turns buffer the whole reply before the unsafe-reply decision:
-  // once a token is emitted over SSE it cannot be recalled, so a mid-stream
-  // fallback would concatenate the emitted model prefix with the refusal copy
-  // (the UAT-21 我會用你的目我不能 failure).
-  const bufferWholeReply = options.bufferWholeReply === true
-    || hasUnsafeNutritionGuidance(stripToolLikeRegions(userMessage));
-  let held = "";
-  let emittedTail = "";
-
-  for await (const token of stream) {
-    held += token;
-    if (!bufferWholeReply && needsUnsafeNutritionBoundaryReply(userMessage, held)) {
-      options.onFallback?.();
-      yield renderUnsafeNutritionGuidanceCopy();
+  // A stream is not safe merely because its current prefix is safe.  Buffer
+  // the complete provider reply so a late frame can replace the entire
+  // response before SSE, JSON-drain output, or assistant history sees it.
+  void options.bufferWholeReply;
+  let fullReply = "";
+  const frames: string[] = [];
+  async function* emitValidatedReply(reply: string): AsyncGenerator<string> {
+    if (canonicalizeNutritionSafetyText(frames.join("")) === reply) {
+      for (const [index, frame] of frames.entries()) {
+        if (options.signal?.aborted) {
+          return;
+        }
+        yield frame;
+        if (options.signal && index < frames.length - 1) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 10));
+        }
+      }
       return;
     }
 
-    if (!bufferWholeReply && !mayContainUnsafeNutritionPrefix(held, emittedTail)) {
-      emittedTail = `${emittedTail}${held}`.slice(-96);
-      yield held;
-      held = "";
+    const canonicalFrames = frames.map((frame) => canonicalizeNutritionSafetyText(frame));
+    if (canonicalFrames.join("") !== reply) {
+      if (!options.signal?.aborted) {
+        yield reply;
+      }
+      return;
+    }
+
+    for (const [index, frame] of canonicalFrames.entries()) {
+      if (options.signal?.aborted) {
+        return;
+      }
+      yield frame;
+      // The complete reply has already passed the safety decision. Yielding
+      // at an event-loop boundary keeps the established stop endpoint able to
+      // interrupt between visible, already-validated frames.
+      if (options.signal && index < canonicalFrames.length - 1) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 10));
+      }
     }
   }
+  try {
+    for await (const token of stream) {
+      frames.push(token);
+      fullReply += token;
+    }
+  } catch (error) {
+    // Preserve the provider-stream continuation contract: a safe prefix may
+    // still be observed before the provider error reaches its existing
+    // fallback path. Never release a prefix that already looks like an unsafe
+    // nutrition construction, because its next frame is unknowable here.
+  const buffered = resolveBufferedNutritionReply({
+      userMessage,
+      reply: fullReply,
+      fallbackText: renderUnsafeNutritionGuidanceCopy(),
+    });
+    if (fullReply && !buffered.usedFallback && !mayContainUnsafeNutritionPrefix(fullReply)) {
+      yield* emitValidatedReply(buffered.reply);
+    }
+    throw error;
+  }
 
-  if (!held) {
+  if (!fullReply) {
     return;
   }
 
-  if (needsUnsafeNutritionBoundaryReply(userMessage, held)) {
+  const buffered = resolveBufferedNutritionReply({
+    userMessage,
+    reply: fullReply,
+    fallbackText: renderUnsafeNutritionGuidanceCopy(),
+  });
+  if (buffered.usedFallback) {
     options.onFallback?.();
-    yield renderUnsafeNutritionGuidanceCopy();
-    return;
   }
-
-  yield held;
+  yield* emitValidatedReply(buffered.reply);
 }
 
 function mayContainUnsafeNutritionPrefix(text: string, previousText = ""): boolean {
@@ -1026,13 +1077,14 @@ function mayContainSubFloorCalorieGuidancePrefix(text: string): boolean {
 function createUnsafeNutritionGuardedStream(
   userMessage: string,
   stream: AsyncGenerator<string>,
-  options: { bufferWholeReply?: boolean } = {},
+  options: { bufferWholeReply?: boolean; signal?: AbortSignal } = {},
 ): { stream: AsyncGenerator<string>; metadata: StreamFinalReplyTraceMetadata } {
   const metadata: StreamFinalReplyTraceMetadata = {};
   return {
     metadata,
     stream: guardUnsafeNutritionStream(userMessage, stream, {
       bufferWholeReply: options.bufferWholeReply,
+      signal: options.signal,
       onFallback: () => {
         metadata.finalReplySource = "renderer";
         metadata.finalReplyShape = "fallback_text";
@@ -1625,6 +1677,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               } else {
                 const guardedStream = createUnsafeNutritionGuardedStream(userMessage, observedStream, {
                   bufferWholeReply: Boolean(activeGoalProposal) || hasCalorieGoalTargetContext(userMessage),
+                  signal: opts?.signal,
                 });
                 opts?.hooks?.onLLMEnd?.(round + 1, false);
                 return {
@@ -1665,6 +1718,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               } else {
                 const guardedStream = createUnsafeNutritionGuardedStream(userMessage, observedStream, {
                   bufferWholeReply: Boolean(activeGoalProposal) || hasCalorieGoalTargetContext(userMessage),
+                  signal: opts?.signal,
                 });
                 opts?.hooks?.onLLMEnd?.(round + 1, false);
                 return {
@@ -1900,6 +1954,18 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           const toolResults: Array<{ toolCall: typeof response.toolCalls[number]; result: string }> = [];
           for (const toolCall of response.toolCalls) {
             try {
+              if (opts?.signal?.aborted) {
+                return {
+                  reply: "",
+                  didLogMeal,
+                  didMutateMeal,
+                  ...mutationOutcomeFactFields(mutationOutcomeFact),
+                  ...deletedMealIdFields(deletedMealId),
+                  ...mutationStateFields(committedMutationState),
+                  finalReplySource: "fallback",
+                  finalReplyShape: "empty_or_missing",
+                };
+              }
               // D-03: emit progress label before executing log_food so the route
               // can surface it during the real waiting period, before tokens arrive.
               if (toolCall.function.name === "log_food") {
@@ -1914,6 +1980,18 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 lastTool = toolCall.function.name;
               }
               opts?.hooks?.onToolReceived?.(toolCall.function.name, argsRedacted);
+              if (opts?.signal?.aborted) {
+                return {
+                  reply: "",
+                  didLogMeal,
+                  didMutateMeal,
+                  ...mutationOutcomeFactFields(mutationOutcomeFact),
+                  ...deletedMealIdFields(deletedMealId),
+                  ...mutationStateFields(committedMutationState),
+                  finalReplySource: "fallback",
+                  finalReplyShape: "empty_or_missing",
+                };
+              }
               const {
                 result,
                 summary,
@@ -2124,15 +2202,25 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               }
               toolResults.push({ toolCall, result });
             } catch (toolErr) {
-              const errorStr = toolErr instanceof Error ? toolErr.message : "Tool execution failed";
+              // Tool/provider/database errors are never conversational data.
+              // Only fixed categories and typed, allowlisted diagnostics may
+              // cross into hooks or the next provider round.
+              const safeFailureReason = isFatalToolError(toolErr)
+                ? toolErr.diagnostic?.failureReason ?? "execute"
+                : "execute";
+              const safeDiagnosticReason = isFatalToolError(toolErr)
+                && typeof toolErr.diagnostic?.reason === "string"
+                && /^[a-z_]{1,48}$/.test(toolErr.diagnostic.reason)
+                ? toolErr.diagnostic.reason
+                : undefined;
               if (isFatalToolError(toolErr)) {
                 // Validation failed before execution — emit executed:false BEFORE propagating
                 opts?.hooks?.onToolResult?.({
                   tool: toolCall.function.name,
                   success: false,
                   executed: false,
-                  failureReason: toolErr.diagnostic?.failureReason ?? errorStr,
-                  reason: toolErr.diagnostic?.reason,
+                  failureReason: safeFailureReason,
+                  reason: safeDiagnosticReason,
                   fields: toolErr.diagnostic?.fields,
                   ...policyFactPayload(toolErr.diagnostic?.policyFact, opts?.turnId),
                 });
@@ -2160,9 +2248,9 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 tool: toolCall.function.name,
                 success: false,
                 executed: true,
-                failureReason: errorStr,
+                failureReason: safeFailureReason,
               });
-              toolResults.push({ toolCall, result: `Error: ${errorStr}` });
+              toolResults.push({ toolCall, result: "Error: tool execution failed" });
             }
           }
           messages.push({ role: "assistant", content: null, tool_calls: response.toolCalls });

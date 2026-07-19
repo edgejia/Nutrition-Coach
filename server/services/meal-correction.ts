@@ -2,6 +2,7 @@ import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import type { AppDatabase } from "../db/client.js";
 import {
   mealRevisionItems,
+  mealRevisions,
   mealTransactions,
 } from "../db/schema.js";
 import { resolveHistoricalDateIntent } from "../lib/historical-date.js";
@@ -9,6 +10,7 @@ import { currentAppDate, formatLocalDate } from "../lib/time.js";
 import {
   createMealTransactionsService,
   type DeletedMealSnapshot,
+  MealRevisionPreconditionError,
   type MealTransactionItemInput,
 } from "./meal-transactions.js";
 import type {
@@ -18,7 +20,7 @@ import type {
 } from "./meal-numeric-proposals.js";
 import { MEAL_NUMERIC_PROPOSAL_KIND as MEAL_NUMERIC_PROPOSAL_STATE_KIND } from "./meal-numeric-proposals.js";
 import { MEAL_DELETE_PROPOSAL_KIND } from "./meal-delete-proposals.js";
-import { createTurnStateService } from "./turn-state.js";
+import { createTurnStateService, type SyncTransactionClient } from "./turn-state.js";
 import { createSummaryService, type DailySummary } from "./summary.js";
 import { createFoodLoggingService } from "./food-logging.js";
 import {
@@ -629,7 +631,253 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
       sessionId,
       kind: PENDING_SELECTION_KIND,
       payload,
-      ttlMs: PENDING_SELECTION_TTL_MS,
+    ttlMs: PENDING_SELECTION_TTL_MS,
+  });
+  }
+
+  type SyncMealHeader = {
+    id: string;
+    loggedAt: string;
+    mealPeriod: MealPeriod | null;
+    currentRevisionId: string;
+    currentRevisionNumber: number;
+    deletedAt: string | null;
+    imageAssetId: string | null;
+  };
+
+  function loadMealForSync(
+    deviceId: string,
+    mealId: string,
+    client: SyncTransactionClient,
+  ): { header: SyncMealHeader; items: MealTransactionItemInput[] } {
+    const header = client
+      .prepare(
+        `
+          SELECT
+            mt.id,
+            mt.logged_at AS loggedAt,
+            mt.meal_period AS mealPeriod,
+            mt.current_revision_id AS currentRevisionId,
+            mt.current_revision_number AS currentRevisionNumber,
+            mt.deleted_at AS deletedAt,
+            mr.image_asset_id AS imageAssetId
+          FROM meal_transactions AS mt
+          INNER JOIN meal_revisions AS mr ON mr.id = mt.current_revision_id
+          WHERE mt.device_id = ? AND mt.id = ?
+          LIMIT 1
+        `,
+      )
+      .get(deviceId, mealId) as SyncMealHeader | undefined;
+    if (!header) throw new Error("MEAL_NOT_FOUND");
+
+    const items = client
+      .prepare(
+        `
+          SELECT
+            food_name AS foodName,
+            calories,
+            protein,
+            carbs,
+            fat
+          FROM meal_revision_items
+          WHERE revision_id = ?
+          ORDER BY position
+        `,
+      )
+      .all(header.currentRevisionId) as MealTransactionItemInput[];
+    if (items.length === 0) throw new Error("MEAL_ITEMS_REQUIRED");
+    return { header, items };
+  }
+
+  function assertSyncMealRevision(header: SyncMealHeader, expectedMealRevisionId?: string | null): void {
+    const expected = typeof expectedMealRevisionId === "string" ? expectedMealRevisionId.trim() : "";
+    const affectedDate = formatLocalDate(new Date(header.loggedAt));
+    if (!expected) {
+      throw new MealRevisionPreconditionError({
+        code: "MEAL_REVISION_REQUIRED",
+        mealId: header.id,
+        affectedDate,
+        currentMealRevisionId: header.currentRevisionId,
+      });
+    }
+    if (expected !== header.currentRevisionId || header.deletedAt !== null) {
+      throw new MealRevisionPreconditionError({
+        code: "MEAL_REVISION_STALE",
+        mealId: header.id,
+        affectedDate,
+        currentMealRevisionId: header.currentRevisionId,
+      });
+    }
+  }
+
+  function updateMealSync(
+    deviceId: string,
+    mealId: string,
+    input: MealCorrectionUpdateInput,
+    expectedMealRevisionId: string | null | undefined,
+    client: SyncTransactionClient = db.$client,
+  ) {
+    const current = loadMealForSync(deviceId, mealId, client);
+    assertSyncMealRevision(current.header, expectedMealRevisionId);
+    const nextItems = "items" in input ? input.items : applyMealPatch(current.items, input.patch);
+    if (nextItems.length === 0) throw new Error("MEAL_ITEMS_REQUIRED");
+
+    const createdAt = new Date().toISOString();
+    const revisionId = `${mealId}:r${current.header.currentRevisionNumber + 1}`;
+    client
+      .prepare(
+        `
+          INSERT INTO meal_revisions (
+            id, transaction_id, revision_number, supersedes_revision_id,
+            image_asset_id, change_type, created_at
+          ) VALUES (?, ?, ?, ?, ?, 'update', ?)
+        `,
+      )
+      .run(
+        revisionId,
+        mealId,
+        current.header.currentRevisionNumber + 1,
+        current.header.currentRevisionId,
+        current.header.imageAssetId,
+        createdAt,
+      );
+    const insertItem = client.prepare(
+      `
+        INSERT INTO meal_revision_items (
+          revision_id, position, food_name, calories, protein, carbs, fat
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `,
+    );
+    for (const [position, item] of nextItems.entries()) {
+      insertItem.run(
+        revisionId,
+        position,
+        item.foodName,
+        item.calories,
+        item.protein,
+        item.carbs,
+        item.fat,
+      );
+    }
+    const update = client
+      .prepare(
+        `
+          UPDATE meal_transactions
+          SET current_revision_id = ?, current_revision_number = ?
+          WHERE id = ? AND device_id = ?
+            AND current_revision_id = ? AND deleted_at IS NULL
+        `,
+      )
+      .run(
+        revisionId,
+        current.header.currentRevisionNumber + 1,
+        mealId,
+        deviceId,
+        current.header.currentRevisionId,
+      );
+    if (update.changes !== 1) {
+      throw new MealRevisionPreconditionError({
+        code: "MEAL_REVISION_STALE",
+        mealId,
+        affectedDate: formatLocalDate(new Date(current.header.loggedAt)),
+        currentMealRevisionId: current.header.currentRevisionId,
+      });
+    }
+
+    const display = projectMealDisplay(nextItems);
+    return {
+      updatedMeal: {
+        id: mealId,
+        mealRevisionId: revisionId,
+        foodName: display.foodName,
+        calories: nextItems.reduce((sum, item) => sum + item.calories, 0),
+        protein: nextItems.reduce((sum, item) => sum + item.protein, 0),
+        carbs: nextItems.reduce((sum, item) => sum + item.carbs, 0),
+        fat: nextItems.reduce((sum, item) => sum + item.fat, 0),
+        itemCount: display.itemCount,
+        items: projectPublicMealItems(nextItems.map((item, position) => ({ ...item, position }))),
+        imagePath: current.header.imageAssetId ? makeAssetRef(current.header.imageAssetId) : null,
+        loggedAt: current.header.loggedAt,
+        mealPeriod: current.header.mealPeriod,
+      },
+      affectedDate: formatLocalDate(new Date(current.header.loggedAt)),
+    };
+  }
+
+  function deleteMealSync(
+    deviceId: string,
+    mealId: string,
+    expectedMealRevisionId: string | null | undefined,
+    client: SyncTransactionClient = db.$client,
+  ) {
+    const current = loadMealForSync(deviceId, mealId, client);
+    assertSyncMealRevision(current.header, expectedMealRevisionId);
+    const display = projectMealDisplay(current.items, "未知餐點");
+    const deletedMeal: DeletedMealSnapshot = {
+      mealId,
+      dateKey: formatLocalDate(new Date(current.header.loggedAt)),
+      loggedAt: current.header.loggedAt,
+      mealPeriod: current.header.mealPeriod,
+      foodName: display.foodName,
+      calories: current.items.reduce((sum, item) => sum + item.calories, 0),
+      protein: current.items.reduce((sum, item) => sum + item.protein, 0),
+    };
+    const createdAt = new Date().toISOString();
+    const revisionId = `${mealId}:r${current.header.currentRevisionNumber + 1}`;
+    client
+      .prepare(
+        `
+          INSERT INTO meal_revisions (
+            id, transaction_id, revision_number, supersedes_revision_id,
+            image_asset_id, change_type, created_at
+          ) VALUES (?, ?, ?, ?, NULL, 'delete', ?)
+        `,
+      )
+      .run(
+        revisionId,
+        mealId,
+        current.header.currentRevisionNumber + 1,
+        current.header.currentRevisionId,
+        createdAt,
+      );
+    const update = client
+      .prepare(
+        `
+          UPDATE meal_transactions
+          SET current_revision_id = ?, current_revision_number = ?, deleted_at = ?
+          WHERE id = ? AND device_id = ?
+            AND current_revision_id = ? AND deleted_at IS NULL
+        `,
+      )
+      .run(
+        revisionId,
+        current.header.currentRevisionNumber + 1,
+        createdAt,
+        mealId,
+        deviceId,
+        current.header.currentRevisionId,
+      );
+    if (update.changes !== 1) {
+      throw new MealRevisionPreconditionError({
+        code: "MEAL_REVISION_STALE",
+        mealId,
+        affectedDate: deletedMeal.dateKey,
+        currentMealRevisionId: current.header.currentRevisionId,
+      });
+    }
+    return {
+      deletedMealId: mealId,
+      affectedDate: deletedMeal.dateKey,
+      deletedMeal,
+    };
+  }
+
+  async function getPostCommitSummary(deviceId: string, affectedDate: string): Promise<SummaryOutcome> {
+    return buildSummaryOutcomeAfterMealCommit({
+      deviceId,
+      affectedDate,
+      summaryService,
+      foodLoggingService,
     });
   }
 
@@ -1062,6 +1310,10 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
       await turnStateService.clearState({ deviceId, sessionId, kind: PENDING_SELECTION_KIND });
     },
 
+    clearPendingSelectionSync({ deviceId, sessionId }: ClearPendingSelectionParams, client?: SyncTransactionClient): void {
+      turnStateService.clearStateSync({ deviceId, sessionId, kind: PENDING_SELECTION_KIND }, client);
+    },
+
     async recoverStalePendingSelection({
       deviceId,
       sessionId,
@@ -1084,26 +1336,14 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
       mealId: string,
       expectedMealRevisionId: string,
     ): Promise<CurrentMealFacts> {
-      const items = await mealTransactionsService.getCurrentItemsForMutation(
+      const snapshot = await mealTransactionsService.getCurrentSnapshotForMutation(
         deviceId,
         mealId,
         expectedMealRevisionId,
       );
-      const header = await db
-        .select({
-          id: mealTransactions.id,
-          loggedAt: mealTransactions.loggedAt,
-          mealPeriod: mealTransactions.mealPeriod,
-          currentRevisionId: mealTransactions.currentRevisionId,
-        })
-        .from(mealTransactions)
-        .where(and(eq(mealTransactions.deviceId, deviceId), eq(mealTransactions.id, mealId)))
-        .limit(1);
-      const current = header[0];
-      if (!current) {
-        throw new Error("MEAL_NOT_FOUND");
-      }
-      const display = projectMealDisplay(items, "未知餐點");
+      const { header: current, items } = snapshot;
+      const factsItems = items.map(({ revisionId: _revisionId, ...item }) => item);
+      const display = projectMealDisplay(factsItems, "未知餐點");
 
       return {
         mealId: current.id,
@@ -1112,12 +1352,12 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
         loggedAt: current.loggedAt,
         dateKey: formatLocalDate(new Date(current.loggedAt)),
         mealPeriod: normalizeMealPeriod(current.mealPeriod) ?? inferMealPeriod(current.loggedAt),
-        items,
+        items: factsItems,
         totals: {
-          calories: items.reduce((sum, item) => sum + item.calories, 0),
-          protein: items.reduce((sum, item) => sum + item.protein, 0),
-          carbs: items.reduce((sum, item) => sum + item.carbs, 0),
-          fat: items.reduce((sum, item) => sum + item.fat, 0),
+          calories: factsItems.reduce((sum, item) => sum + item.calories, 0),
+          protein: factsItems.reduce((sum, item) => sum + item.protein, 0),
+          carbs: factsItems.reduce((sum, item) => sum + item.carbs, 0),
+          fat: factsItems.reduce((sum, item) => sum + item.fat, 0),
         },
       };
     },
@@ -1209,6 +1449,8 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
       };
     },
 
+    updateMealSync,
+
     async deleteMeal(
       deviceId: string,
       mealId: string,
@@ -1237,5 +1479,8 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
         deletedMeal: deleted.deletedMeal,
       };
     },
+
+    deleteMealSync,
+    getPostCommitSummary,
   };
 }

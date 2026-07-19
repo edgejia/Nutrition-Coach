@@ -15,6 +15,7 @@ import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { validJpegBytes } from "../../fixtures/image-bytes.js";
 import { buildHistoryMealEditPayload } from "../../../client/src/meal-edit-payload.js";
+import { buildPositiveScenarioResult } from "../positive-metadata.js";
 import type { MealEntry } from "../../../client/src/types.js";
 import type {
   ScenarioContext,
@@ -114,22 +115,17 @@ function failResult(
   failedStepName: StepName,
   artifacts: Record<string, unknown>,
 ): ScenarioResult {
-  return {
-    ok: false,
-    failedStep: failedStepName,
-    steps,
-    artifacts,
-    consoleSummary: `FAIL meal-image-continuity ${failedStepName}`,
-  };
+  return buildPositiveScenarioResult("meal-image-continuity", false, steps, failedStepName, {
+    counts: { expectedStepCount: STEP_NAMES.length },
+    assertions: { detailedChecksCompleted: Object.keys(artifacts).length > 0 },
+  });
 }
 
 function passResult(steps: ScenarioStepResult[], artifacts: Record<string, unknown>): ScenarioResult {
-  return {
-    ok: true,
-    steps,
-    artifacts,
-    consoleSummary: `PASS meal-image-continuity ${steps.filter((step) => step.ok).length}/${STEP_NAMES.length}`,
-  };
+  return buildPositiveScenarioResult("meal-image-continuity", true, steps, undefined, {
+    counts: { expectedStepCount: STEP_NAMES.length },
+    assertions: { detailedChecksCompleted: Object.keys(artifacts).length === STEP_NAMES.length },
+  });
 }
 
 function makeJpegBytes(): ArrayBuffer {

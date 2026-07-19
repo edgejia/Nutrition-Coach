@@ -41,6 +41,28 @@ export interface ScenarioAppContext {
   services: ScenarioAppServices;
   /** Shut down the app and release the port. */
   close(): Promise<void>;
+  /** Number of runner-owned close attempts; nested fixtures must not call this. */
+  readonly closeCalls: number;
+}
+
+export type ScenarioLifecycleStage = "boot" | "seed" | "listen" | "close";
+
+export class ScenarioAppLifecycleError extends Error {
+  readonly stage: ScenarioLifecycleStage;
+  readonly closeCalls: 0 | 1;
+  readonly cleanup: "complete" | "incomplete";
+
+  constructor(
+    stage: ScenarioLifecycleStage,
+    closeCalls: 0 | 1,
+    cleanup: "complete" | "incomplete",
+  ) {
+    super(`Scenario app ${stage} stage failed`);
+    this.name = "ScenarioAppLifecycleError";
+    this.stage = stage;
+    this.closeCalls = closeCalls;
+    this.cleanup = cleanup;
+  }
 }
 
 export interface ScenarioAppServices {
@@ -53,6 +75,7 @@ export interface ScenarioAppServices {
   mealDeleteProposalService: AppServices["mealDeleteProposalService"];
   mealNumericProposalService: AppServices["mealNumericProposalService"];
   publisher: AppServices["publisher"];
+  proposalCardService: AppServices["proposalCardService"];
   summaryService: AppServices["summaryService"];
 }
 
@@ -96,33 +119,63 @@ export async function createScenarioApp(
         mealDeleteProposalService: readyServices.mealDeleteProposalService,
         mealNumericProposalService: readyServices.mealNumericProposalService,
         publisher: readyServices.publisher,
+        proposalCardService: readyServices.proposalCardService,
         summaryService: readyServices.summaryService,
       };
     },
   };
 
-  const app = await buildApp(buildOpts);
+  let app: FastifyInstance;
+  try {
+    app = await buildApp(buildOpts);
+  } catch {
+    throw new ScenarioAppLifecycleError("boot", 0, "complete");
+  }
   if (!services) {
     throw new Error("createScenarioApp: services were not captured during app boot");
   }
 
   // Seed one device so scenarios can make authenticated requests immediately.
-  const deviceRes = await app.inject({
-    method: "POST",
-    url: "/api/device",
-    payload: { goal: "fat_loss" },
-  });
+  let closeCalls = 0;
+  let closed = false;
+  const close = async (): Promise<void> => {
+    if (closed) return;
+    closeCalls += 1;
+    try {
+      if (app.server.listening) await app.close();
+      closed = true;
+    } catch {
+      throw new ScenarioAppLifecycleError("close", 1, "incomplete");
+    }
+  };
+
+  let deviceRes;
+  try {
+    deviceRes = await app.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "fat_loss" },
+    });
+  } catch {
+    try { await close(); } catch { /* bounded lifecycle error below */ }
+    throw new ScenarioAppLifecycleError("seed", closeCalls as 0 | 1, closed ? "complete" : "incomplete");
+  }
 
   if (deviceRes.statusCode !== 200 && deviceRes.statusCode !== 201) {
-    throw new Error(
-      `createScenarioApp: device seeding failed with ${deviceRes.statusCode}: ${deviceRes.body}`,
-    );
+    try { await close(); } catch { /* bounded lifecycle error below */ }
+    throw new ScenarioAppLifecycleError("seed", closeCalls as 0 | 1, closed ? "complete" : "incomplete");
   }
 
   const deviceId = (deviceRes.json() as { deviceId: string }).deviceId;
   const cookieHeader = toCookieHeader(deviceRes.headers["set-cookie"]);
 
-  const address = await app.listen({ port: 0, host: "127.0.0.1" });
+  let address: string;
+  try {
+    address = await app.listen({ port: 0, host: "127.0.0.1" });
+  } catch {
+    try { await close(); } catch { /* bounded lifecycle error below */ }
+    throw new ScenarioAppLifecycleError("listen", closeCalls as 0 | 1, closed ? "complete" : "incomplete");
+  }
 
   return {
     app,
@@ -130,10 +183,7 @@ export async function createScenarioApp(
     deviceId,
     cookieHeader,
     services,
-    close: async () => {
-      if (app.server.listening) {
-        await app.close();
-      }
-    },
+    close,
+    get closeCalls() { return closeCalls; },
   };
 }

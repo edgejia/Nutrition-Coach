@@ -3651,4 +3651,60 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(redacted, "fields: calories,protein");
     assert.doesNotMatch(redacted, /610|31|11111111/);
   });
+
+  it("redacts log_food hook args to bounded metadata without nutrition values", () => {
+    const redacted = redactToolArgsForHook("log_food", JSON.stringify({
+      items: [{
+        food_name: "privacy-sentinel-food-9f4e",
+        calories: 3901,
+        protein: 397,
+        carbs: 799,
+        fat: 299,
+      }],
+      protein_sources: [{ name: "privacy-sentinel-protein", protein: 396, is_primary: true, certainty: "clear" }],
+    }));
+
+    assert.equal(
+      redacted,
+      "tool: log_food; status: received; itemCount: 1; fields: calories,carbs,fat,protein; proteinSourceCount: 1; unit: kcal",
+    );
+    for (const sentinel of [
+      "privacy-sentinel-food-9f4e",
+      "privacy-sentinel-protein",
+      "3901",
+      "397",
+      "799",
+      "299",
+      "396",
+    ]) {
+      const count: number = redacted.split(sentinel).length - 1;
+      assert.equal(count, 0, `channel=tool_hook key=log_food count=${count}`);
+    }
+  });
+
+  it("converts unexpected contract errors to a fixed execution diagnostic", async () => {
+    const rawError = "privacy-sentinel-unexpected-provider-body-0c91";
+    const throwingSummary = {
+      getDailySummary: async () => { throw new Error(rawError); },
+    } as unknown as typeof summaryService;
+    const call: ToolCall = {
+      id: "privacy-unexpected-error-call",
+      type: "function",
+      function: { name: "get_daily_summary", arguments: "{}" },
+    };
+
+    await assert.rejects(
+      () => executeTool(call, deviceId, { foodLoggingService, summaryService: throwingSummary }),
+      (error: unknown) => {
+        assert.ok(error instanceof FatalToolError);
+        assert.equal(error.message, "tool execution failed");
+        assert.deepEqual(error.diagnostic, {
+          failureReason: "execute",
+          reason: "unexpected_error",
+        });
+        assert.equal(error.message.includes(rawError), false);
+        return true;
+      },
+    );
+  });
 });

@@ -1,5 +1,9 @@
 import type { DailyTargets } from "../services/device.js";
 import type { DailySummary } from "../services/summary.js";
+import {
+  decideNutritionSafetyBoundary,
+  resolveBufferedNutritionReply,
+} from "./nutrition-safety-policy.js";
 
 export const MAX_COACH_REPLY_BULLETS = 5;
 
@@ -295,7 +299,17 @@ export function guardPlanningAdvice(
     return { status: "accepted", advice: "", reasons: [] };
   }
 
-  const contradictionReasons = hasWrongFactClaim(normalized, facts);
+  const safetyDecision = decideNutritionSafetyBoundary(normalized);
+  if (!safetyDecision.safe) {
+    return {
+      status: "fallback",
+      advice: "",
+      reasons: ["unsafe_nutrition_guidance"],
+    };
+  }
+
+  const canonicalAdvice = safetyDecision.canonicalText;
+  const contradictionReasons = hasWrongFactClaim(canonicalAdvice, facts);
   if (contradictionReasons.length > 0) {
     return {
       status: options.repairAttempted ? "fallback" : "needs_repair",
@@ -304,7 +318,7 @@ export function guardPlanningAdvice(
     };
   }
 
-  const rangeResult = clampAdviceRanges(normalized, facts);
+  const rangeResult = clampAdviceRanges(canonicalAdvice, facts);
   return {
     status: rangeResult.clamped ? "clamped" : "accepted",
     advice: rangeResult.advice,
@@ -323,6 +337,19 @@ export function composePlanningReply(
     return deterministicFacts;
   }
   return `${deterministicFacts}\n\n${guarded.advice}`;
+}
+
+export function bufferPlanningAdvice(
+  advice: string | undefined,
+  facts: PlanningFacts,
+): { reply: string; usedFallback: boolean } {
+  const buffered = resolveBufferedNutritionReply({
+    reply: advice ?? "",
+    fallbackText: "",
+  });
+  return buffered.usedFallback
+    ? { reply: renderPlanningFallbackReply(facts), usedFallback: true }
+    : { reply: buffered.reply, usedFallback: false };
 }
 
 export function renderPlanningFallbackReply(facts: PlanningFacts): string {

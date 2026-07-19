@@ -51,6 +51,7 @@ function assertIncludesInOrder(source: string, labels: Array<[string, string]>) 
 const sources = {
   mainLayout: await readSource("../../client/src/components/MainLayout.tsx"),
   homeScreen: await readSource("../../client/src/components/HomeScreen.tsx"),
+  homeAnimationLifecycle: await readSource("../../client/src/lib/home-animation-lifecycle.ts"),
   onboarding: await readSource("../../client/src/components/Onboarding.tsx"),
 };
 
@@ -132,8 +133,9 @@ describe("Home manual refresh source contract", () => {
     assert.match(screenBody, /ariaLabel="下拉重新整理今日資料"/);
     assert.match(screenBody, /const secondaryScreen = useStore\(\(s\) => s\.secondaryScreen\)/);
     assert.match(screenBody, /const homeAnimationEnabled = secondaryScreen === null/);
-    assert.match(screenBody, /const frame = useHomeNutritionTimeline\(homeAnimationEnabled\)/);
-    assert.match(screenBody, /<CalorieHero dailySummary=\{dailySummary\} dailyTargets=\{dailyTargets\} frame=\{frame\} \/>/);
+    assert.match(screenBody, /const nutritionTimeline = useHomeNutritionTimeline\(homeAnimationEnabled\)/);
+    assert.match(screenBody, /const frame = nutritionTimeline\.frame/);
+    assert.match(screenBody, /animationRunning=\{nutritionTimeline\.running\}/);
     assertIncludesInOrder(headerBody, [
       ["Settings control", 'aria-label="設定"'],
     ]);
@@ -142,21 +144,23 @@ describe("Home manual refresh source contract", () => {
   it("routes manual refresh replay through the single Home nutrition frame", () => {
     const body = functionBody(sources.homeScreen, "CalorieHero");
 
-    assert.match(sources.homeScreen, /function useHomeNutritionTimeline\(enabled: boolean\): HomeTimelineFrame/);
-    assert.match(sources.homeScreen, /if \(!enabled\)\s*\{\s*return;\s*\}/);
+    assert.match(sources.homeScreen, /function useHomeNutritionTimeline\(enabled: boolean\): HomeNutritionTimeline/);
+    assert.match(sources.homeScreen, /if \(!enabled \|\| pendingIntent === null \|\| intentToken === null\) return;/);
     assert.doesNotMatch(sources.homeScreen, /refreshCueChanged|previousRefreshCueRef|input\.refreshCueToken/);
     assert.match(sources.homeScreen, /pendingIntent\?\.kind === "delta" && pendingIntent\.from[\s\S]*getSnapshotTimelineEndpoints\(pendingIntent\.from, dailyTargets\)[\s\S]*zeroEndpoints\(end\)/);
-    assert.match(sources.homeScreen, /setFrame\(finishImmediately \? end : frameAt\(start, end, 0\)\)/);
     assert.match(sources.homeScreen, /consumeHomeAnimationIntent\(intentToken\)/);
-    assert.match(sources.homeScreen, /HOME_TIMELINE_DURATION_MS/);
+    assert.match(sources.homeScreen, /runHomeAnimationEffect\(/);
+    assert.match(sources.homeAnimationLifecycle, /frameAt\(start, end, easeShared\(progress\)\)/);
+    assert.match(sources.homeAnimationLifecycle, /HOME_TIMELINE_DURATION_MS/);
     assert.match(
       sources.homeScreen,
-      /function CalorieHero\(\{\s*dailySummary,\s*dailyTargets,\s*frame,\s*\}: \{/,
+      /function CalorieHero\(\{\s*dailySummary,\s*dailyTargets,\s*frame,\s*animationRunning,\s*\}: \{/,
     );
     assert.match(body, /value=\{frame\.ringValue\}/);
     assert.match(body, /drivenExternally/);
     assert.match(sources.homeScreen, /<SportProgressBar value=\{framePart\.barValue\} variant=\{macro\.variant\} drivenExternally \/>/);
-    assert.match(sources.homeScreen, /const frame = useHomeNutritionTimeline\(homeAnimationEnabled\)/);
+    assert.match(sources.homeScreen, /const nutritionTimeline = useHomeNutritionTimeline\(homeAnimationEnabled\)/);
+    assert.match(sources.homeScreen, /data-home-animation-state=\{animationRunning \? "running" : "complete"\}/);
     assert.doesNotMatch(sources.homeScreen, /function useCountUpNumber/);
     assert.doesNotMatch(sources.homeScreen, /home-sport-refresh-cue/);
     assert.doesNotMatch(sources.homeScreen, /key=\{`home-hero-/);

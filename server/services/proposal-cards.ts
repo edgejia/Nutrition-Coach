@@ -4,6 +4,7 @@ import {
   chatProposalActionEvents,
   chatProposalCards,
 } from "../db/schema.js";
+import type { SyncTransactionClient } from "./turn-state.js";
 
 export const PROPOSAL_KINDS = ["goal", "meal_numeric", "meal_estimate", "meal_delete"] as const;
 export const PROPOSAL_LANES = ["goal", "meal_mutation"] as const;
@@ -246,6 +247,26 @@ function actionEventRowToMetadata(
   };
 }
 
+function cardRawRowToMetadata(row: {
+  id: string;
+  deviceId: string;
+  assistantMessageId: string;
+  proposalId: string;
+  proposalKind: string;
+  proposalLane: string;
+  status: string;
+  title: string;
+  detailsJson: string;
+  actionsJson: string;
+  expiresAt: string | null;
+  lapseCopy: string | null;
+  supersededByKind: string | null;
+  createdAt: string;
+  updatedAt: string;
+}): ProposalCardMetadata {
+  return cardRowToMetadata(row as typeof chatProposalCards.$inferSelect);
+}
+
 function isExpired(expiresAt: string | null | undefined, now: Date): boolean {
   return Boolean(expiresAt && new Date(expiresAt).getTime() <= now.getTime());
 }
@@ -314,6 +335,128 @@ export function projectProposalActionEventForClient(
 }
 
 export function createProposalCardService(db: AppDatabase) {
+  function getLatestCardForProposalSync({
+    deviceId,
+    proposalId,
+    proposalKind,
+  }: {
+    deviceId: string;
+    proposalId: string;
+    proposalKind?: ProposalKind;
+  }, client: SyncTransactionClient = db.$client): ProposalCardMetadata | undefined {
+    const kindClause = proposalKind === undefined ? "" : " AND proposal_kind = ?";
+    const row = client
+      .prepare(
+        `
+          SELECT
+            id,
+            device_id AS deviceId,
+            assistant_message_id AS assistantMessageId,
+            proposal_id AS proposalId,
+            proposal_kind AS proposalKind,
+            proposal_lane AS proposalLane,
+            status,
+            title,
+            details_json AS detailsJson,
+            actions_json AS actionsJson,
+            expires_at AS expiresAt,
+            lapse_copy AS lapseCopy,
+            superseded_by_kind AS supersededByKind,
+            created_at AS createdAt,
+            updated_at AS updatedAt
+          FROM chat_proposal_cards
+          WHERE device_id = ? AND proposal_id = ?${kindClause}
+          ORDER BY created_at DESC
+          LIMIT 1
+        `,
+      )
+      .get(...(proposalKind === undefined ? [deviceId, proposalId] : [deviceId, proposalId, proposalKind])) as Parameters<typeof cardRawRowToMetadata>[0] | undefined;
+    return row ? cardRawRowToMetadata(row) : undefined;
+  }
+
+  function markProposalStatusSync({
+    deviceId,
+    proposalId,
+    proposalKind,
+    status,
+    lapseCopy,
+    supersededByKind,
+  }: {
+    deviceId: string;
+    proposalId: string;
+    proposalKind?: ProposalKind;
+    status: ProposalStatus;
+    lapseCopy?: string | null;
+    supersededByKind?: ProposalKind | null;
+  }, client: SyncTransactionClient = db.$client): number {
+    assertOneOf(status, PROPOSAL_STATUSES, "status");
+    if (supersededByKind !== undefined && supersededByKind !== null) {
+      assertOneOf(supersededByKind, PROPOSAL_KINDS, "superseded kind");
+    }
+
+    const assignments = ["status = ?", "updated_at = ?"];
+    const values: Array<string | null> = [status, new Date().toISOString()];
+    if (lapseCopy !== undefined) {
+      assignments.push("lapse_copy = ?");
+      values.push(lapseCopy);
+    } else if (isTerminalStatus(status)) {
+      assignments.push("lapse_copy = NULL");
+    }
+    if (supersededByKind !== undefined) {
+      assignments.push("superseded_by_kind = ?");
+      values.push(supersededByKind);
+    }
+    values.push(deviceId, proposalId);
+    const kindClause = proposalKind === undefined ? "" : " AND proposal_kind = ?";
+    if (proposalKind !== undefined) values.push(proposalKind);
+    const result = client
+      .prepare(`UPDATE chat_proposal_cards SET ${assignments.join(", ")} WHERE device_id = ? AND proposal_id = ?${kindClause}`)
+      .run(...values);
+    return result.changes;
+  }
+
+  function saveProposalActionEventSync(input: SaveProposalActionEventInput, client: SyncTransactionClient = db.$client): ProposalActionEventMetadata {
+    assertOneOf(input.proposalKind, PROPOSAL_KINDS, "kind");
+    assertOneOf(input.proposalLane, PROPOSAL_LANES, "lane");
+    assertOneOf(input.action, PROPOSAL_ACTIONS, "action");
+    assertNonEmptyString(input.transcriptCopy, "transcript copy");
+    const row = {
+      id: crypto.randomUUID(),
+      deviceId: input.deviceId,
+      actionMessageId: input.actionMessageId,
+      assistantMessageId: input.assistantMessageId,
+      proposalId: input.proposalId,
+      proposalKind: input.proposalKind,
+      proposalLane: input.proposalLane,
+      action: input.action,
+      transcriptCopy: input.transcriptCopy,
+      createdAt: new Date().toISOString(),
+    } satisfies typeof chatProposalActionEvents.$inferInsert;
+    client
+      .prepare(
+        `
+          INSERT INTO chat_proposal_action_events (
+            id, device_id, action_message_id, assistant_message_id,
+            proposal_id, proposal_kind, proposal_lane, action,
+            transcript_copy, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        row.id,
+        row.deviceId,
+        row.actionMessageId,
+        row.assistantMessageId,
+        row.proposalId,
+        row.proposalKind,
+        row.proposalLane,
+        row.action,
+        row.transcriptCopy,
+        row.createdAt,
+      );
+    return actionEventRowToMetadata(row);
+  }
+
   return {
     async saveAssistantProposalCard(
       input: SaveProposalCardInput,
@@ -375,6 +518,8 @@ export function createProposalCardService(db: AppDatabase) {
       return actionEventRowToMetadata(row);
     },
 
+    saveProposalActionEventSync,
+
     async getCardsForAssistantMessages({
       deviceId,
       assistantMessageIds,
@@ -401,9 +546,11 @@ export function createProposalCardService(db: AppDatabase) {
     async getLatestCardForProposal({
       deviceId,
       proposalId,
+      proposalKind,
     }: {
       deviceId: string;
       proposalId: string;
+      proposalKind?: ProposalKind;
     }): Promise<ProposalCardMetadata | undefined> {
       const rows = await db
         .select()
@@ -412,12 +559,15 @@ export function createProposalCardService(db: AppDatabase) {
           and(
             eq(chatProposalCards.deviceId, deviceId),
             eq(chatProposalCards.proposalId, proposalId),
+            ...(proposalKind === undefined ? [] : [eq(chatProposalCards.proposalKind, proposalKind)]),
           ),
         )
         .orderBy(desc(chatProposalCards.createdAt))
         .limit(1);
       return rows[0] ? cardRowToMetadata(rows[0]) : undefined;
     },
+
+    getLatestCardForProposalSync,
 
     async getActionEventsForMessages({
       deviceId,
@@ -445,12 +595,14 @@ export function createProposalCardService(db: AppDatabase) {
     async markProposalStatus({
       deviceId,
       proposalId,
+      proposalKind,
       status,
       lapseCopy,
       supersededByKind,
     }: {
       deviceId: string;
       proposalId: string;
+      proposalKind?: ProposalKind;
       status: ProposalStatus;
       lapseCopy?: string | null;
       supersededByKind?: ProposalKind | null;
@@ -472,11 +624,14 @@ export function createProposalCardService(db: AppDatabase) {
           and(
             eq(chatProposalCards.deviceId, deviceId),
             eq(chatProposalCards.proposalId, proposalId),
+            ...(proposalKind === undefined ? [] : [eq(chatProposalCards.proposalKind, proposalKind)]),
           ),
         );
 
       return result.changes;
     },
+
+    markProposalStatusSync,
 
     async markSupersededInLane({
       deviceId,

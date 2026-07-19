@@ -43,12 +43,7 @@ function advisoryId(advisory) {
 }
 
 function normalizeErrorRecord(data) {
-  if (typeof data === "string") {
-    return data;
-  }
-  if (data && typeof data === "object") {
-    return data.summary || data.detail || data.message || JSON.stringify(data);
-  }
+  void data;
   return "Yarn audit emitted an error record";
 }
 
@@ -146,19 +141,34 @@ export function summarizeAudit(parsed, options = {}) {
   messages.push(...parsed.errors);
 
   let status = "completed";
+  let evidenceState = "scanner_success";
 
-  if (messages.length > 0) {
+  if (options.endpointStatus === 410 || options.executionError) {
     status = "execution_failed";
+    evidenceState = "endpoint_failure";
+    messages.length = 0;
+    messages.push(options.endpointStatus === 410
+      ? "Advisory endpoint returned HTTP 410"
+      : "Advisory scanner execution failed");
+  } else if (parsed.errors.length > 0) {
+    status = "execution_failed";
+    evidenceState = "error_record";
   } else if (parsed.records.length === 0 && exitStatus !== 0) {
     status = "execution_failed";
+    evidenceState = "endpoint_failure";
     messages.push(`Yarn exited with status ${exitStatus} and produced no JSON-lines output`);
   } else if (!parsed.auditSummary) {
     status = "incomplete";
+    evidenceState = "incomplete";
     messages.push("Yarn audit output did not include an auditSummary record");
+  } else if (exitStatus !== 0) {
+    evidenceState = "advisory_bitmask";
   }
 
   return {
     status,
+    evidenceState,
+    clean: evidenceState === "scanner_success" && totalFromCounts(counts) === 0,
     scope: scopeFromArgs(args),
     command: `yarn ${args.join(" ")}`,
     args,
@@ -170,6 +180,34 @@ export function summarizeAudit(parsed, options = {}) {
   };
 }
 
+/**
+ * Classify injected or collected advisory evidence without ever treating a
+ * missing, malformed, unavailable, or error response as a clean audit.
+ * Malformed input is reduced to a fixed message and never returned verbatim.
+ */
+export function classifyAuditEvidence(stdout, options = {}) {
+  const args = options.args || buildYarnAuditArgs([]);
+  try {
+    const parsed = parseYarnAuditJsonLines(stdout, options);
+    return summarizeAudit(parsed, { ...options, args });
+  } catch {
+    const counts = vulnerabilityCounts(null);
+    return {
+      status: "malformed",
+      evidenceState: "malformed",
+      clean: false,
+      scope: scopeFromArgs(args),
+      command: `yarn ${args.join(" ")}`,
+      args,
+      exitStatus: options.exitStatus ?? 1,
+      advisories: [],
+      vulnerabilities: counts,
+      totalVulnerabilities: totalFromCounts(counts),
+      messages: ["Yarn audit output was malformed JSONL"],
+    };
+  }
+}
+
 export function renderAuditReport(summary) {
   const lines = [
     "# Dependency Advisory Audit",
@@ -177,6 +215,8 @@ export function renderAuditReport(summary) {
     `Command: \`${summary.command}\``,
     `Scope: ${summary.scope}`,
     `Exit status: ${summary.exitStatus}`,
+    `Evidence state: ${summary.evidenceState || "unknown"}`,
+    `Clean: ${summary.clean === true ? "yes" : "no"}`,
     "",
   ];
 
@@ -188,6 +228,12 @@ export function renderAuditReport(summary) {
     }
   } else if (summary.status === "incomplete") {
     lines.push("## Audit incomplete", "");
+    lines.push("Do not treat this run as clean advisory evidence.");
+    for (const message of summary.messages) {
+      lines.push(`- ${message}`);
+    }
+  } else if (summary.evidenceState === "malformed") {
+    lines.push("## Audit malformed", "");
     lines.push("Do not treat this run as clean advisory evidence.");
     for (const message of summary.messages) {
       lines.push(`- ${message}`);

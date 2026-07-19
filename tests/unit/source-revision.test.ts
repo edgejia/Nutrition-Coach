@@ -1,6 +1,6 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -14,6 +14,12 @@ const REPO_ROOT = path.resolve(import.meta.dirname, "../..");
 const WRAPPER_PATH = path.join(REPO_ROOT, "scripts/run-with-source-sha.mjs");
 const TSX_IMPORT_PATH = path.join(REPO_ROOT, "node_modules/tsx/dist/loader.mjs");
 const temporaryDirectories: string[] = [];
+const WRAPPER_RUNTIME_PATH_VARIABLES = [
+  "DB_PATH",
+  "ASSETS_DIR",
+  "UPLOADS_STAGING_DIR",
+  "CLIENT_DIST_DIR",
+] as const;
 
 const ADVERSARIAL_SOURCE_WRAPPER_CASES = [
   {
@@ -33,6 +39,12 @@ const ADVERSARIAL_SOURCE_WRAPPER_CASES = [
     expected: "original signal, never code zero",
     registrations: 2,
     executions: 2,
+  },
+  {
+    name: "non_manifest_post_preflight_mutation",
+    expected: "run committed source with checkout-rooted runtime paths",
+    registrations: 1,
+    executions: 1,
   },
   {
     name: "manifest_handled_signal_exit_zero",
@@ -157,11 +169,26 @@ async function makeTemporaryDirectory() {
   return directory;
 }
 
-async function runWrapper(args: string[], cwd = REPO_ROOT) {
+function makeWrapperEnvironment(
+  overrides: NodeJS.ProcessEnv = {},
+  inheritedEnvironment: NodeJS.ProcessEnv = process.env,
+) {
+  const environment = { ...inheritedEnvironment };
+  for (const variableName of WRAPPER_RUNTIME_PATH_VARIABLES) {
+    delete environment[variableName];
+  }
+  return { ...environment, ...overrides };
+}
+
+async function runWrapper(
+  args: string[],
+  cwd = REPO_ROOT,
+  envOverrides: NodeJS.ProcessEnv = {},
+) {
   return execFileAsync(
     process.execPath,
     ["--import", TSX_IMPORT_PATH, WRAPPER_PATH, ...args],
-    { cwd },
+    { cwd, env: makeWrapperEnvironment(envOverrides) },
   );
 }
 
@@ -197,13 +224,18 @@ function spawnWrapperProbe(
   cwd: string,
   caseTmpdir: string,
   ipc = false,
+  envOverrides: NodeJS.ProcessEnv = {},
 ): WrapperProbe {
   const child = spawn(
     process.execPath,
     ["--import", TSX_IMPORT_PATH, WRAPPER_PATH, ...args],
     {
       cwd,
-      env: { ...process.env, TMPDIR: caseTmpdir, TSX_DISABLE_CACHE: "1" },
+      env: makeWrapperEnvironment({
+        TMPDIR: caseTmpdir,
+        TSX_DISABLE_CACHE: "1",
+        ...envOverrides,
+      }),
       stdio: ipc ? ["ignore", "pipe", "pipe", "ipc"] : ["ignore", "pipe", "pipe"],
     },
   );
@@ -394,7 +426,7 @@ async function runSignalForwardingProbe(signal: NodeJS.Signals) {
       "-e",
       childSource,
     ],
-    { cwd: directory, stdio: "ignore" },
+    { cwd: directory, env: makeWrapperEnvironment(), stdio: "ignore" },
   );
   const wrapperCompletion = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
     (resolve, reject) => {
@@ -796,6 +828,25 @@ describe("source revision validation", () => {
 });
 
 describe("source revision command wrapper", () => {
+  it("removes inherited runtime paths before applying controlled wrapper overrides", () => {
+    const environment = makeWrapperEnvironment(
+      { DB_PATH: ":memory:" },
+      {
+        PATH: "/controlled/bin",
+        DB_PATH: "/ambient/private.db",
+        ASSETS_DIR: "/ambient/assets",
+        UPLOADS_STAGING_DIR: "/ambient/uploads",
+        CLIENT_DIST_DIR: "/ambient/client",
+      },
+    );
+
+    assert.equal(environment.PATH, "/controlled/bin");
+    assert.equal(environment.DB_PATH, ":memory:");
+    assert.equal(environment.ASSETS_DIR, undefined);
+    assert.equal(environment.UPLOADS_STAGING_DIR, undefined);
+    assert.equal(environment.CLIENT_DIST_DIR, undefined);
+  });
+
   it("injects the selected checkout SHA into the child environment", async () => {
     const directory = await makeTemporaryGitRepository();
     const expectedSha = (await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: directory })).stdout.trim();
@@ -822,6 +873,203 @@ describe("source revision command wrapper", () => {
       },
     );
   });
+
+  const runtimePathCases = [
+    {
+      name: "resolves default runtime paths against the checkout",
+      overrides: (_checkoutRoot: string): NodeJS.ProcessEnv => ({}),
+      expected: (checkoutRoot: string) => ({
+        dbPath: path.join(checkoutRoot, "data/nutrition.db"),
+        assetsDir: path.join(checkoutRoot, "data/assets"),
+        uploadsStagingDir: path.join(checkoutRoot, "data/uploads-staging"),
+        clientDistDir: path.join(checkoutRoot, "dist/client"),
+      }),
+    },
+    {
+      name: "resolves relative runtime paths against the checkout",
+      overrides: (_checkoutRoot: string): NodeJS.ProcessEnv => ({
+        DB_PATH: "runtime/nutrition.sqlite",
+        ASSETS_DIR: "runtime/assets",
+        UPLOADS_STAGING_DIR: "runtime/uploads",
+        CLIENT_DIST_DIR: "runtime/client",
+      }),
+      expected: (checkoutRoot: string) => ({
+        dbPath: path.join(checkoutRoot, "runtime/nutrition.sqlite"),
+        assetsDir: path.join(checkoutRoot, "runtime/assets"),
+        uploadsStagingDir: path.join(checkoutRoot, "runtime/uploads"),
+        clientDistDir: path.join(checkoutRoot, "runtime/client"),
+      }),
+    },
+    {
+      name: "preserves absolute runtime paths",
+      overrides: (checkoutRoot: string): NodeJS.ProcessEnv => ({
+        DB_PATH: path.join(checkoutRoot, "../absolute/nutrition.sqlite"),
+        ASSETS_DIR: path.join(checkoutRoot, "../absolute/assets"),
+        UPLOADS_STAGING_DIR: path.join(checkoutRoot, "../absolute/uploads"),
+        CLIENT_DIST_DIR: path.join(checkoutRoot, "../absolute/client"),
+      }),
+      expected: (checkoutRoot: string) => ({
+        dbPath: path.join(checkoutRoot, "../absolute/nutrition.sqlite"),
+        assetsDir: path.join(checkoutRoot, "../absolute/assets"),
+        uploadsStagingDir: path.join(checkoutRoot, "../absolute/uploads"),
+        clientDistDir: path.join(checkoutRoot, "../absolute/client"),
+      }),
+    },
+    {
+      name: "preserves DB_PATH=:memory: while defaulting other runtime paths",
+      overrides: (_checkoutRoot: string): NodeJS.ProcessEnv => ({ DB_PATH: ":memory:" }),
+      expected: (checkoutRoot: string) => ({
+        dbPath: ":memory:",
+        assetsDir: path.join(checkoutRoot, "data/assets"),
+        uploadsStagingDir: path.join(checkoutRoot, "data/uploads-staging"),
+        clientDistDir: path.join(checkoutRoot, "dist/client"),
+      }),
+    },
+  ] as const;
+
+  for (const runtimePathCase of runtimePathCases) {
+    it(runtimePathCase.name, async () => {
+      const directory = await makeTemporaryGitRepository();
+      const checkoutRoot = await realpath(directory);
+      const result = await runWrapper(
+        [
+          "--",
+          process.execPath,
+          "-e",
+          [
+            "process.stdout.write(JSON.stringify({",
+            "  dbPath: process.env.DB_PATH,",
+            "  assetsDir: process.env.ASSETS_DIR,",
+            "  uploadsStagingDir: process.env.UPLOADS_STAGING_DIR,",
+            "  clientDistDir: process.env.CLIENT_DIST_DIR,",
+            "}));",
+          ].join("\n"),
+        ],
+        directory,
+        runtimePathCase.overrides(checkoutRoot),
+      );
+
+      assert.deepEqual(
+        JSON.parse(result.stdout) as Record<string, string>,
+        runtimePathCase.expected(checkoutRoot),
+      );
+      assert.equal(result.stderr, "");
+    });
+  }
+
+  it("resolves a committed TSX dependency from the snapshot and removes the snapshot", async () => {
+    const directory = await makeTemporaryGitRepository();
+    const caseTmpdir = await makeCaseTmpdir(directory);
+    await writeFile(
+      path.join(directory, "dependency.tsx"),
+      [
+        "/** @jsx createElement */",
+        "function createElement(tag: string, properties: Record<string, string>, ...children: string[]) {",
+        "  return { tag, properties, children };",
+        "}",
+        'export const resolvedDependency = <fixture proof="tsx">resolved</fixture>;',
+      ].join("\n"),
+      "utf8",
+    );
+    await writeFile(
+      path.join(directory, "entry.ts"),
+      [
+        'import { resolvedDependency } from "./dependency.tsx";',
+        "process.stdout.write(JSON.stringify({ cwd: process.cwd(), resolvedDependency }));",
+      ].join("\n"),
+      "utf8",
+    );
+    await execFileAsync("git", ["add", "dependency.tsx", "entry.ts"], { cwd: directory });
+    await execFileAsync("git", ["commit", "-m", "add TSX dependency fixture"], {
+      cwd: directory,
+    });
+
+    const probe = spawnWrapperProbe(
+      ["--", process.execPath, "--import", TSX_IMPORT_PATH, "entry.ts"],
+      directory,
+      caseTmpdir,
+    );
+    const result = await waitForWrapper(probe, 10_000);
+    const observed = JSON.parse(result.stdout) as {
+      cwd: string;
+      resolvedDependency: {
+        tag: string;
+        properties: Record<string, string>;
+        children: string[];
+      };
+    };
+
+    assert.deepEqual({ code: result.code, signal: result.signal }, { code: 0, signal: null });
+    assert.equal(result.stderr, "");
+    assert.deepEqual(observed.resolvedDependency, {
+      tag: "fixture",
+      properties: { proof: "tsx" },
+      children: ["resolved"],
+    });
+    assert.notEqual(observed.cwd, await realpath(directory));
+    await assert.rejects(readFile(path.join(observed.cwd, "dependency.tsx"), "utf8"), {
+      code: "ENOENT",
+    });
+    await assertCaseTmpdirEmpty(caseTmpdir);
+  });
+
+  adversarialIt(
+    "non_manifest_post_preflight_mutation",
+    "runs non-manifest children from committed source after a post-preflight checkout mutation",
+    async () => {
+      const directory = await makeTemporaryGitRepository();
+      const caseTmpdir = await makeCaseTmpdir(directory);
+      const checkoutRoot = await realpath(directory);
+      const readyPath = makeCoordinationPath(directory, "runtime-snapshot-ready.marker");
+      const releasePath = makeCoordinationPath(directory, "runtime-snapshot-release.marker");
+      const observedPath = makeCoordinationPath(directory, "runtime-snapshot-observed.json");
+      const expectedSha = (
+        await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: directory })
+      ).stdout.trim();
+      const childSource = [
+        'const { existsSync, readFileSync, writeFileSync } = require("node:fs");',
+        `writeFileSync(${JSON.stringify(readyPath)}, "ready");`,
+        `const timer = setInterval(() => { if (existsSync(${JSON.stringify(releasePath)})) {`,
+        "  clearInterval(timer);",
+        `  writeFileSync(${JSON.stringify(observedPath)}, JSON.stringify({`,
+        '    sourceSha: process.env.SOURCE_SHA, sourceBytes: readFileSync("tracked.txt", "utf8"),',
+        "    cwd: process.cwd(), dbPath: process.env.DB_PATH, assetsDir: process.env.ASSETS_DIR,",
+        "    uploadsStagingDir: process.env.UPLOADS_STAGING_DIR, clientDistDir: process.env.CLIENT_DIST_DIR,",
+        "  }));",
+        "}}, 10);",
+      ].join("\n");
+      const probe = spawnWrapperProbe(
+        ["--", process.execPath, "-e", childSource],
+        directory,
+        caseTmpdir,
+      );
+
+      await waitForFile(readyPath, 10_000);
+      await writeFile(path.join(directory, "tracked.txt"), "mutated input\n", "utf8");
+      await writeFile(releasePath, "release", "utf8");
+      const result = await waitForWrapper(probe, 10_000);
+      const observed = JSON.parse(await readFile(observedPath, "utf8")) as {
+        sourceSha: string;
+        sourceBytes: string;
+        cwd: string;
+        dbPath: string;
+        assetsDir: string;
+        uploadsStagingDir: string;
+        clientDistDir: string;
+      };
+
+      assert.deepEqual({ code: result.code, signal: result.signal }, { code: 0, signal: null });
+      assert.equal(result.stderr, "");
+      assert.equal(observed.sourceSha, expectedSha);
+      assert.equal(observed.sourceBytes, "committed input\n");
+      assert.notEqual(observed.cwd, checkoutRoot);
+      assert.equal(observed.dbPath, path.join(checkoutRoot, "data/nutrition.db"));
+      assert.equal(observed.assetsDir, path.join(checkoutRoot, "data/assets"));
+      assert.equal(observed.uploadsStagingDir, path.join(checkoutRoot, "data/uploads-staging"));
+      assert.equal(observed.clientDistDir, path.join(checkoutRoot, "dist/client"));
+      await assertCaseTmpdirEmpty(caseTmpdir);
+    },
+  );
 
   it("atomically replaces the manifest only after a successful child", async () => {
     const directory = await makeTemporaryGitRepository();
@@ -948,6 +1196,7 @@ describe("source revision command wrapper", () => {
         "pre_launch_dirtiness",
         "signal_during_snapshot_setup",
         "non_manifest_handled_signal_exit_zero",
+        "non_manifest_post_preflight_mutation",
         "manifest_handled_signal_exit_zero",
         "ignored_first_repeated_signal",
         "signal_exit_race",

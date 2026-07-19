@@ -17,6 +17,7 @@ function escapedPattern(source: string) {
 
 const sources = {
   home: await readSource("../../client/src/components/HomeScreen.tsx"),
+  lifecycle: await readSource("../../client/src/lib/home-animation-lifecycle.ts"),
   primitives: await readSource("../../client/src/components/SportPrimitives.tsx"),
   css: await readSource("../../client/src/app.css"),
 };
@@ -48,7 +49,8 @@ describe("Home canonical Sport kit source parity", () => {
     assert.match(sources.home, /function useHomeNutritionTimeline/);
     assert.match(sources.home, /getHomeCalorieDisplay\(dailySummary, dailyTargets\)/);
     assert.match(sources.home, /getHomeMacroDisplays\(dailySummary, dailyTargets\)/);
-    assert.match(sources.home, /frameAt\(start, end, easeShared\(progress\)\)/);
+    assert.match(sources.home, /runHomeAnimationEffect\(/);
+    assert.match(sources.lifecycle, /frameAt\(start, end, easeShared\(progress\)\)/);
     assert.match(sources.home, /<SportRing[\s\S]*value=\{frame\.ringValue\}[\s\S]*accentTick[\s\S]*drivenExternally[\s\S]*size=\{120\}[\s\S]*stroke=\{9\}/);
     assert.match(sources.home, /\{frame\.kcal\.toLocaleString\("en-US"\)\}/);
     assert.match(sources.home, /\{frame\.percent\}/);

@@ -283,6 +283,14 @@ export function isFatalToolError(error: unknown): error is FatalToolError {
   return error instanceof FatalToolError;
 }
 
+const SAFE_FATAL_TOOL_MESSAGES = new Set([
+  "trusted protein basis required for this meal",
+  "meal target unresolved",
+  "multi-item meal name changes require full items replacement",
+  "unknown tool",
+  "tool execution failed",
+]);
+
 // ---------------------------------------------------------------------------
 // Contract-level types.
 // ---------------------------------------------------------------------------
@@ -3212,11 +3220,32 @@ export function redactToolArgsForHook(toolName: string, rawArgs: string): string
       return summary;
     }
     if (toolName === "log_food") {
-      const calories = summary.calories ?? "?";
-      const protein = summary.protein ?? "?";
-      const carbs = summary.carbs ?? "?";
-      const fat = summary.fat ?? "?";
-      return `熱量 ${calories}kcal, P${protein}g, C${carbs}g, F${fat}g`;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(rawArgs);
+      } catch {
+        return "<log_food args>";
+      }
+      const objectArgs = parsed && typeof parsed === "object"
+        ? parsed as Record<string, unknown>
+        : {};
+      const items = Array.isArray(objectArgs.items) ? objectArgs.items : [];
+      const itemRecords = items.filter(
+        (item): item is Record<string, unknown> => item !== null && typeof item === "object",
+      );
+      const fieldNames = ["calories", "carbs", "fat", "protein"]
+        .filter((field) => itemRecords.some((item) => Object.hasOwn(item, field)));
+      const proteinSources = Array.isArray(objectArgs.protein_sources)
+        ? objectArgs.protein_sources
+        : [];
+      return [
+        "tool: log_food",
+        "status: received",
+        `itemCount: ${Math.min(itemRecords.length, 100)}`,
+        `fields: ${fieldNames.length > 0 ? fieldNames.join(",") : "none"}`,
+        `proteinSourceCount: ${Math.min(proteinSources.length, 100)}`,
+        "unit: kcal",
+      ].join("; ");
     }
     if (toolName === "get_daily_summary") {
       return "<get_daily_summary args>";
@@ -3418,7 +3447,17 @@ export async function executeTool(
     deps: { toolDeps: deps, deviceId },
   };
 
-  const outcome = await runContract(contract, toolCall, ctx);
+  let outcome: Awaited<ReturnType<typeof runContract>>;
+  try {
+    outcome = await runContract(contract, toolCall, ctx);
+  } catch {
+    // Unexpected contract failures must not become provider retry text or
+    // route metadata. Keep the existing fatal fallback path, but expose only
+    // the fixed execution category to its consumers.
+    throw new FatalToolError("tool execution failed", {
+      diagnostic: { failureReason: "execute", reason: "unexpected_error" },
+    });
+  }
   const attachPolicyFact = <T extends Omit<ToolExecutionResult, "policyFact">>(result: T): T & {
     policyFact?: ToolPolicyDecisionFact;
   } => {
@@ -3565,18 +3604,17 @@ export async function executeTool(
 
     // Convert controlled failures into FatalToolError so the existing
     // orchestrator catch-block emits `executed:false` exactly as Phase 8 did
-    // for log_food / get_daily_summary. Carry the underlying message so test
-    // assertions like `/summary computation failed/` still match.
+    // for log_food / get_daily_summary. Never carry a serialized `message`
+    // field here: it may be a provider/database error and would otherwise
+    // enter the next provider prompt or route fallback metadata.
     let failureMessage = "tool execution failed";
     try {
       const parsed = JSON.parse(outcome.result) as Record<string, unknown>;
-      if (typeof parsed.message === "string" && parsed.message.length > 0) {
+      if (typeof parsed.message === "string" && SAFE_FATAL_TOOL_MESSAGES.has(parsed.message)) {
         failureMessage = parsed.message;
-      } else if (typeof parsed.failureReason === "string") {
-        failureMessage = `tool failed: ${parsed.failureReason}`;
       }
     } catch {
-      // result was not JSON; keep generic message
+      // Keep the fixed category for malformed or unexpected failure payloads.
     }
     let diagnostic: FatalToolDiagnostic | undefined;
     try {

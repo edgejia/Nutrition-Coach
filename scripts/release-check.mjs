@@ -6,12 +6,15 @@ import fs from "node:fs";
 import process from "node:process";
 import {
   CommandReceiptError,
+  classifySpawnTermination,
   publishFailedCommandReceipt,
   publishPassedCommandReceipt,
   resolveCommandReceiptPathOutsideProject,
   reserveCommandReceiptPath,
   stableCommandWorkspaceFingerprint,
 } from "./workflow/command-receipt.mjs";
+import { withWorkflowWriterFence } from "./workflow/workflow-lease.mjs";
+import { assertNoAmbientGitAuthority, runAuthoritativeGit, sanitizedGitEnvironment } from "./git-authority.mjs";
 
 const YARN_BIN = process.platform === "win32" ? "yarn.cmd" : "yarn";
 const REQUIRED_TZ = "Asia/Taipei";
@@ -20,28 +23,45 @@ const MAX_RELEASE_DURATION_MS = 18 * 60 * 1000;
 const TERMINATION_GRACE_MS = 1_000;
 const KILL_CONFIRMATION_MS = 2_000;
 const PROCESS_POLL_MS = 25;
+const MAX_DIAGNOSTIC_BYTES = 64 * 1024;
 const RUN_ID_PATTERN = /^[0-9a-f-]{36}$/;
-const GIT_ROUTING_ENVIRONMENT = [
-  "GIT_DIR",
-  "GIT_WORK_TREE",
-  "GIT_COMMON_DIR",
-  "GIT_INDEX_FILE",
-  "GIT_OBJECT_DIRECTORY",
-  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-];
+const RELEASE_CHILD_GIT_ENVIRONMENT = {
+  GIT_CONFIG_NOSYSTEM: "1",
+  GIT_CONFIG_GLOBAL: "/dev/null",
+};
+const RELEASE_FAILURE_CODES = {
+  timezone_contract: "timezone_contract_failed",
+  typescript_gate: "typescript_gate_failed",
+  full_test_suite: "test_unclassified_failure",
+  capability_matrix: "capability_matrix_failed",
+  behavior_matrix: "behavior_matrix_failed",
+  policy_taxonomy: "policy_taxonomy_failed",
+  frontend_build: "frontend_build_failed",
+  release_deadline: "release_deadline_exceeded",
+  workspace_stability: "workspace_changed_during_release_check",
+};
 const releaseStartedAtMs = Date.now();
 
-if (GIT_ROUTING_ENVIRONMENT.some((name) => process.env[name] !== undefined)) {
-  console.error("[release-check] FAIL: ambient Git routing environment is forbidden");
+class ReleaseGateFailure extends Error {
+  constructor(label, gate, result) {
+    super(`release gate failed: ${gate}`);
+    this.name = "ReleaseGateFailure";
+    this.label = label;
+    this.gate = gate;
+    this.result = result;
+  }
+}
+
+try {
+  assertNoAmbientGitAuthority(process.env);
+} catch {
+  console.error("[release-check] FAIL: ambient Git authority environment is forbidden");
   process.exit(2);
 }
 
-function sanitizedGitEnvironment() {
-  return {
-    ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_"))),
-    GIT_CONFIG_NOSYSTEM: "1",
-    GIT_CONFIG_GLOBAL: "/dev/null",
-  };
+function releaseChildEnvironment(envOverrides = {}) {
+  const inherited = { ...process.env, ...envOverrides };
+  return { ...sanitizedGitEnvironment(inherited), ...RELEASE_CHILD_GIT_ENVIRONMENT };
 }
 
 function resolveReleaseDurationMs() {
@@ -79,7 +99,7 @@ const postflightDelayMs = resolvePostflightDelayMs();
 
 function discoverProjectRoot() {
   return fs.realpathSync(
-    execFileSync("git", ["--no-replace-objects", "rev-parse", "--show-toplevel"], {
+    runAuthoritativeGit(["rev-parse", "--show-toplevel"], {
       cwd: process.cwd(),
       encoding: "utf8",
       env: sanitizedGitEnvironment(),
@@ -90,7 +110,7 @@ function discoverProjectRoot() {
 const projectRoot = discoverProjectRoot();
 
 function runGit(args) {
-  return execFileSync("git", ["--no-replace-objects", ...args], {
+  return runAuthoritativeGit(args, {
     cwd: projectRoot,
     encoding: "utf8",
     env: sanitizedGitEnvironment(),
@@ -110,7 +130,7 @@ function readGitLines(args) {
 
 function hasGitRef(ref) {
   try {
-    execFileSync("git", ["--no-replace-objects", "rev-parse", "--verify", ref], {
+    runAuthoritativeGit(["rev-parse", "--verify", ref], {
       cwd: projectRoot,
       stdio: "ignore",
       env: sanitizedGitEnvironment(),
@@ -210,9 +230,13 @@ async function publishSuccessReceipt() {
         reservation,
         ...receiptAuthority,
       });
-      console.error(`[release-check] FAIL: workspace changed while gates were running`);
+      printGateFailure("Workspace stability", "workspace_stability", {
+        status: 1,
+        signal: null,
+        diagnostics: { stdout: "empty", stderr: "empty", stdoutTruncated: false, stderrTruncated: false },
+      });
       console.error(`[release-check] Receipt: ${JSON.stringify(receipt)}`);
-      process.exit(1);
+      return false;
     }
     const receipt = await publishPassedCommandReceipt({
       commandId: "release-check",
@@ -227,8 +251,8 @@ async function publishSuccessReceipt() {
       },
       ...receiptAuthority,
     });
-    assertWithinReleaseDeadline();
     console.log(`[release-check] Receipt: ${JSON.stringify(receipt)}`);
+    return true;
   } catch (error) {
     if (error?.code === "ETIMEDOUT") {
       console.error("[release-check] FAIL: release deadline exceeded during postflight");
@@ -237,11 +261,11 @@ async function publishSuccessReceipt() {
         signal: "SIGTERM",
         error: Object.assign(new Error("release deadline exceeded"), { code: "ETIMEDOUT" }),
       });
-      process.exit(1);
+      return false;
     }
     const code = error instanceof CommandReceiptError ? error.code : "receipt_publication_failed";
     console.error(`[release-check] Receipt publication failed: ${code}`);
-    process.exit(1);
+    return false;
   }
 }
 
@@ -296,26 +320,67 @@ async function terminateChildGroup(child) {
 
 async function executeStep(args, timeoutMs, envOverrides = {}) {
   let child;
+  let stdoutBytes = 0;
+  let stderrBytes = 0;
+  let stdoutTruncated = false;
+  let stderrTruncated = false;
+  const recordOutput = (stream, chunk) => {
+    const bytes = Buffer.isBuffer(chunk) ? chunk.byteLength : Buffer.byteLength(String(chunk));
+    if (stream === "stdout") {
+      if (stdoutBytes >= MAX_DIAGNOSTIC_BYTES) {
+        stdoutTruncated = true;
+        return;
+      }
+      stdoutBytes = Math.min(MAX_DIAGNOSTIC_BYTES, stdoutBytes + bytes);
+      stdoutTruncated ||= stdoutBytes >= MAX_DIAGNOSTIC_BYTES;
+    } else {
+      if (stderrBytes >= MAX_DIAGNOSTIC_BYTES) {
+        stderrTruncated = true;
+        return;
+      }
+      stderrBytes = Math.min(MAX_DIAGNOSTIC_BYTES, stderrBytes + bytes);
+      stderrTruncated ||= stderrBytes >= MAX_DIAGNOSTIC_BYTES;
+    }
+  };
+  const diagnostics = () => ({
+    stdout: stdoutBytes > 0 ? "present" : "empty",
+    stderr: stderrBytes > 0 ? "present" : "empty",
+    stdoutTruncated,
+    stderrTruncated,
+  });
   try {
     child = spawn(YARN_BIN, args, {
       cwd: projectRoot,
-      stdio: ["ignore", "ignore", "ignore"],
+      stdio: ["ignore", "pipe", "pipe"],
       detached: process.platform !== "win32",
-      env: { ...process.env, ...envOverrides },
+      env: releaseChildEnvironment(envOverrides),
     });
+    child.stdout?.on("data", (chunk) => recordOutput("stdout", chunk));
+    child.stderr?.on("data", (chunk) => recordOutput("stderr", chunk));
   } catch (error) {
-    return { status: null, signal: null, error };
+    return { status: null, signal: null, error, diagnostics: diagnostics() };
   }
 
   const stepDeadlineAtMs = Date.now() + timeoutMs;
   const completion = new Promise((resolve) => {
     let spawnError = null;
+    let settled = false;
+    const finish = (status, signal) => {
+      if (settled) return;
+      settled = true;
+      resolve({
+        status: spawnError ? null : status,
+        signal: spawnError ? null : signal,
+        completedAtMs: Date.now(),
+        diagnostics: diagnostics(),
+        ...(spawnError ? { error: spawnError } : {}),
+      });
+    };
     child.once("error", (error) => {
       spawnError = error;
+      finish(null, null);
     });
-    child.once("close", (status, signal) => {
-      resolve({ status, signal, completedAtMs: Date.now(), ...(spawnError ? { error: spawnError } : {}) });
-    });
+    child.once("exit", (status, signal) => finish(status, signal));
   });
   let deadlineTimer;
   const deadline = new Promise((resolve) => {
@@ -326,14 +391,19 @@ async function executeStep(args, timeoutMs, envOverrides = {}) {
   if (completed !== null) {
     if (completed.completedAtMs >= stepDeadlineAtMs) {
       await terminateChildGroup(child);
+      child.stdout?.destroy();
+      child.stderr?.destroy();
       return {
         status: null,
         signal: "SIGTERM",
         error: Object.assign(new Error("release deadline exceeded"), { code: "ETIMEDOUT" }),
+        diagnostics: diagnostics(),
       };
     }
     if (!childGroupIsQuiescent(child)) {
       const cleanupConfirmed = await terminateChildGroup(child);
+      child.stdout?.destroy();
+      child.stderr?.destroy();
       if (!cleanupConfirmed) {
         console.error("[release-check] Completed process-group cleanup was not confirmed");
       }
@@ -342,6 +412,7 @@ async function executeStep(args, timeoutMs, envOverrides = {}) {
         error: Object.assign(new Error("completed child left a live process group"), {
           code: "EPROCESSGROUPLEAK",
         }),
+        diagnostics: diagnostics(),
       };
     }
     return completed;
@@ -351,12 +422,38 @@ async function executeStep(args, timeoutMs, envOverrides = {}) {
   if (!cleanupConfirmed) {
     console.error("[release-check] Timed-out process-group cleanup was not confirmed");
   }
+  child.stdout?.destroy();
+  child.stderr?.destroy();
   await Promise.race([completion, delay(KILL_CONFIRMATION_MS)]);
   return {
     status: null,
     signal: "SIGTERM",
     error: Object.assign(new Error("release deadline exceeded"), { code: "ETIMEDOUT" }),
+    diagnostics: diagnostics(),
   };
+}
+
+function diagnosticErrorClass(result) {
+  const code = result?.error?.code;
+  if (typeof code !== "string" || code.length === 0) return "none";
+  if (["ENOENT", "EACCES", "ETIMEDOUT", "EPROCESSGROUPLEAK"].includes(code)) return code;
+  if (/^E[A-Z0-9]+$/.test(code)) return "RESOURCE";
+  return "OTHER";
+}
+
+function printGateFailure(label, gate, result) {
+  const termination = classifySpawnTermination(result);
+  console.error(
+    `[release-check] FAIL: ${label}; diagnostic: ${JSON.stringify({
+      schemaVersion: 1,
+      kind: "release_check_failure",
+      gate,
+      sanitizedCode: RELEASE_FAILURE_CODES[gate] ?? "unclassified_failure",
+      termination,
+      errorClass: diagnosticErrorClass(result),
+      output: result?.diagnostics ?? { stdout: "empty", stderr: "empty", stdoutTruncated: false, stderrTruncated: false },
+    })}`,
+  );
 }
 
 async function runStep(label, gate, args, envOverrides = {}) {
@@ -366,9 +463,8 @@ async function runStep(label, gate, args, envOverrides = {}) {
     ? { status: null, signal: "SIGTERM", error: Object.assign(new Error("release deadline exceeded"), { code: "ETIMEDOUT" }) }
     : await executeStep(args, remainingMs, envOverrides);
   if (result.error || result.status !== 0) {
-    console.error(`[release-check] FAIL: ${label}; raw child output suppressed`);
-    await publishFailureReceipt(gate, result);
-    process.exit(Number.isInteger(result.status) && result.status !== 0 ? result.status : 1);
+    printGateFailure(label, gate, result);
+    throw new ReleaseGateFailure(label, gate, result);
   }
 }
 
@@ -434,13 +530,14 @@ if (runIdArg !== undefined && !RUN_ID_PATTERN.test(runIdArg.slice("--run-id=".le
 const checkArgs = args.filter(
   (arg) => arg !== receiptArg && arg !== runIdArg && arg !== tokenArg && arg !== runtimeArg,
 );
-const receiptAuthority = tokenArg
+const receiptAuthorityBase = tokenArg
   ? {
       projectRoot,
       tokenFile: tokenArg.slice("--workflow-token=".length),
       expectedRuntime: runtimeArg.slice("--workflow-runtime=".length),
     }
   : {};
+let receiptAuthority = receiptAuthorityBase;
 let receiptPath = null;
 if (receiptArg) {
   try {
@@ -489,50 +586,99 @@ if (isDryRun) {
   process.exit(0);
 }
 
-if (receiptPath) {
+async function runGateSequence() {
+  if (!timezoneValid) {
+    await publishFailureReceipt("timezone_contract", { status: 1, signal: null });
+    return 1;
+  }
+
   try {
-    reservation = await reserveCommandReceiptPath(receiptPath, {
-      commandId: "release-check",
-      runId,
-      sourceSha,
-      workspaceBeforeSha256,
-      ...receiptAuthority,
-    });
+    await runStep("TypeScript gate", "typescript_gate", ["tsc", "--noEmit"]);
+    await runStep("Full test suite", "full_test_suite", ["test"], { NODE_ENV: "test" });
+    if (touchesServerBoundary) {
+      console.log(
+        "\n[release-check] Note: server route/service changes detected; yarn test already includes the integration suite.",
+      );
+    }
+
+    await runStep("Capability matrix generated doc drift", "capability_matrix", ["matrix:gen:check"]);
+    await runStep("Behavior matrix generated doc drift", "behavior_matrix", ["behavior-matrix:gen:check"]);
+    await runStep("Policy taxonomy coverage", "policy_taxonomy", ["policy-taxonomy:check"]);
+    await runStep("Frontend build", "frontend_build", ["build"]);
   } catch (error) {
-    const code = error instanceof CommandReceiptError ? error.code : "receipt_reservation_failed";
-    console.error(`[release-check] FAIL: receipt reservation failed: ${code}`);
-    process.exit(2);
+    if (error instanceof ReleaseGateFailure) {
+      await publishFailureReceipt(error.gate, error.result);
+      return Number.isInteger(error.result.status) && error.result.status !== 0 ? error.result.status : 1;
+    }
+    console.error("[release-check] FAIL: release gate orchestration failed: unexpected_error");
+    return 1;
+  }
+
+  if (postflightDelayMs > 0) await delay(postflightDelayMs);
+  try {
+    assertWithinReleaseDeadline();
+  } catch (error) {
+    printGateFailure("Release deadline", "release_deadline", {
+      status: null,
+      signal: "SIGTERM",
+      error,
+      diagnostics: { stdout: "empty", stderr: "empty", stdoutTruncated: false, stderrTruncated: false },
+    });
+    await publishFailureReceipt("release_deadline", { status: null, signal: "SIGTERM", error });
+    return 1;
+  }
+
+  if (!(await publishSuccessReceipt())) return 1;
+  console.log("\n[release-check] PASS");
+  return 0;
+}
+
+async function runSignedReleaseCheck() {
+  const maxDurationSeconds = Math.max(
+    1,
+    Math.min(86_400, Math.ceil(Math.max(1, releaseDeadlineAtMs - Date.now()) / 1_000) + 1),
+  );
+  try {
+    const governed = await withWorkflowWriterFence(
+      {
+        ...receiptAuthorityBase,
+        purpose: "maintenance_check",
+        maxDurationSeconds,
+      },
+      async (holder) => {
+        const nested = holder.nestedEnvironment();
+        receiptAuthority = {
+          ...receiptAuthorityBase,
+          fenceId: holder.fenceId,
+          nestedCapability: nested.NUTRITION_WORKFLOW_FENCE_CAPABILITY,
+        };
+        try {
+          reservation = await reserveCommandReceiptPath(receiptPath, {
+            commandId: "release-check",
+            runId,
+            sourceSha,
+            workspaceBeforeSha256,
+            ...receiptAuthority,
+          });
+        } catch (error) {
+          const code = error instanceof CommandReceiptError ? error.code : "receipt_reservation_failed";
+          console.error(`[release-check] FAIL: receipt reservation failed: ${code}`);
+          return { releaseStatus: 2 };
+        }
+        return { releaseStatus: await runGateSequence() };
+      },
+    );
+    if (governed.status === "needs_reconciliation") {
+      console.error(`[release-check] FAIL: writer fence cleanup failed: ${governed.writerCleanupCode}`);
+      return 1;
+    }
+    return governed.releaseStatus === 0 ? 0 : governed.releaseStatus ?? 1;
+  } catch (error) {
+    const code = error instanceof CommandReceiptError ? error.code : "writer_fence_failed";
+    console.error(`[release-check] FAIL: signed release run failed: ${code}`);
+    return 1;
   }
 }
 
-if (!timezoneValid) {
-  await publishFailureReceipt("timezone_contract", { status: 1, signal: null });
-  process.exit(1);
-}
-
-await runStep("TypeScript gate", "typescript_gate", ["tsc", "--noEmit"]);
-await runStep("Full test suite", "full_test_suite", ["test"], { NODE_ENV: "test" });
-if (touchesServerBoundary) {
-  console.log(
-    "\n[release-check] Note: server route/service changes detected; yarn test already includes the integration suite.",
-  );
-}
-
-await runStep("Capability matrix generated doc drift", "capability_matrix", ["matrix:gen:check"]);
-await runStep("Behavior matrix generated doc drift", "behavior_matrix", ["behavior-matrix:gen:check"]);
-await runStep("Frontend build", "frontend_build", ["build"]);
-
-if (postflightDelayMs > 0) await delay(postflightDelayMs);
-try {
-  assertWithinReleaseDeadline();
-} catch (error) {
-  console.error("[release-check] FAIL: release deadline exceeded during postflight");
-  await publishFailureReceipt("release_deadline", {
-    status: null,
-    signal: "SIGTERM",
-    error,
-  });
-  process.exit(1);
-}
-await publishSuccessReceipt();
-console.log("\n[release-check] PASS");
+const exitStatus = receiptPath ? await runSignedReleaseCheck() : await runGateSequence();
+process.exitCode = exitStatus;

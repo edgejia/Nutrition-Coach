@@ -27,8 +27,22 @@ function assertRuntimeRefreshOrder(text: string, recoveryAnchor: string) {
 }
 
 describe("tracked deployment ordering", () => {
+  it("records the terminated v3.4.1 plan and exactly three deployment gates", () => {
+    const runbook = read("docs/deploy/production-runtime.md");
+    const postmortem = read("docs/deploy/archive/v3.4.1-postmortem.md");
+    assert.match(runbook, /original v3\.4\.1 five-phase runtime\/demo plan is terminated/);
+    assert.match(runbook, /three gates/);
+    assert.match(postmortem, /Status:\*\* terminated, unshipped/);
+    assert.match(postmortem, /Phases 116–118\nwere not executed/);
+    assert.match(postmortem, /1\. \*\*Source release/);
+    assert.match(postmortem, /2\. \*\*Runtime safety and refresh/);
+    assert.match(postmortem, /3\. \*\*Public validation/);
+    assert.match(postmortem, /five-minute timed demo is retired/);
+    assert.match(postmortem, /PPL006,\n+telemetry, recovery redesign, workflow decommission/);
+  });
+
   it("makes PR, human merge, post-merge archive, and runtime refresh distinct ordered gates", () => {
-    const runbook = read("docs/deploy/cloudflare-tunnel.md");
+    const runbook = read("docs/deploy/production-runtime.md");
     const integratedFlow = runbook.slice(0, runbook.indexOf("## Environment"));
 
     assertOrdered(integratedFlow, [
@@ -51,14 +65,14 @@ describe("tracked deployment ordering", () => {
   });
 
   it("places recovery proof before migration and keeps restore separately authorized", () => {
-    const tunnel = read("docs/deploy/cloudflare-tunnel.md");
+    const tunnel = read("docs/deploy/production-runtime.md");
     const buildSection = tunnel.slice(tunnel.indexOf("## Build and Start"), tunnel.indexOf("## Cloudflare Tunnel"));
     assertOrdered(buildSection, ["clean, non-serving verification checkout", "yarn release:check"]);
     assert.match(buildSection, /cp \.env\.example \.env\nyarn release:check/);
     assertRuntimeRefreshOrder(buildSection, "Production Storage Recovery");
     assert.match(buildSection, /obtain B01 approval/);
 
-    const recovery = read("docs/deploy/production-recovery.md");
+    const recovery = read("docs/deploy/storage-recovery.md");
     assertOrdered(recovery.slice(0, recovery.indexOf("## Protected storage")), [
       "source PR is merged into `main`",
       "Post-merge local planning archive",
@@ -141,7 +155,7 @@ describe("tracked deployment ordering", () => {
     assert.match(enDeployment, /must never run in the active runtime checkout/);
     assert.match(enDeployment, /only R06 may rewrite the runtime checkout's `dist\/client`/);
 
-    const demo = read("docs/demo.md");
+    const demo = read("docs/demo-runbook.md");
     assert.match(demo, /operator\.backup_approval/);
     assert.match(demo, /B01 quiescence／backup／restore-readiness/);
     assertOrdered(demo.slice(demo.indexOf("### R04"), demo.indexOf("### R07")), [
@@ -159,7 +173,7 @@ describe("tracked deployment ordering", () => {
   });
 
   it("blocks runtime refresh until archive completion and isolates release preflight", () => {
-    const release = read("docs/deploy/cloudflare-tunnel.md");
+    const release = read("docs/deploy/production-runtime.md");
     const runtime = release.slice(release.indexOf("Source release and runtime refresh are separate gates"), release.indexOf("## Environment"));
     assertOrdered(runtime, [
       "A PR targets `main`",

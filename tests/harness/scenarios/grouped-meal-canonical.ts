@@ -2,6 +2,7 @@ import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import { validJpegBytes } from "../../fixtures/image-bytes.js";
+import { buildPositiveScenarioResult } from "../positive-metadata.js";
 import type {
   ScenarioContext,
   ScenarioResult,
@@ -86,22 +87,13 @@ function failResult(
   failedStepName: StepName,
   artifacts: Record<string, unknown>,
 ): ScenarioResult {
-  return {
-    ok: false,
-    failedStep: failedStepName,
-    steps,
-    artifacts,
-    consoleSummary: `FAIL grouped-meal-canonical ${failedStepName}`,
-  };
+  return buildPositiveScenarioResult("grouped-meal-canonical", false, steps, failedStepName);
 }
 
 function passResult(steps: ScenarioStepResult[], artifacts: Record<string, unknown>): ScenarioResult {
-  return {
-    ok: true,
-    steps,
-    artifacts,
-    consoleSummary: `PASS grouped-meal-canonical ${steps.filter((step) => step.ok).length}/${STEP_NAMES.length}`,
-  };
+  return buildPositiveScenarioResult("grouped-meal-canonical", true, steps, undefined, {
+    counts: { expectedStepCount: STEP_NAMES.length },
+  });
 }
 
 function makeJpegBytes(): ArrayBuffer {

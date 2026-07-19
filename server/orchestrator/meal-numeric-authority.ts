@@ -1,4 +1,8 @@
-import { normalizeNumericSourceText, stripToolLikeRegions } from "./source-text-guard.js";
+import {
+  extractNumericSourceEvidence,
+  normalizeNumericSourceText,
+  stripToolLikeRegions,
+} from "./source-text-guard.js";
 
 export const MEAL_NUMERIC_FIELDS = ["calories", "protein", "carbs", "fat"] as const;
 
@@ -59,7 +63,7 @@ const FIELD_ALIASES: Record<MealNumericField, readonly string[]> = {
 };
 
 const FIELD_LABEL_RE = /(熱量|卡路里|蛋白質|蛋白|碳水化合物|碳水|脂肪)/g;
-const CALORIE_UNIT_RE = /(\d+(?:\.\d+)?)\s*(?:kcal|卡)/gi;
+const UNLABELED_CALORIE_TOKEN_RE = /([0-9０-９٠-٩۰-۹]+(?:[,.，][0-9０-９٠-٩۰-۹]+)*(?:[.．][0-9０-９٠-٩۰-۹]+)?)\s*(?:kcal|calories?|卡路里|大卡|卡)/giu;
 const VAGUE_RE = /(合理一點|合理點|正常一點|正常點|怪怪的|不太對|不對勁|平均(?:一下|一點)?)/;
 const DIRECTION_ONLY_RE = /(偏高|太高|高了|偏低|太低|低了|過高|過低)/;
 const HALF_RE = /(減半|半份|一半)/;
@@ -118,6 +122,19 @@ function normalizeValue(value: number): number {
   return Number(Number(value).toFixed(3));
 }
 
+function normalizeMealNumericToken(value: string): number {
+  return Number(
+    value
+      .normalize("NFKC")
+      .replace(/[٠-٩۰-۹]/g, (digit) => String.fromCharCode(
+        digit >= "٠" && digit <= "٩"
+          ? "0".charCodeAt(0) + digit.charCodeAt(0) - "٠".charCodeAt(0)
+          : "0".charCodeAt(0) + digit.charCodeAt(0) - "۰".charCodeAt(0),
+      ))
+      .replace(/[,.，\s]/g, ""),
+  );
+}
+
 function valuesFromNumericToken(token: string): number[] {
   const values = normalizeNumericSourceText(token)
     .map((candidate) => Number(candidate))
@@ -160,29 +177,24 @@ function numbersFromText(text: string): number[] {
 
 export function extractMealNumericEvidence(text: string): MealNumericEvidence {
   const evidence = emptyEvidence();
-  const evidenceText = stripToolLikeRegions(text);
-  const matches = [...evidenceText.matchAll(FIELD_LABEL_RE)];
-  const globalNegatedValues = negatedValuesFromText(evidenceText);
-
-  for (let index = 0; index < matches.length; index += 1) {
-    const match = matches[index]!;
-    const field = fieldForLabel(match[0]);
-    if (!field) continue;
-
-    const segmentStart = match.index + match[0].length;
-    const nextMatch = matches[index + 1];
-    const segmentEnd = nextMatch?.index ?? evidenceText.length;
-    const segment = evidenceText.slice(segmentStart, segmentEnd);
-    for (const value of numbersFromText(segment)) {
-      pushUnique(evidence[field], value);
-    }
+  for (const item of extractNumericSourceEvidence(text, "current_turn")) {
+    if (!item.affirmative || item.field === "unknown") continue;
+    pushUnique(evidence[item.field], normalizeValue(item.value));
   }
 
-  for (const match of evidenceText.matchAll(CALORIE_UNIT_RE)) {
-    const value = Number(match[1]);
-    if (Number.isFinite(value) && !globalNegatedValues.includes(normalizeValue(value))) {
-      pushUnique(evidence.calories, normalizeValue(value));
-    }
+  // Meal corrections commonly state the calories after the food name rather
+  // than repeating the field label ("半份雞腿便當，360 kcal，蛋白質 20 g").
+  // Keep this meal-local convenience out of the generic goal guard, and do
+  // not let an explicitly incompatible macro unit become calories.
+  const mealText = stripToolLikeRegions(text).normalize("NFKC");
+  for (const match of mealText.matchAll(UNLABELED_CALORIE_TOKEN_RE)) {
+    const value = normalizeMealNumericToken(match[1] ?? "");
+    if (!Number.isFinite(value) || evidence.calories.includes(value)) continue;
+    const start = match.index ?? 0;
+    const prefix = mealText.slice(Math.max(0, start - 28), start);
+    if (/(?:蛋白質|蛋白|碳水化合物|碳水|脂肪|protein|carbs?|fat)\s*$/iu.test(prefix)) continue;
+    if (/(?:不要|不是|別|不想|不能|無法|not|don't|do\s+not)[^。！？!?；;，,\n]{0,28}$/iu.test(prefix.replace(/\s+/g, ""))) continue;
+    pushUnique(evidence.calories, normalizeValue(value));
   }
 
   return evidence;

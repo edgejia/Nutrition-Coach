@@ -10,6 +10,7 @@ import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import type { VerificationScenario, ScenarioContext, ScenarioResult, ScenarioStepResult } from "../scenario-types.js";
 import { currentAppDate, formatLocalDate } from "../../../server/lib/time.js";
 import type { DailySummary } from "../../../server/services/summary.js";
+import { buildPositiveScenarioResult } from "../positive-metadata.js";
 
 interface DailySummaryEnvelope {
   summary?: unknown;
@@ -40,7 +41,7 @@ function failResult(
   failedStepName: string,
   artifacts: Record<string, unknown>,
 ): ScenarioResult {
-  return { ok: false, failedStep: failedStepName, steps, artifacts, consoleSummary: `FAIL ${scenarioName} ${failedStepName}` };
+  return buildPositiveScenarioResult(scenarioName, false, steps, failedStepName);
 }
 
 const STEP_NAMES = [
@@ -381,12 +382,9 @@ const dailyRolloverScenario: VerificationScenario = {
       }
 
       const passedCount = steps.filter((step) => step.ok).length;
-      return {
-        ok: true,
-        steps,
-        artifacts,
-        consoleSummary: `PASS ${scenarioName} ${passedCount}/${STEP_NAMES.length}`,
-      };
+      return buildPositiveScenarioResult(scenarioName, true, steps, undefined, {
+        counts: { expectedStepCount: STEP_NAMES.length, passedStepCount: passedCount },
+      });
     } finally {
       await fixture.close();
     }

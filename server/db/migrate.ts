@@ -1,15 +1,18 @@
-import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { loadEnvFile } from "node:process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import {
+  CHAT_MESSAGE_STATUS_MIGRATION_TAG,
+  getExpectedMigration,
+  hasExpectedChatMessageStatusDefinition,
+} from "./schema-manifest.js";
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const migrationsFolder = path.resolve(moduleDir, "../../drizzle");
-const chatMessageStatusMigrationTag = "0005_chat_message_status";
 
 function hasTable(sqlite: Database.Database, tableName: string) {
   return Boolean(
@@ -34,20 +37,11 @@ function hasColumn(sqlite: Database.Database, tableName: string, columnName: str
 }
 
 function getChatMessageStatusMigrationMeta() {
-  const journal = JSON.parse(readFileSync(path.join(migrationsFolder, "meta/_journal.json"), "utf8")) as {
-    entries: Array<{ tag: string; when: number }>;
-  };
-  const entry = journal.entries.find((candidate) => candidate.tag === chatMessageStatusMigrationTag);
-
-  if (!entry) {
-    throw new Error(`Missing ${chatMessageStatusMigrationTag} journal entry.`);
-  }
-
-  const query = readFileSync(path.join(migrationsFolder, `${chatMessageStatusMigrationTag}.sql`), "utf8");
+  const migration = getExpectedMigration(CHAT_MESSAGE_STATUS_MIGRATION_TAG);
 
   return {
-    hash: createHash("sha256").update(query).digest("hex"),
-    createdAt: entry.when,
+    hash: migration.hash,
+    createdAt: migration.createdAt,
   };
 }
 
@@ -72,6 +66,9 @@ function markChatMessageStatusMigrationApplied(sqlite: Database.Database) {
 
 function reconcilePartialChatMessageStatusMigration(sqlite: Database.Database) {
   if (hasTable(sqlite, "chat_messages") && hasColumn(sqlite, "chat_messages", "status")) {
+    if (!hasExpectedChatMessageStatusDefinition(sqlite)) {
+      throw new Error("Database migration compatibility failed: DB_MIGRATION_PARTIAL_STATUS_INVALID.");
+    }
     markChatMessageStatusMigrationApplied(sqlite);
   }
 }

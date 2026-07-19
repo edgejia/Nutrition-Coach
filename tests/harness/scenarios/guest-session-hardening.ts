@@ -5,6 +5,7 @@ import { config } from "../../../server/config.js";
 import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
+import { buildPositiveScenarioResult } from "../positive-metadata.js";
 import type { VerificationScenario, ScenarioContext, ScenarioResult, ScenarioStepResult } from "../scenario-types.js";
 
 interface DailyTargets {
@@ -73,7 +74,7 @@ function failResult(
   failedStepName: string,
   artifacts: Record<string, unknown>,
 ): ScenarioResult {
-  return { ok: false, failedStep: failedStepName, steps, artifacts, consoleSummary: `FAIL ${scenarioName} ${failedStepName}` };
+  return buildPositiveScenarioResult(scenarioName, false, steps, failedStepName);
 }
 
 const STEP_NAMES = [
@@ -1204,12 +1205,10 @@ const scenario: VerificationScenario = {
         return failResult("guest-session-hardening", steps, missingStepNames[0], artifacts);
       }
 
-      return {
-        ok: true,
-        steps,
-        artifacts,
-        consoleSummary: `PASS guest-session-hardening ${steps.filter((step) => step.ok).length}/${STEP_NAMES.length}`,
-      };
+      return buildPositiveScenarioResult("guest-session-hardening", true, steps, undefined, {
+        counts: { expectedStepCount: STEP_NAMES.length },
+        assertions: { allRevocationStepsPassed: true, metadataOnly: true },
+      });
     } finally {
       await fixture.close();
       await rm(tempRoot, { recursive: true, force: true });

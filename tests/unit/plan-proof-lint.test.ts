@@ -226,6 +226,126 @@ describe("plan proof linter", () => {
     }
   });
 
+  it("requires the exact Phase 126 negative-control file for each product task", () => {
+    const phase126Task = (subject: string, command: string) => lintPlanProof(`
+phase: 126
+
+<task type="auto">
+  <name>${subject} boundary</name>
+  <action>Prove the ${subject} database boundary behavior.</action>
+  <verify><automated>
+    ${command}
+  </automated></verify>
+</task>
+`);
+
+    const registered = [
+      "tests/integration/phase-126-proposal-negative-controls.test.ts",
+      "tests/integration/phase-126-admission-negative-controls.test.ts",
+      "tests/integration/phase-126-ai-boundary-negative-controls.test.ts",
+      "tests/integration/phase-126-privacy-negative-controls.test.ts",
+    ];
+
+    const subjects = ["proposal transaction", "admission", "AI safety", "privacy"];
+    for (const [index, testPath] of registered.entries()) {
+      const result = phase126Task(subjects[index]!, `node --import tsx --test ${testPath}`);
+      assert.equal(result.status, "pass", testPath);
+    }
+
+    for (const command of [
+      "node --import tsx --test --test-name-pattern=rollback tests/integration/phase-126-proposal-negative-controls.test.ts",
+      "node --import tsx --test --test-skip-pattern=.* tests/integration/phase-126-proposal-negative-controls.test.ts",
+      "node --import tsx --test tests/integration/phase-126-proposal-negative-controls.test.ts --test-only",
+      "node --import tsx --test tests/integration/phase-126-unregistered-negative-controls.test.ts",
+      "node --import tsx --test tests/unit/plan-proof-lint.test.ts",
+      "printf phase-126-proposal-negative-controls",
+    ]) {
+      const rules = ruleIds(phase126Task("proposal transaction", command));
+      assert.ok(rules.has("PPL006"), command);
+    }
+  });
+
+  it("requires the exact Phase 127 negative-control file for each lifecycle task", () => {
+    const phase127Task = (subject: string, command: string) => lintPlanProof(`
+phase: 127
+
+<task type="auto">
+  <name>${subject} boundary</name>
+  <action>Prove the ${subject} database/runtime boundary behavior.</action>
+  <verify><automated>
+    ${command}
+  </automated></verify>
+</task>
+`);
+
+    const registered = [
+      ["meal correction snapshot", "tests/integration/phase-127-meal-snapshot-negative-controls.test.ts"],
+      ["chat lifecycle disconnect", "tests/integration/phase-127-chat-lifecycle-negative-controls.test.ts"],
+      ["goal PATCH", "tests/integration/phase-127-goal-patch-negative-controls.test.ts"],
+      ["history trend range", "tests/integration/phase-127-history-bound-negative-controls.test.ts"],
+      ["startup schema migration provenance", "tests/integration/phase-127-startup-schema-negative-controls.test.ts"],
+    ] as const;
+
+    for (const [subject, testPath] of registered) {
+      const result = phase127Task(subject, `node --import tsx --test ${testPath}`);
+      assert.equal(result.status, "pass", testPath);
+    }
+
+    for (const command of [
+      "node --import tsx --test --test-name-pattern=rollback tests/integration/phase-127-meal-snapshot-negative-controls.test.ts",
+      "node --import tsx --test --test-skip-pattern=.* tests/integration/phase-127-chat-lifecycle-negative-controls.test.ts",
+      "node --import tsx --test tests/integration/phase-127-goal-patch-negative-controls.test.ts --test-only",
+      "node --import tsx --test tests/integration/phase-127-unregistered-negative-controls.test.ts",
+      "node --import tsx --test tests/unit/plan-proof-lint.test.ts",
+      "printf phase-127-goal-patch-negative-controls",
+    ]) {
+      const rules = ruleIds(phase127Task("goal PATCH", command));
+      assert.ok(rules.has("PPL006"), command);
+    }
+  });
+
+  it("requires the exact Phase 128 negative-control file for each evidence and release task", () => {
+    const phase128Task = (subject: string, command: string) => lintPlanProof(`
+phase: 128
+
+<task type="auto">
+  <name>${subject} boundary</name>
+  <action>Prove the ${subject} evidence or release boundary behavior.</action>
+  <verify><automated>
+    ${command}
+  </automated></verify>
+</task>
+`);
+
+    const registered = [
+      ["artifact schema", "tests/integration/phase-128-artifact-negative-controls.test.ts"],
+      ["SSE terminal lifecycle", "tests/integration/phase-128-sse-negative-controls.test.ts"],
+      ["policy side effects", "tests/integration/phase-128-policy-side-effect-negative-controls.test.ts"],
+      ["harness lifecycle CAS publication", "tests/integration/phase-128-harness-lifecycle-negative-controls.test.ts"],
+      ["Git authority", "tests/integration/phase-128-git-authority-negative-controls.test.ts"],
+      ["policy taxonomy", "tests/integration/phase-128-policy-taxonomy-negative-controls.test.ts"],
+      ["advisory evidence", "tests/integration/phase-128-advisory-negative-controls.test.ts"],
+      ["readiness disposition", "tests/integration/phase-128-readiness-audit-negative-controls.test.ts"],
+    ] as const;
+
+    for (const [subject, testPath] of registered) {
+      const result = phase128Task(subject, `node --import tsx --test ${testPath}`);
+      assert.equal(result.status, "pass", testPath);
+    }
+
+    for (const command of [
+      "node --import tsx --test --test-name-pattern=terminal tests/integration/phase-128-sse-negative-controls.test.ts",
+      "node --import tsx --test --test-skip-pattern=.* tests/integration/phase-128-policy-side-effect-negative-controls.test.ts",
+      "node --import tsx --test tests/integration/phase-128-harness-lifecycle-negative-controls.test.ts --test-only",
+      "node --import tsx --test tests/integration/phase-128-unregistered-negative-controls.test.ts",
+      "node --import tsx --test tests/unit/plan-proof-lint.test.ts",
+      "printf phase-128-artifact-negative-controls",
+    ]) {
+      const rules = ruleIds(phase128Task("artifact storage", command));
+      assert.ok(rules.size > 0, command);
+    }
+  });
+
   it("rejects executable search options and parses attached short-option clusters", () => {
     const executable = lint("bad-search-executable-options.md");
     assert.equal(executable.findings.filter((finding) => finding.ruleId === "PPL003").length, 3);

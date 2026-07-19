@@ -1,6 +1,6 @@
 # Workflow Runtime Governance
 
-These tools make writer identity, artifact provenance, and bounded telemetry explicit. They are maintenance controls, not authority to run GSD. While the Temporary GSD Maintenance Pause is active, use them only in deterministic tests or in a separately approved disposable pilot. Do not point them at this checkout's `.planning/**`.
+These tools make writer identity, artifact provenance, signed receipts, and verification seals explicit. They are maintenance controls, not authority to run GSD. Use them only for the explicitly authorized local workflow action and never point them at this checkout's `.planning/**` without a separate current-thread approval.
 
 ## Single-writer lease
 
@@ -9,17 +9,17 @@ The lease lives under the repository's Git common directory so worktrees of the 
 For an approved disposable checkout:
 
 ```bash
-PILOT_ROOT=/absolute/path/to/disposable-checkout
+WORKFLOW_ROOT=/absolute/path/to/disposable-checkout
 TOKEN_DIR=/absolute/private/directory/outside-the-checkout
 TOKEN_FILE="$TOKEN_DIR/codex-holder.json"
 yarn workflow:lease acquire \
-  --project-root="$PILOT_ROOT" \
+  --project-root="$WORKFLOW_ROOT" \
   --runtime=codex \
   --gsd-version=1.7.0 \
   --model-profile=sol-high \
   --ttl-seconds=900 \
   --token-file="$TOKEN_FILE"
-yarn workflow:lease status --project-root="$PILOT_ROOT"
+yarn workflow:lease status --project-root="$WORKFLOW_ROOT"
 ```
 
 `status` exposes the current lease ID and digest without exposing private material. It validates the current public attestation against the full immutable acquisition identity; a missing, replaced, or mismatched attestation makes the lease not ready. Lease and writer authority records are installed from fsynced temporary files with an exclusive hard-link publication step. A long mutation holds a durable lease-bound `writer.lock`; acquire, renew, release, and takeover all fail while that fence is live, and an expired lease cannot use ordinary renewal. Nested governed tools validate the non-secret `NUTRITION_WORKFLOW_FENCE_ID` plus the same private holder token instead of acquiring a second writer.
@@ -36,7 +36,7 @@ Release the lease with the current private token:
 
 ```bash
 yarn workflow:lease release \
-  --project-root="$PILOT_ROOT" \
+  --project-root="$WORKFLOW_ROOT" \
   --token-file="$TOKEN_FILE"
 ```
 
@@ -47,11 +47,11 @@ A receipt with `cleanupRequired: true` or `status: needs_reconciliation` exits n
 Only `*-PLAN.md`, `*-SUMMARY.md`, and `*-VERIFICATION.md` are accepted. Stamping requires an active holder token, expected runtime, the exact SHA-256 of the current file, and a new receipt path outside the checkout. Replacing an existing stamp additionally requires its exact provenance digest.
 
 ```bash
-ARTIFACT=.planning/phases/999-pilot/999-01-PLAN.md
-ARTIFACT_SHA=$(shasum -a 256 "$PILOT_ROOT/$ARTIFACT" | awk '{print $1}')
-SOURCE_SHA=$(git -C "$PILOT_ROOT" rev-parse HEAD)
+ARTIFACT=.planning/phases/999-maintenance/999-01-PLAN.md
+ARTIFACT_SHA=$(shasum -a 256 "$WORKFLOW_ROOT/$ARTIFACT" | awk '{print $1}')
+SOURCE_SHA=$(git -C "$WORKFLOW_ROOT" rev-parse HEAD)
 yarn workflow:artifact-provenance stamp \
-  --project-root="$PILOT_ROOT" \
+  --project-root="$WORKFLOW_ROOT" \
   --artifact="$ARTIFACT" \
   --token-file="$TOKEN_FILE" \
   --runtime=codex \
@@ -59,7 +59,7 @@ yarn workflow:artifact-provenance stamp \
   --source-sha="$SOURCE_SHA" \
   --receipt="$TOKEN_DIR/plan-provenance.json"
 yarn workflow:artifact-provenance check \
-  --project-root="$PILOT_ROOT" \
+  --project-root="$WORKFLOW_ROOT" \
   --artifact="$ARTIFACT" \
   --receipt="$TOKEN_DIR/plan-provenance.json" \
   --runtime=codex \
@@ -79,16 +79,16 @@ A release-check receipt path is accepted only when `--receipt`, caller-generated
 
 ```bash
 RUN_ID=$(node -e 'process.stdout.write(require("node:crypto").randomUUID())')
-EXPECTED_WORKSPACE_SHA256=$(cd "$PILOT_ROOT" && node --input-type=module -e \
+EXPECTED_WORKSPACE_SHA256=$(cd "$WORKFLOW_ROOT" && node --input-type=module -e \
   'import { stableCommandWorkspaceFingerprint } from "./scripts/workflow/command-receipt.mjs"; process.stdout.write(stableCommandWorkspaceFingerprint(process.cwd()))')
-(cd "$PILOT_ROOT" && \
+(cd "$WORKFLOW_ROOT" && \
   yarn release:check --base=HEAD \
     --run-id="$RUN_ID" \
     --receipt="$TOKEN_DIR/release-check.json" \
     --workflow-token="$TOKEN_FILE" \
     --workflow-runtime=codex)
 yarn workflow:command-receipt verify \
-  --project-root="$PILOT_ROOT" \
+  --project-root="$WORKFLOW_ROOT" \
   --receipt="$TOKEN_DIR/release-check.json" \
   --source-sha="$SOURCE_SHA" \
   --run-id="$RUN_ID" \
@@ -101,7 +101,7 @@ yarn workflow:command-receipt verify \
   --model-profile=sol-high
 ```
 
-The run ID and expected workspace digest above are caller evidence captured before launch, not values learned from the completed receipt. The signed release command must run with the governed checkout as its current directory; release-check rejects ambient Git routing variables before scope discovery, pins all Git and child operations to that canonical project root, strips ambient `GIT_*` routing/configuration, and disables Git replacement refs. The Yarn wrapper also loads checkout-local `.env`. The prepared no-`.env` pilot contract therefore cannot execute this block; creating `.env` or relaxing that pilot boundary requires a separately reviewed contract and approval.
+The run ID and expected workspace digest above are caller evidence captured before launch, not values learned from the completed receipt. The signed release command must run with the governed checkout as its current directory; release-check rejects ambient Git routing variables before scope discovery, pins all Git and child operations to that canonical project root, strips ambient `GIT_*` routing/configuration, and disables Git replacement refs. The Yarn wrapper also loads checkout-local `.env`; creating or changing that environment remains a separately reviewed action.
 
 Receipt parent safety is checked before any missing directory is created and checked again afterward. Reservation and final reads use `O_NOFOLLOW`, device/inode/digest stability, a final CAS check, directory fsync, and a post-publication reread. These controls fail closed on symlink ancestors, reservation replacement, holder changes, source changes, and signed-content tampering.
 
@@ -118,21 +118,21 @@ Closeout deliberately has no provenance-relocation contract. A PLAN, SUMMARY, or
 
 ```bash
 yarn workflow:closeout normalize \
-  --project-root="$PILOT_ROOT" \
-  --planning-root="$PILOT_ROOT/.planning" \
+  --project-root="$WORKFLOW_ROOT" \
+  --planning-root="$WORKFLOW_ROOT/.planning" \
   --milestone=v999.0 \
   --dry-run
 yarn workflow:closeout normalize \
-  --project-root="$PILOT_ROOT" \
-  --planning-root="$PILOT_ROOT/.planning" \
+  --project-root="$WORKFLOW_ROOT" \
+  --planning-root="$WORKFLOW_ROOT/.planning" \
   --milestone=v999.0 \
   --source-sha="$SOURCE_SHA" \
   --token-file="$TOKEN_FILE" \
   --runtime=codex \
   --confirm-plan-sha256="$PLAN_SHA256"
 yarn workflow:closeout check \
-  --project-root="$PILOT_ROOT" \
-  --planning-root="$PILOT_ROOT/.planning" \
+  --project-root="$WORKFLOW_ROOT" \
+  --planning-root="$WORKFLOW_ROOT/.planning" \
   --milestone=v999.0 \
   --strict \
   --source-sha="$SOURCE_SHA" \
@@ -143,36 +143,6 @@ yarn workflow:closeout check \
 ```
 
 The signed closeout journal binds the initial tree for both moved and already-canonical archives; a canonical normalization with no file operations still commits a signed no-op journal. Root routing state is closed, not keyword-based: `STATE.md` and `ROADMAP.md` must equal their exact terminal templates, while `MILESTONES.md` must contain exactly one canonical record for the milestone (`- <version> complete` or the shipped H2 form). Contradictory `Status`, active/non-archived roadmap text, negated completion prose, and duplicate milestone records fail normalization and strict checking instead of being rewritten from ambiguous input. Strict evolution permits only a provenance change whose clean payload still matches the signed initial artifact, the exact direct seal for an existing phase directory, and separately governed retained sidecars with their required rationale. Journal reads require canonical bytes; publication is exclusive, replacement uses raw-byte/device/inode CAS under the writer fence, and destructive effects reassert the holder immediately before mutation. Strict verification holds its own writer fence for the whole check and revalidates Git source, planning tree, canonical journal ledger (including inode ABA), artifact/receipt pairs, off-checkout receipt snapshots, and lease attestations at the final checkpoint.
-
-## Privacy-bounded telemetry
-
-The telemetry wrapper asserts the active holder, creates an immutable signed `0600` running record under the Git common directory, fsyncs both the record directory and its governance parent before spawn, runs exactly one child command, and atomically commits a newly signed termination record. A crash may leave a truthful `running` record; it must not be rewritten as a pass.
-
-```bash
-node scripts/workflow/workflow-telemetry.mjs \
-  --project-root="$PILOT_ROOT" \
-  --token-file="$TOKEN_FILE" \
-  --runtime=codex \
-  --phase=synthetic-999 \
-  --command-label=maintenance_check \
-  --reasoning-effort=high \
-  --timeout-seconds=300 \
-  --source-sha="$SOURCE_SHA" \
-  --bundle-sha256="$APPROVED_BUNDLE_SHA256" \
-  --artifact=.planning/phases/999-pilot/999-01-PLAN.md \
-  --event=retry \
-  -- yarn workflow:plan-proof --plan=.planning/phases/999-pilot/999-01-PLAN.md
-```
-
-The direct Node entrypoint is intentional: ordinary Yarn 1 output adds banners to stdout, while this boundary reserves stdout for one structured receipt and discards child stdout/stderr. The caller-selectable semantic labels are closed to `maintenance_check` (with `pilot` rejected); records instead carry `authorizationProfile: signed_exact_bundle` and a holder-signed SHA-256 over the exact argv, environment digest, source, phase, timeout, artifact/event declarations, and metrics-path digest. An optional `expectedBundleSha256` API argument makes a separately reviewed bundle digest an execution precondition. Neither argv nor environment values are stored.
-
-The timeout plus 30-second reconciliation margin must be shorter than the remaining lease. On POSIX, the wrapper registers a dedicated child process group in the writer fence, sends TERM then KILL to that group on timeout or leaked same-group descendants, and proves only that original group is quiescent before the fence can be released. It requires the approved source SHA to equal real `HEAD` before and after the child. Post-child measurement, source, or holder-check failures commit a metadata-only `needs_reconciliation` record. After publication it rereads the signed record and rechecks real `HEAD`, holder authority, and the exact command-bundle digest before returning a separately signed receipt; any mismatch is reconciliation, never success. The strict receipt verifier requires independently expected run ID, phase, semantic status, child outcome, source, bundle, lease, runtime, version, and model. The strict record verifier additionally accepts only the canonical Git-common record path and an expected final state of `completed` or `needs_reconciliation`, verifies the same holder/source/bundle identities, and rereads the final record and live source. A signed `running` record is crash evidence, never final success. These bindings prevent a different valid local holder, copied record, intermediate record, or prior run from being silently substituted.
-
-This is deliberately `limited_observation`, never a pass: a child can call `setsid` or a detached spawn and escape into another session that a pure unprivileged Node process cannot enumerate or contain without races. `pilot` is rejected before spawn with `telemetry_pilot_containment_unavailable`; every receipt has `pilotEligible:false` and `routingEvidenceEligible:false`. A future pilot needs an approved kernel/VM containment provider whose lifecycle and recovery both prove the entire container empty. Process-tree scans, environment markers, and prompt conventions are not accepted substitutes.
-
-Records contain only allowlisted identifiers, before/after source SHA, lease-derived runtime/version/model identity, reasoning-effort class, caller-declared retry/replan/repair counts, before/after artifact counts and byte totals, wall time, and exact process termination. They never contain child argv, prompts, transcripts, output, artifact paths, repository paths, environment values, or secrets.
-
-Token, tool-call, and agent-session counts default to explicit `unavailable/null`. A bounded exact-schema file may carry a runtime-matching `codex_usage_api` or `claude_usage_api` source claim, but the current adapter marks every such value `caller_declared`, `not_run_delta_verified`, and `routingEvidenceEligible: false`. No routing or cost conclusion may treat it as authoritative until a trusted before/after provider adapter binds a run-level delta.
 
 ## Residual risk
 
@@ -185,6 +155,4 @@ Token, tool-call, and agent-session counts default to explicit `unavailable/null
 - A crash between marking child registration pending and recording the process-group ID intentionally leaves recovery blocked because the unknown child cannot be proven absent.
 - Public-key provenance proves possession of a declared lease key, not an independently verified host/model identity or artifact semantics. The same OS account can still create a different declared lease ledger.
 - Node does not expose dirfd-based `renameat`; repeated ancestor/inode/digest checks reduce, but cannot eliminate, a hostile same-account micro-TOCTOU.
-- Telemetry records process-level measurements; declared events are not observed events, and unavailable provider metrics remain unavailable and may not be imputed.
-- POSIX process-group observation is not a process container. Detached or `setsid` descendants can escape it, so no current telemetry result is pilot-eligible; macOS requires an external disposable VM/container or equivalently enforceable job boundary before the pilot can run.
 - None of these controls authorizes GSD resume, source release, production migration, runtime refresh, Tunnel, smoke, merge, or tag actions.

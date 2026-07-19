@@ -197,7 +197,8 @@ describe("dependency audit parser", () => {
 
     assert.equal(summary.status, "execution_failed");
     assert.match(report, /Audit execution failed/);
-    assert.match(report, /registry timeout/);
+    assert.match(report, /Yarn audit emitted an error record/);
+    assert.doesNotMatch(report, /registry timeout/);
     assert.doesNotMatch(report, /0 advisories|No advisories/i);
   });
 
