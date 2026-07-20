@@ -16,10 +16,16 @@
 
 import {
   createScenarioApp,
+  createRunnerRootScenarioApp,
   createRunnerOwnedNestedScenarioAppFactory,
+  drainRunnerLifecycleCleanup,
+  fenceRunnerLifecycle,
+  finishRunnerLifecycle,
   ScenarioAppLifecycleError,
+  withRunnerRootScenarioAppCreation,
   withScenarioAppLifecycleScope,
   type ScenarioAppContext,
+  type ScenarioAppFactory,
 } from "./app-fixture.js";
 import { writeRunnerFailureArtifacts, writeScenarioArtifacts, type RunnerFailureEnvelope } from "./artifacts.js";
 import type { VerificationScenario, ScenarioResult } from "./scenario-types.js";
@@ -86,12 +92,13 @@ export async function runScenarioByName(
   scenarioName: string,
   options: ScenarioRunnerOptions = {},
 ): Promise<ScenarioResult> {
-  return withScenarioAppLifecycleScope(() => runScenarioByNameInScope(scenarioName, options));
+  return withScenarioAppLifecycleScope((capability) => runScenarioByNameInScope(scenarioName, options, capability));
 }
 
 async function runScenarioByNameInScope(
   scenarioName: string,
   options: ScenarioRunnerOptions,
+  capability: unknown,
 ): Promise<ScenarioResult> {
   const signal = options.signal;
   const loadScenario = options.loadScenario ?? (async (name: string) => {
@@ -112,33 +119,70 @@ async function runScenarioByNameInScope(
   const writeArtifacts = options.writeScenarioArtifacts ?? writeScenarioArtifacts;
   const faultStage = options.faultInjection?.stage;
   let ctx: ScenarioAppContext | undefined;
-  const nestedContexts: ScenarioAppContext[] = [];
+  const nestedCreations: Array<{
+    context?: ScenarioAppContext;
+    error?: unknown;
+    settled: Promise<void>;
+  }> = [];
+  let nestedIssuanceOpen = false;
   let result: ScenarioResult | undefined;
   let failure: ReturnType<typeof classifyFailure> | undefined;
+  let cleanup: "complete" | "incomplete" = "complete";
 
   try {
     throwIfInterrupted(signal);
     const scenario = await loadScenario(scenarioName);
     throwIfInterrupted(signal);
-    if (faultStage === "boot" || faultStage === "seed" || faultStage === "listen") {
+    if (faultStage === "boot") {
+      throw new ScenarioAppLifecycleError(faultStage, 0, "complete");
+    }
+    if ((faultStage === "seed" || faultStage === "listen") && createApp !== createScenarioApp) {
       throw new ScenarioAppLifecycleError(faultStage, 0, "complete");
     }
     const preparation = scenario.prepareApp ? await scenario.prepareApp() : {};
-    ctx = await createApp({
+    const appOptions = {
       ...(preparation.appOptions ?? {}),
-      lifecycleOwner: "runner",
-    });
-    const createNestedApp = createRunnerOwnedNestedScenarioAppFactory();
-    const trackedCreateApp = async (options: Parameters<typeof createNestedApp>[0]) => {
-      const nested = await createNestedApp(options);
-      nestedContexts.push(nested);
-      return {
-        ...nested,
-        // Scenario code may retain its standalone finally/close shape, but
-        // the actual nested app remains exclusively runner-closed below.
-        close: async () => {},
-        get closeCalls() { return nested.closeCalls; },
-      };
+      ...(faultStage === "seed" || faultStage === "listen" ? { lifecycleFault: faultStage } : {}),
+    };
+    ctx = createApp === createScenarioApp
+      ? await createRunnerRootScenarioApp(capability, appOptions)
+      : await withRunnerRootScenarioAppCreation(capability, () => createApp(appOptions));
+    const createNestedApp = createRunnerOwnedNestedScenarioAppFactory(capability);
+    nestedIssuanceOpen = true;
+    const trackedCreateApp: ScenarioAppFactory = (options) => {
+      if (!nestedIssuanceOpen) {
+        const rejected = Promise.reject<ScenarioAppContext>(
+          new ScenarioAppLifecycleError("boot", 0, "complete"),
+        );
+        void rejected.catch(() => {});
+        return rejected;
+      }
+
+      const slot: (typeof nestedCreations)[number] = { settled: Promise.resolve() };
+      nestedCreations.push(slot);
+      let creation: Promise<ScenarioAppContext>;
+      try {
+        creation = createNestedApp(options);
+      } catch (error) {
+        creation = Promise.reject(error);
+      }
+      const publicCreation: Promise<ScenarioAppContext> = creation.then((nested) => {
+        slot.context = nested;
+        return {
+          ...nested,
+          // Scenario-visible close remains inert; only the runner closes.
+          close: async () => {},
+          get closeCalls() { return nested.closeCalls; },
+        } as ScenarioAppContext;
+      });
+      slot.settled = publicCreation.then(
+        () => {},
+        (error) => { slot.error = error; },
+      );
+      // Fire-and-forget scenario calls are still observed and drained by the
+      // slot above, so their rejection cannot become unhandled process state.
+      void publicCreation.catch(() => {});
+      return publicCreation;
     };
     if (faultStage === "close") {
       const originalContext = ctx;
@@ -171,13 +215,33 @@ async function runScenarioByNameInScope(
     failure = classifyFailure(error, ctx, signal);
   } finally {
     let closeError: unknown;
-    for (const nested of [...nestedContexts].reverse()) {
+    nestedIssuanceOpen = false;
+    try {
+      fenceRunnerLifecycle(capability);
+    } catch (error) {
+      closeError ??= error;
+      cleanup = "incomplete";
+    }
+    await Promise.all(nestedCreations.map((creation) => creation.settled));
+    const nestedFailure = nestedCreations.find((creation) => creation.error !== undefined)?.error;
+    if (nestedFailure !== undefined && failure === undefined) {
+      failure = classifyFailure(nestedFailure, ctx, signal);
+    }
+    for (const creation of [...nestedCreations].reverse()) {
+      const nested = creation.context;
+      if (!nested) continue;
       if (nested.closeCalls !== 0) continue;
       try {
         await nested.close();
       } catch (error) {
         closeError ??= error;
       }
+    }
+    // A nested fixture can fail after boot but before it is issued as a
+    // context. Drain that runner-held cleanup before closing the root so
+    // reverse creation order remains deterministic.
+    if ((await drainRunnerLifecycleCleanup(capability)) === "incomplete") {
+      cleanup = "incomplete";
     }
     if (ctx && ctx.closeCalls === 0) {
       try {
@@ -189,9 +253,19 @@ async function runScenarioByNameInScope(
     if (closeError !== undefined && ctx) {
       failure = classifyFailure(closeError, ctx, signal, "close");
     }
+    try {
+      finishRunnerLifecycle(capability);
+    } catch {
+      cleanup = "incomplete";
+    }
   }
 
   if (failure) {
+    const resolvedCleanup = cleanup === "incomplete"
+      || failure.stage === "close"
+      || failure.lifecycle?.cleanup === "incomplete"
+      ? "incomplete"
+      : "complete";
     const envelope: RunnerFailureEnvelope = {
       schemaVersion: 1,
       result: "failure",
@@ -199,9 +273,7 @@ async function runScenarioByNameInScope(
       category: failure.category,
       owner: "runner",
       closeCalls: ctx ? (ctx.closeCalls === 0 ? 0 : 1) : (failure.lifecycle?.closeCalls ?? 0),
-      cleanup: failure.lifecycle?.cleanup ?? (failure.stage === "close"
-        ? "incomplete"
-        : (ctx ? (ctx.closeCalls === 0 ? "incomplete" : "complete") : "complete")),
+      cleanup: resolvedCleanup,
       interrupted: failure.interrupted,
     };
     try { writeFailureArtifacts(scenarioName, envelope); } catch { /* retain original failure */ }

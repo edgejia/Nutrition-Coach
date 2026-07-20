@@ -15,6 +15,8 @@ import { assertPolicyEvidenceHasNoForbiddenFields } from "../harness/policy-asse
 import { runScenarioByName } from "../harness/run.js";
 import policySideEffectScenario from "../harness/scenarios/policy-side-effect-gate.js";
 
+const UUID_LIKE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
 function cookieHeader(raw: string | string[] | undefined): string {
   const values = Array.isArray(raw) ? raw : raw ? [raw] : [];
   return values.map((value) => value.split(";", 1)[0]).join("; ");
@@ -173,6 +175,19 @@ test("Phase 128 policy evidence rejects raw arguments and keeps stale/idempotent
 test("Phase 128 policy scenario records backend proposal-card identity invariants", async () => {
   const result = await runPolicyScenario();
   assert.equal(result.ok, true);
+  assert.ok(result.metadata?.policyFacts && result.metadata.policyFacts.length > 0);
+  for (const fact of result.metadata.policyFacts) {
+    assert.equal(
+      Object.hasOwn(fact, "proposalId"),
+      false,
+      `${fact.step} must not publish a raw proposal identifier`,
+    );
+  }
+  assert.doesNotMatch(
+    JSON.stringify(result.metadata),
+    UUID_LIKE,
+    "generated policy metadata must not contain a proposal UUID",
+  );
   const approval = result.metadata?.policyDbInvariants?.find(
     (entry) => entry.step === "confirm-first_propose_approve_meal_numeric",
   );
@@ -199,8 +214,17 @@ test("Phase 128 policy disk snapshot preserves backend proposal-card identity bo
     const result = await runPolicyScenario();
     await writeScenarioArtifacts("phase-128-policy-disk", result);
     const snapshots = JSON.parse(readPublishedArtifact("phase-128-policy-disk", "snapshots.json")) as {
+      policyFacts?: Array<Record<string, unknown>>;
       policyDbInvariants?: Array<Record<string, unknown>>;
     };
+    assert.ok(snapshots.policyFacts && snapshots.policyFacts.length > 0);
+    for (const fact of snapshots.policyFacts) {
+      assert.equal(
+        Object.hasOwn(fact, "proposalId"),
+        false,
+        `${String(fact.step)} must not persist a raw proposal identifier`,
+      );
+    }
     const approval = snapshots.policyDbInvariants?.find(
       (entry) => entry.step === "confirm-first_propose_approve_meal_numeric",
     );
@@ -215,6 +239,15 @@ test("Phase 128 policy disk snapshot preserves backend proposal-card identity bo
         proposalCardKindMatches: true,
         proposalCardProposalIdMatches: true,
       },
+    );
+    const latestRoot = path.join(root, "phase-128-policy-disk", "latest");
+    const persistedMetadata = ["summary.json", "steps.json", "snapshots.json", "scenario-result.json"]
+      .map((fileName) => fs.readFileSync(path.join(latestRoot, fileName), "utf8"))
+      .join("\n");
+    assert.doesNotMatch(
+      persistedMetadata,
+      UUID_LIKE,
+      "published policy artifacts must not contain a proposal UUID",
     );
     assert.equal(fs.existsSync(path.join(root, "phase-128-policy-disk", "latest", "snapshots.json")), true);
   } finally {

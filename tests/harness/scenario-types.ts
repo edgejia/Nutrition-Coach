@@ -27,7 +27,7 @@ export interface ScenarioContext {
 }
 
 export interface ScenarioAppPreparation {
-  appOptions?: Omit<ScenarioAppOptions, "lifecycleOwner">;
+  appOptions?: ScenarioAppOptions;
   state?: unknown;
 }
 
@@ -76,7 +76,6 @@ export interface ScenarioPolicyFactMetadata {
   policyClass: "direct-execute" | "execute-and-report" | "clarify-first" | "confirm-first";
   decision: "allowed" | "blocked";
   ruleId: string;
-  proposalId?: string;
 }
 
 export interface ScenarioPolicyDbInvariantMetadata {

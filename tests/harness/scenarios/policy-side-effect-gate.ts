@@ -88,7 +88,6 @@ function buildPolicyMetadata(
       policyClass: value.policyClass as "direct-execute" | "execute-and-report" | "clarify-first" | "confirm-first",
       decision: value.decision as "allowed" | "blocked",
       ruleId: String(value.ruleId),
-      ...(typeof value.proposalId === "string" ? { proposalId: value.proposalId } : {}),
     }];
   });
   const policyDbInvariants = evidence.flatMap((entry) => {

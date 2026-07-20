@@ -46,7 +46,7 @@ function withRunnerFactory(runner: FactoryCaseRunner): BehaviorCaseRunner {
 const CASE_RUNNERS = {
   "CASE-01": withRunnerFactory(runCase01ImageOnly),
   "CASE-02": withRunnerFactory(runCase02UncertainQuantity),
-  "CASE-03": runCase03ReceiptConsistency,
+  "CASE-03": withRunnerFactory(runCase03ReceiptConsistency),
   "CASE-04": withRunnerFactory(runCase04HistoricalDate),
   "CASE-05": withRunnerFactory(runCase05GoalAuthorization),
   "CASE-06": withRunnerFactory(runCase06UpdateDeleteClarification),

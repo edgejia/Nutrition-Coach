@@ -30,12 +30,19 @@ export interface ScenarioAppOptions {
   logger?: AppOptions["logger"];
   /** Runner-owned admission budgets for high-volume deterministic scenarios. */
   admissionLimiterOptions?: AppOptions["admissionLimiterOptions"];
-  /** Internal lifecycle owner; only the runner may set this value. */
-  lifecycleOwner?: "runner";
+  /** Deterministic real-fixture failure injection used by lifecycle controls. */
+  lifecycleFault?: "services" | "seed" | "listen";
+  /** Deterministic barriers/observers for lifecycle negative controls. */
+  lifecycleTestControl?: {
+    beforeBuild?: () => void | Promise<void>;
+    onAppBuilt?: (app: FastifyInstance) => void;
+    onContextCreated?: (context: ScenarioAppContext) => void;
+    onServicesCaptured?: (services: ScenarioAppServices) => void;
+  };
 }
 
 export type ScenarioAppFactory = (
-  options: Omit<ScenarioAppOptions, "lifecycleOwner">,
+  options: ScenarioAppOptions,
 ) => Promise<ScenarioAppContext>;
 
 export interface ScenarioAppLifecycleObserver {
@@ -44,12 +51,33 @@ export interface ScenarioAppLifecycleObserver {
 }
 
 const lifecycleObservers = new AsyncLocalStorage<ScenarioAppLifecycleObserver>();
+const RUNNER_CAPABILITY = Symbol("runner-lifecycle-capability");
+
+type LifecyclePhase = "preparing" | "root" | "scenario" | "closing" | "closed";
+
 interface ScenarioAppLifecycleScope {
-  runnerAppActive: boolean;
+  phase: LifecyclePhase;
+  capability: { readonly [RUNNER_CAPABILITY]: symbol };
+  nestedCapability: symbol;
+  pendingCleanups: Array<() => Promise<"complete" | "incomplete">>;
 }
 
 const lifecycleScopes = new AsyncLocalStorage<ScenarioAppLifecycleScope>();
-const RUNNER_NESTED_FIXTURE = Symbol("runner-nested-fixture");
+
+interface RunnerBootPermit {
+  scope: ScenarioAppLifecycleScope;
+  kind: "root" | "nested";
+  nestedCapability?: symbol;
+}
+
+const runnerBootPermits = new AsyncLocalStorage<RunnerBootPermit>();
+
+function isRunnerCapability(
+  value: unknown,
+  scope: ScenarioAppLifecycleScope,
+): value is ScenarioAppLifecycleScope["capability"] {
+  return value === scope.capability;
+}
 
 export async function withScenarioAppLifecycleObserver<T>(
   observer: ScenarioAppLifecycleObserver,
@@ -58,10 +86,65 @@ export async function withScenarioAppLifecycleObserver<T>(
   return lifecycleObservers.run(observer, run);
 }
 
-export async function withScenarioAppLifecycleScope<T>(run: () => Promise<T>): Promise<T> {
+export async function withScenarioAppLifecycleScope<T>(
+  run: (capability?: unknown) => Promise<T>,
+): Promise<T> {
   const activeScope = lifecycleScopes.getStore();
+  // Nested callers (including scenario code) never receive the runner
+  // capability. Only the outer runner invocation may issue fixtures.
   if (activeScope) return run();
-  return lifecycleScopes.run({ runnerAppActive: false }, run);
+  const scope: ScenarioAppLifecycleScope = {
+    phase: "preparing",
+    capability: { [RUNNER_CAPABILITY]: Symbol("runner-scope") },
+    nestedCapability: Symbol("runner-nested-capability"),
+    pendingCleanups: [],
+  };
+  return lifecycleScopes.run(scope, () => run(scope.capability));
+}
+
+function registerPendingCleanup(
+  scope: ScenarioAppLifecycleScope | undefined,
+  cleanup: () => Promise<"complete" | "incomplete">,
+): () => void {
+  if (!scope) return () => {};
+  scope.pendingCleanups.push(cleanup);
+  return () => {
+    const index = scope.pendingCleanups.indexOf(cleanup);
+    if (index >= 0) scope.pendingCleanups.splice(index, 1);
+  };
+}
+
+export async function drainRunnerLifecycleCleanup(
+  capability: unknown,
+): Promise<"complete" | "incomplete"> {
+  const scope = lifecycleScopes.getStore();
+  if (!scope || !isRunnerCapability(capability, scope)) return "incomplete";
+  scope.phase = "closing";
+  let cleanup: "complete" | "incomplete" = "complete";
+  for (const pending of scope.pendingCleanups.splice(0).reverse()) {
+    try {
+      if ((await pending()) === "incomplete") cleanup = "incomplete";
+    } catch {
+      cleanup = "incomplete";
+    }
+  }
+  return cleanup;
+}
+
+export function fenceRunnerLifecycle(capability: unknown): void {
+  const scope = lifecycleScopes.getStore();
+  if (!scope || !isRunnerCapability(capability, scope)) {
+    throw new ScenarioAppLifecycleError("boot", 0, "incomplete");
+  }
+  scope.phase = "closing";
+}
+
+export function finishRunnerLifecycle(capability: unknown): void {
+  const scope = lifecycleScopes.getStore();
+  if (!scope || !isRunnerCapability(capability, scope)) {
+    throw new ScenarioAppLifecycleError("close", 0, "incomplete");
+  }
+  scope.phase = "closed";
 }
 
 export interface ScenarioAppContext {
@@ -130,25 +213,33 @@ function toCookieHeader(rawHeader: string | string[] | undefined) {
  */
 async function createScenarioAppInternal(
   opts: ScenarioAppOptions,
-  nestedOwner?: symbol,
 ): Promise<ScenarioAppContext> {
   // TZ must be set before server boot for day-boundary correctness.
   process.env.TZ = "Asia/Taipei";
   const lifecycleScope = lifecycleScopes.getStore();
-  const lifecycleOwner = opts.lifecycleOwner ?? "standalone";
-  const runnerNestedBoot = nestedOwner === RUNNER_NESTED_FIXTURE;
-  if (lifecycleScope?.runnerAppActive && !runnerNestedBoot) {
+  const bootPermit = runnerBootPermits.getStore();
+  const runnerRootBoot = bootPermit !== undefined
+    && lifecycleScope !== undefined
+    && bootPermit.scope === lifecycleScope
+    && bootPermit.kind === "root"
+    && lifecycleScope.phase === "root";
+  const runnerNestedBoot = bootPermit !== undefined
+    && lifecycleScope !== undefined
+    && bootPermit.scope === lifecycleScope
+    && bootPermit.kind === "nested"
+    && bootPermit.nestedCapability === lifecycleScope.nestedCapability
+    && lifecycleScope.phase === "scenario";
+  const runnerOwned = runnerRootBoot || runnerNestedBoot;
+  if (lifecycleScope && !runnerOwned) {
     throw new ScenarioAppLifecycleError("boot", 0, "complete");
   }
-  if (runnerNestedBoot && !lifecycleScope?.runnerAppActive) {
-    throw new ScenarioAppLifecycleError("boot", 0, "complete");
-  }
-  if (lifecycleOwner === "runner" && lifecycleScope) lifecycleScope.runnerAppActive = true;
   lifecycleObservers.getStore()?.onCreate?.();
+  await opts.lifecycleTestControl?.beforeBuild?.();
   const { buildApp } = await import("../../server/app.js");
 
   const llmProvider = opts.llmProvider ?? new StreamingLLMProvider();
   let services: ScenarioAppServices | undefined;
+  let cleanupServices: ScenarioAppServices | undefined;
 
   const buildOpts = {
     dbPath: ":memory:",
@@ -159,7 +250,7 @@ async function createScenarioAppInternal(
     ...(opts.logger !== undefined ? { logger: opts.logger } : {}),
     ...(opts.admissionLimiterOptions !== undefined ? { admissionLimiterOptions: opts.admissionLimiterOptions } : {}),
     onServicesReady: (readyServices: AppServices) => {
-      services = {
+      const capturedServices: ScenarioAppServices = {
         assetService: readyServices.assetService,
         chatService: readyServices.chatService,
         db: readyServices.db,
@@ -172,6 +263,8 @@ async function createScenarioAppInternal(
         proposalCardService: readyServices.proposalCardService,
         summaryService: readyServices.summaryService,
       };
+      services = capturedServices;
+      cleanupServices = capturedServices;
     },
   };
 
@@ -179,45 +272,93 @@ async function createScenarioAppInternal(
   try {
     app = await buildApp(buildOpts);
   } catch {
-    if (lifecycleOwner === "runner" && lifecycleScope) lifecycleScope.runnerAppActive = false;
     throw new ScenarioAppLifecycleError("boot", 0, "complete");
   }
+  // Establish cleanup immediately after build, before any test observer can
+  // throw, so every built fixture has one owner even when no context is issued.
+  let closeCalls = 0;
+  let closeAttempted = false;
+  let closed = false;
+  const closeUnderlying = async (): Promise<void> => {
+    if (closeAttempted) return;
+    closeAttempted = true;
+    let incomplete = false;
+    try {
+      await app.close();
+    } catch {
+      incomplete = true;
+    }
+    try {
+      const sqlite = cleanupServices?.db.$client;
+      if (sqlite?.open) sqlite.close();
+    } catch {
+      incomplete = true;
+    }
+    if (incomplete) {
+      throw new ScenarioAppLifecycleError("close", 1, "incomplete");
+    }
+    closed = true;
+    lifecycleObservers.getStore()?.onClose?.();
+  };
+  const close = async (): Promise<void> => {
+    if (closeAttempted || closed) return;
+    closeCalls = 1;
+    await closeUnderlying();
+  };
+
+  const releasePendingCleanup = registerPendingCleanup(
+    runnerOwned ? lifecycleScope : undefined,
+    async () => {
+      try {
+        await closeUnderlying();
+        return "complete";
+      } catch {
+        return "incomplete";
+      }
+    },
+  );
+
+  const failAfterBuild = async (stage: "boot" | "seed" | "listen"): Promise<never> => {
+    if (runnerOwned) {
+      throw new ScenarioAppLifecycleError(stage, 0, "complete");
+    }
+    let cleanup: "complete" | "incomplete" = "complete";
+    try {
+      await closeUnderlying();
+    } catch {
+      cleanup = "incomplete";
+    }
+    throw new ScenarioAppLifecycleError(stage, 0, cleanup);
+  };
+
+  try {
+    opts.lifecycleTestControl?.onAppBuilt?.(app);
+    if (cleanupServices) opts.lifecycleTestControl?.onServicesCaptured?.(cleanupServices);
+  } catch {
+    return failAfterBuild("boot");
+  }
+
+  if (opts.lifecycleFault === "services") services = undefined;
   if (!services) {
-    if (lifecycleOwner === "runner" && lifecycleScope) lifecycleScope.runnerAppActive = false;
-    throw new Error("createScenarioApp: services were not captured during app boot");
+    return failAfterBuild("boot");
   }
 
   // Seed one device so scenarios can make authenticated requests immediately.
-  let closeCalls = 0;
-  let closed = false;
-  const close = async (): Promise<void> => {
-    if (closed) return;
-    closeCalls += 1;
-    try {
-      if (app.server.listening) await app.close();
-      closed = true;
-      lifecycleObservers.getStore()?.onClose?.();
-      if (lifecycleOwner === "runner" && lifecycleScope) lifecycleScope.runnerAppActive = false;
-    } catch {
-      throw new ScenarioAppLifecycleError("close", 1, "incomplete");
-    }
-  };
 
   let deviceRes;
   try {
+    if (opts.lifecycleFault === "seed") throw new Error("seed fault injection");
     deviceRes = await app.inject({
       method: "POST",
       url: "/api/device",
       payload: { goal: "fat_loss" },
     });
   } catch {
-    try { await close(); } catch { /* bounded lifecycle error below */ }
-    throw new ScenarioAppLifecycleError("seed", closeCalls as 0 | 1, closed ? "complete" : "incomplete");
+    return failAfterBuild("seed");
   }
 
   if (deviceRes.statusCode !== 200 && deviceRes.statusCode !== 201) {
-    try { await close(); } catch { /* bounded lifecycle error below */ }
-    throw new ScenarioAppLifecycleError("seed", closeCalls as 0 | 1, closed ? "complete" : "incomplete");
+    return failAfterBuild("seed");
   }
 
   const deviceId = (deviceRes.json() as { deviceId: string }).deviceId;
@@ -225,13 +366,13 @@ async function createScenarioAppInternal(
 
   let address: string;
   try {
+    if (opts.lifecycleFault === "listen") throw new Error("listen fault injection");
     address = await app.listen({ port: 0, host: "127.0.0.1" });
   } catch {
-    try { await close(); } catch { /* bounded lifecycle error below */ }
-    throw new ScenarioAppLifecycleError("listen", closeCalls as 0 | 1, closed ? "complete" : "incomplete");
+    return failAfterBuild("listen");
   }
 
-  return {
+  const context: ScenarioAppContext = {
     app,
     address,
     deviceId,
@@ -241,6 +382,14 @@ async function createScenarioAppInternal(
     close,
     get closeCalls() { return closeCalls; },
   };
+  try {
+    opts.lifecycleTestControl?.onContextCreated?.(context);
+  } catch {
+    return failAfterBuild("boot");
+  }
+  releasePendingCleanup();
+  if (runnerRootBoot && lifecycleScope) lifecycleScope.phase = "scenario";
+  return context;
 }
 
 export async function createScenarioApp(
@@ -253,11 +402,47 @@ export async function createScenarioApp(
  * Create the only factory allowed to boot nested fixtures in a runner-owned
  * lifecycle scope. Direct createScenarioApp() calls remain fail-closed.
  */
-export function createRunnerOwnedNestedScenarioAppFactory(): ScenarioAppFactory {
+export function createRunnerOwnedNestedScenarioAppFactory(capability?: unknown): ScenarioAppFactory {
   const lifecycleScope = lifecycleScopes.getStore();
-  if (!lifecycleScope) {
+  if (!lifecycleScope || !isRunnerCapability(capability, lifecycleScope) || lifecycleScope.phase !== "scenario") {
     throw new ScenarioAppLifecycleError("boot", 0, "complete");
   }
-  lifecycleScope.runnerAppActive = true;
-  return (options) => createScenarioAppInternal(options, RUNNER_NESTED_FIXTURE);
+  const capturedScope = lifecycleScope;
+  const nestedCapability = lifecycleScope.nestedCapability;
+  return (options) => {
+    if (lifecycleScopes.getStore() !== capturedScope || capturedScope.phase !== "scenario") {
+      return Promise.reject(new ScenarioAppLifecycleError("boot", 0, "complete"));
+    }
+    return runnerBootPermits.run(
+      { scope: capturedScope, kind: "nested", nestedCapability },
+      () => createScenarioAppInternal(options),
+    );
+  };
+}
+
+export async function createRunnerRootScenarioApp(
+  capability: unknown,
+  options: ScenarioAppOptions,
+): Promise<ScenarioAppContext> {
+  return withRunnerRootScenarioAppCreation(
+    capability,
+    () => createScenarioAppInternal(options),
+  );
+}
+
+export async function withRunnerRootScenarioAppCreation<T>(
+  capability: unknown,
+  create: () => Promise<T>,
+): Promise<T> {
+  const lifecycleScope = lifecycleScopes.getStore();
+  if (!lifecycleScope || !isRunnerCapability(capability, lifecycleScope) || lifecycleScope.phase !== "preparing") {
+    throw new ScenarioAppLifecycleError("boot", 0, "complete");
+  }
+  lifecycleScope.phase = "root";
+  const result = await runnerBootPermits.run(
+    { scope: lifecycleScope, kind: "root" },
+    create,
+  );
+  if (lifecycleScope.phase === "root") lifecycleScope.phase = "scenario";
+  return result;
 }

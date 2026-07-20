@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, test } from "node:test";
-import { writeScenarioArtifacts } from "../harness/artifacts.js";
+import { readPublishedArtifact, writeScenarioArtifacts } from "../harness/artifacts.js";
 import type { ScenarioMetadata, ScenarioResult } from "../harness/scenario-types.js";
 
 const SENTINEL = "phase128-raw-sentinel-value";
@@ -195,5 +196,178 @@ describe("Phase 128 artifact integrity negative controls", () => {
       .map((file) => fs.readFileSync(path.join(output, file), "utf8"))
       .join("\n");
     assert.doesNotMatch(raw, new RegExp(SENTINEL));
+  });
+
+  test("rejects sensitive metadata keys, UUID-like identifiers, and asset paths without leaking values", async () => {
+    const uuid = "123e4567-e89b-12d3-a456-426614174000";
+    const uuidV7 = "01890f47-42e7-7b5d-b1bd-6f062e6c7c8c";
+    const uuidLike = "deadbeef-cafe-f00d-0123-0123456789ab";
+    const rawProposalIdentifier = "proposal-sensitive-identifier";
+    const cases: Array<{
+      name: string;
+      expectedPath: string;
+      sensitiveValue?: string;
+      mutate: (metadata: ScenarioMetadata) => void;
+    }> = [
+      {
+        name: "count-meal-id",
+        expectedPath: "metadata.counts.mealId",
+        mutate: (metadata) => {
+          (metadata.counts as Record<string, number>).mealId = 1;
+        },
+      },
+      {
+        name: "assertion-food-name",
+        expectedPath: "metadata.assertions.foodName",
+        mutate: (metadata) => {
+          (metadata.assertions as Record<string, boolean>).foodName = true;
+        },
+      },
+      {
+        name: "uuid-v7-scenario-id",
+        expectedPath: "metadata.scenarioId",
+        sensitiveValue: uuidV7,
+        mutate: (metadata) => {
+          metadata.scenarioId = uuidV7;
+        },
+      },
+      {
+        name: "uuid-like-scenario-name",
+        expectedPath: "metadata.scenarioName",
+        sensitiveValue: uuidLike,
+        mutate: (metadata) => {
+          metadata.scenarioName = uuidLike;
+        },
+      },
+      {
+        name: "uuid-rule-id",
+        expectedPath: "metadata.policyFacts[0].ruleId",
+        sensitiveValue: uuidV7,
+        mutate: (metadata) => {
+          metadata.policyFacts = [{
+            step: "verify_policy",
+            tool: "safe_tool",
+            policyClass: "confirm-first",
+            decision: "blocked",
+            ruleId: uuidV7,
+          }];
+        },
+      },
+      {
+        name: "raw-proposal-identifier",
+        expectedPath: "metadata.policyFacts[0].proposalId",
+        sensitiveValue: rawProposalIdentifier,
+        mutate: (metadata) => {
+          metadata.policyFacts = [{
+            step: "verify_policy",
+            tool: "safe_tool",
+            policyClass: "confirm-first",
+            decision: "blocked",
+            ruleId: "confirm_required",
+          }];
+          (metadata.policyFacts[0] as unknown as Record<string, unknown>).proposalId = rawProposalIdentifier;
+        },
+      },
+      {
+        name: "uuid-asset-path",
+        expectedPath: "metadata.files[0].path",
+        sensitiveValue: uuidV7,
+        mutate: (metadata) => {
+          metadata.files = [{
+            path: `api/assets/${uuidV7}`,
+            sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            byteLength: 128,
+          }];
+        },
+      },
+    ];
+
+    for (const current of cases) {
+      const root = tempRoot();
+      roots.push(root);
+      process.env.HARNESS_ARTIFACTS_DIR = root;
+      const metadata = safeMetadata();
+      current.mutate(metadata);
+      const sensitiveValue = current.sensitiveValue ?? uuid;
+
+      await assert.rejects(
+        writeScenarioArtifacts(`phase-128-private-${current.name}`, result(metadata)),
+        (error: unknown) => {
+          const bounded = error as { category?: string; fieldPath?: string; value?: unknown };
+          assert.equal(bounded.category, "artifact_allowlist_violation");
+          assert.equal(bounded.fieldPath, current.expectedPath);
+          assert.equal("value" in bounded, false);
+          assert.doesNotMatch(String((error as Error).message), new RegExp(sensitiveValue, "i"));
+          return true;
+        },
+      );
+
+      const failure = fs.readFileSync(
+        path.join(latest(root, `phase-128-private-${current.name}`), "failure.json"),
+        "utf8",
+      );
+      assert.doesNotMatch(failure, new RegExp(sensitiveValue, "i"));
+    }
+  });
+
+  test("rejects a pre-existing scenario-root symlink before writing outside the artifact root", async () => {
+    const root = tempRoot();
+    const outside = tempRoot();
+    roots.push(root, outside);
+    process.env.HARNESS_ARTIFACTS_DIR = root;
+    const scenarioName = "phase-128-scenario-root-escape";
+    fs.symlinkSync(outside, path.join(root, scenarioName), "dir");
+
+    await assert.rejects(
+      writeScenarioArtifacts(scenarioName, result(safeMetadata())),
+      (error: unknown) => {
+        assert.match((error as Error).message, /artifact path/i);
+        assert.equal((error as Error).message.includes(outside), false);
+        return true;
+      },
+    );
+    assert.deepEqual(fs.readdirSync(outside), []);
+  });
+
+  test("rejects latest pointers outside or not directly under the scenario root", () => {
+    const root = tempRoot();
+    const outside = tempRoot();
+    roots.push(root, outside);
+    process.env.HARNESS_ARTIFACTS_DIR = root;
+
+    for (const location of ["outside", "nested"] as const) {
+      const scenarioName = `phase-128-pointer-${location}`;
+      const scenarioRoot = path.join(root, scenarioName);
+      const generationId = location === "outside"
+        ? "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        : "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+      const generation = location === "outside"
+        ? path.join(outside, `generation-${generationId}`)
+        : path.join(scenarioRoot, "nested", `generation-${generationId}`);
+      fs.mkdirSync(generation, { recursive: true });
+      const summary = JSON.stringify({ scenarioId: "safe-scenario", status: "pass" });
+      fs.writeFileSync(path.join(generation, "summary.json"), summary, "utf8");
+      fs.writeFileSync(path.join(generation, "index.json"), JSON.stringify({
+        schemaVersion: 1,
+        generation: generationId,
+        files: {
+          "summary.json": {
+            sha256: createHash("sha256").update(summary, "utf8").digest("hex"),
+            byteLength: Buffer.byteLength(summary),
+          },
+        },
+      }), "utf8");
+      fs.mkdirSync(scenarioRoot, { recursive: true });
+      fs.symlinkSync(path.relative(scenarioRoot, generation), path.join(scenarioRoot, "latest"), "dir");
+
+      assert.throws(
+        () => readPublishedArtifact(scenarioName, "summary.json"),
+        (error: unknown) => {
+          assert.match((error as Error).message, /pointer/i);
+          assert.doesNotMatch((error as Error).message, new RegExp(generationId));
+          return true;
+        },
+      );
+    }
   });
 });

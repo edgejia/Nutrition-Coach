@@ -300,4 +300,35 @@ describe("harness-foundation", () => {
       /scenario must not call createScenarioApp/,
     );
   });
+
+  test("behavior-matrix cases are statically runner-factory owned", () => {
+    const registrySource = readFileSync("tests/harness/scenarios/behavior-matrix.ts", "utf-8");
+    const caseImports = [...registrySource.matchAll(
+      /import\s+\{\s*(runCase\w+)\s*\}\s+from\s+"\.\.\/cases\/([^".]+)\.js"/g,
+    )];
+    assert.ok(caseImports.length >= 18, "behavior matrix must register the complete case catalog");
+
+    for (const match of caseImports) {
+      const runnerName = match[1]!;
+      const casePath = `tests/harness/cases/${match[2]}.ts`;
+      const caseSource = readFileSync(casePath, "utf-8");
+      assert.match(
+        registrySource,
+        new RegExp(`withRunnerFactory\\(${runnerName}\\)`),
+        `${runnerName} must be adapted through the runner-issued factory`,
+      );
+      assert.doesNotMatch(caseSource, /(?:from\s+["'][^"']*server\/app\.js|\bbuildApp\s*\(|\bcreateScenarioApp\s*\()/);
+      assert.doesNotMatch(caseSource, /\.listen\s*\(/, `${casePath} must not own a listening server`);
+    }
+  });
+
+  test("runner ownership is not forgeable through public scenario options", () => {
+    const fixtureSource = readFileSync("tests/harness/app-fixture.ts", "utf-8");
+    const runnerSource = readFileSync("tests/harness/run.ts", "utf-8");
+
+    assert.doesNotMatch(fixtureSource, /\blifecycleOwner\b/);
+    assert.doesNotMatch(runnerSource, /\blifecycleOwner\b/);
+    assert.match(fixtureSource, /runnerBootPermits/);
+    assert.match(fixtureSource, /capturedScope\.phase !== "scenario"/);
+  });
 });

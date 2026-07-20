@@ -7,6 +7,7 @@ import fs from "node:fs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
+import { Worker } from "node:worker_threads";
 import path from "node:path";
 import {
   ArtifactPublicationConflict,
@@ -48,10 +49,16 @@ const PUBLICATION_CHILD_SOURCE = `
     consoleSummary: "PASS phase-128-process-" + writerId + " 1/1",
   };
 
-  const publicationTestControl = holdMode === "lock"
+  const publicationTestControl = holdMode === "owner-window"
+    ? { beforeLockPublish: waitAtCheckpoint }
+    : holdMode === "pre-owner"
+    ? { afterTemporaryLockCreate: waitAtCheckpoint }
+    : holdMode === "lock"
     ? { afterLock: waitAtCheckpoint }
     : holdMode === "generation"
       ? { afterTemporaryGeneration: waitAtCheckpoint }
+      : holdMode === "generation-renamed"
+        ? { afterGenerationRename: waitAtCheckpoint }
       : undefined;
 
   try {
@@ -61,11 +68,117 @@ const PUBLICATION_CHILD_SOURCE = `
     if (error && typeof error === "object" && error.category === "publication_conflict") {
       console.log("conflict");
     } else {
-      console.log("unexpected");
+      const details = error && typeof error === "object"
+        ? { name: error.name, code: error.code, category: error.category }
+        : { name: typeof error };
+      console.log("unexpected " + JSON.stringify(details));
       process.exitCode = 1;
     }
   }
 `;
+
+const PUBLICATION_WORKER_SOURCE = `
+  const { parentPort, workerData } = require("node:worker_threads");
+
+  process.env.HARNESS_ARTIFACTS_DIR = workerData.root;
+
+  async function run() {
+    const { writeScenarioArtifacts } = await import(workerData.artifactsModuleUrl);
+    const result = {
+      ok: true,
+      steps: [{ name: "publication", ok: true }],
+      artifacts: {},
+      metadata: {
+        scenarioId: "phase-128-worker-" + workerData.writerId,
+        scenarioName: "phase-128-worker-" + workerData.writerId,
+        status: "pass",
+        counts: { completeGenerations: 1 },
+        assertions: { noMixedGeneration: true },
+        trace: { eventNames: ["scenario"], counts: { scenario: 1 } },
+      },
+      consoleSummary: "PASS phase-128-worker-" + workerData.writerId + " 1/1",
+    };
+    const publicationTestControl = workerData.hold
+      ? {
+          afterLock: () => {
+            parentPort.postMessage({ kind: "locked", pid: process.pid });
+            const gate = new Int32Array(workerData.gate);
+            while (Atomics.load(gate, 0) === 0) Atomics.wait(gate, 0, 0);
+          },
+        }
+      : undefined;
+    try {
+      await writeScenarioArtifacts("phase-128-workers", result, { publicationTestControl });
+      parentPort.postMessage({ kind: "result", outcome: "success", pid: process.pid });
+    } catch (error) {
+      if (error && typeof error === "object" && error.category === "publication_conflict") {
+        parentPort.postMessage({ kind: "result", outcome: "conflict", pid: process.pid });
+        return;
+      }
+      throw error;
+    }
+  }
+
+  run().catch((error) => {
+    parentPort.postMessage({
+      kind: "unexpected",
+      name: error && typeof error === "object" ? error.name : typeof error,
+      code: error && typeof error === "object" ? error.code : undefined,
+    });
+  });
+`;
+
+interface PublicationWorkerMessage {
+  kind: "locked" | "result" | "unexpected";
+  outcome?: "success" | "conflict";
+  pid?: number;
+  name?: string;
+  code?: string;
+}
+
+function waitForWorkerMessage(worker: Worker, kind: PublicationWorkerMessage["kind"]): Promise<PublicationWorkerMessage> {
+  return new Promise((resolve, reject) => {
+    const onMessage = (message: PublicationWorkerMessage) => {
+      if (message.kind !== kind) return;
+      cleanup();
+      resolve(message);
+    };
+    const onError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+    const onExit = (code: number) => {
+      cleanup();
+      reject(new Error(`publication worker exited before ${kind}: ${code}`));
+    };
+    const cleanup = () => {
+      worker.off("message", onMessage);
+      worker.off("error", onError);
+      worker.off("exit", onExit);
+    };
+    worker.on("message", onMessage);
+    worker.once("error", onError);
+    worker.once("exit", onExit);
+  });
+}
+
+function createPublicationWorker(
+  root: string,
+  writerId: string,
+  hold: boolean,
+  gate: SharedArrayBuffer,
+): Worker {
+  return new Worker(PUBLICATION_WORKER_SOURCE, {
+    eval: true,
+    workerData: {
+      root,
+      writerId,
+      hold,
+      gate,
+      artifactsModuleUrl: new URL("../harness/artifacts.ts", import.meta.url).href,
+    },
+  });
+}
 
 async function waitForFile(filePath: string): Promise<void> {
   const deadline = Date.now() + 5_000;
@@ -78,7 +191,7 @@ async function waitForFile(filePath: string): Promise<void> {
 function spawnPublicationChild(
   root: string,
   writer: string,
-  hold: "lock" | "generation" | "none",
+  hold: "pre-owner" | "owner-window" | "lock" | "generation" | "generation-renamed" | "none",
   ready: string,
   release: string,
 ) {
@@ -184,7 +297,7 @@ test("Phase 128 sibling publication has one complete winner and an exact loser w
     fs.mkdirSync(path.join(scenarioRoot, ".publication.lock"));
     fs.writeFileSync(
       path.join(scenarioRoot, ".publication.lock", "owner.json"),
-      JSON.stringify({ pid: process.ppid }),
+      JSON.stringify({ pid: process.ppid, token: "11111111-1111-4111-8111-111111111111" }),
       "utf8",
     );
     await assert.rejects(
@@ -286,6 +399,49 @@ test("Phase 128 real competing writers have one winner and killed-owner recovery
     for (const child of children) {
       if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
     }
+    if (previous === undefined) delete process.env.HARNESS_ARTIFACTS_DIR;
+    else process.env.HARNESS_ARTIFACTS_DIR = previous;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Phase 128 same-PID workers cannot both own one publication", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "phase-128-worker-publication-"));
+  const previous = process.env.HARNESS_ARTIFACTS_DIR;
+  process.env.HARNESS_ARTIFACTS_DIR = root;
+  const gate = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT);
+  const gateView = new Int32Array(gate);
+  const workers: Worker[] = [];
+  try {
+    const owner = createPublicationWorker(root, "owner", true, gate);
+    workers.push(owner);
+    const locked = await waitForWorkerMessage(owner, "locked");
+    assert.equal(locked.pid, process.pid);
+
+    const scenarioRoot = path.join(root, "phase-128-workers");
+    const ownerMetadata = JSON.parse(fs.readFileSync(
+      path.join(scenarioRoot, ".publication.lock", "owner.json"),
+      "utf8",
+    )) as { pid?: unknown; token?: unknown };
+    assert.equal(ownerMetadata.pid, process.pid);
+    assert.match(String(ownerMetadata.token), /^[a-f0-9-]{36}$/i);
+
+    const sibling = createPublicationWorker(root, "sibling", false, gate);
+    workers.push(sibling);
+    const siblingResult = await waitForWorkerMessage(sibling, "result");
+    assert.equal(siblingResult.pid, process.pid);
+    assert.equal(siblingResult.outcome, "conflict");
+
+    Atomics.store(gateView, 0, 1);
+    Atomics.notify(gateView, 0);
+    const ownerResult = await waitForWorkerMessage(owner, "result");
+    assert.equal(ownerResult.outcome, "success");
+    assert.match(readPublishedArtifact("phase-128-workers", "summary.json"), /worker-owner/);
+    assert.equal(fs.existsSync(path.join(scenarioRoot, ".publication.lock")), false);
+  } finally {
+    Atomics.store(gateView, 0, 1);
+    Atomics.notify(gateView, 0);
+    await Promise.all(workers.map((worker) => worker.terminate()));
     if (previous === undefined) delete process.env.HARNESS_ARTIFACTS_DIR;
     else process.env.HARNESS_ARTIFACTS_DIR = previous;
     rmSync(root, { recursive: true, force: true });
@@ -524,6 +680,361 @@ test("Phase 128 next publication recovers stale owner residue and swaps one poin
       [],
     );
     assert.match(readPublishedArtifact("phase-128-recovery", "summary.json"), /recovered/);
+  } finally {
+    if (previous === undefined) delete process.env.HARNESS_ARTIFACTS_DIR;
+    else process.env.HARNESS_ARTIFACTS_DIR = previous;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Phase 128 lock acquisition never exposes an empty owner window", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "phase-128-lock-owner-atomic-"));
+  const previous = process.env.HARNESS_ARTIFACTS_DIR;
+  process.env.HARNESS_ARTIFACTS_DIR = root;
+  const ready = path.join(root, "owner-window.ready");
+  const release = path.join(root, "owner-window.release");
+  const children: ReturnType<typeof spawn>[] = [];
+  try {
+    const owner = spawnPublicationChild(root, "owner-window-a", "owner-window", ready, release);
+    children.push(owner);
+    await waitForFile(ready);
+    const scenarioRoot = path.join(root, "phase-128-processes");
+    assert.equal(fs.existsSync(path.join(scenarioRoot, ".publication.lock")), false);
+    const candidates = fs.readdirSync(scenarioRoot)
+      .filter((entry) => entry.startsWith(".publication-lock-") && entry.endsWith(".tmp"));
+    assert.equal(candidates.length, 1);
+    const ownerPath = path.join(scenarioRoot, candidates[0]!, "owner.json");
+    const ownerMetadata = JSON.parse(fs.readFileSync(ownerPath, "utf8")) as { pid?: unknown; token?: unknown };
+    assert.equal(ownerMetadata.pid, owner.pid);
+    assert.match(String(ownerMetadata.token), /^[a-f0-9-]{36}$/i);
+
+    const sibling = spawnPublicationChild(
+      root,
+      "owner-window-b",
+      "none",
+      path.join(root, "owner-window-b.ready"),
+      path.join(root, "owner-window-b.release"),
+    );
+    children.push(sibling);
+    const siblingResult = await waitForChild(sibling);
+    assert.equal(siblingResult.code, 0);
+    assert.equal(siblingResult.signal, null);
+    assert.match(siblingResult.stdout, /^success\s*$/);
+    assert.equal(siblingResult.stderr, "");
+
+    fs.writeFileSync(release, "release", "utf8");
+    const ownerResult = await waitForChild(owner);
+    assert.equal(ownerResult.code, 0, `owner stdout=${ownerResult.stdout} stderr=${ownerResult.stderr}`);
+    assert.equal(ownerResult.signal, null);
+    assert.match(ownerResult.stdout, /^success\s*$/);
+    assert.equal(ownerResult.stderr, "");
+    assert.equal(fs.existsSync(path.join(scenarioRoot, ".publication.lock")), false);
+    assert.match(readPublishedArtifact("phase-128-processes", "summary.json"), /owner-window-a/);
+  } finally {
+    for (const child of children) {
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    }
+    if (previous === undefined) delete process.env.HARNESS_ARTIFACTS_DIR;
+    else process.env.HARNESS_ARTIFACTS_DIR = previous;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Phase 128 legacy pointer remains restorable after migration fault", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "phase-128-legacy-rollback-"));
+  const previous = process.env.HARNESS_ARTIFACTS_DIR;
+  process.env.HARNESS_ARTIFACTS_DIR = root;
+  try {
+    for (const stage of ["afterLegacyMigration", "beforePointerRename", "afterPointerRename"] as const) {
+      const scenarioName = `phase-128-legacy-rollback-${stage}`;
+      const scenarioRoot = path.join(root, scenarioName);
+      fs.mkdirSync(path.join(scenarioRoot, "latest"), { recursive: true });
+      fs.writeFileSync(path.join(scenarioRoot, "latest", "index.json"), "legacy-pointer", "utf8");
+      fs.writeFileSync(path.join(scenarioRoot, "latest", "summary.json"), "legacy-summary", "utf8");
+      fs.writeFileSync(path.join(scenarioRoot, "latest.index.json"), "legacy-index", "utf8");
+      const originalLatestPointer = fs.readFileSync(path.join(scenarioRoot, "latest", "index.json"), "utf8");
+      const originalLatestSummary = fs.readFileSync(path.join(scenarioRoot, "latest", "summary.json"), "utf8");
+      const originalLatestIndex = fs.readFileSync(path.join(scenarioRoot, "latest.index.json"), "utf8");
+      const injectedFailure = new Error(`phase-128 injected ${stage} failure`);
+      const publicationTestControl = {
+        [stage]: () => {
+          if (stage === "afterLegacyMigration") {
+            const migrated = fs.readdirSync(scenarioRoot)
+              .filter((entry) => entry.startsWith(".legacy-latest-"));
+            assert.equal(migrated.length >= 1, true);
+          }
+          throw injectedFailure;
+        },
+      };
+
+      await assert.rejects(
+        writeScenarioArtifacts(
+          scenarioName,
+          result(safeMetadata("should-not-publish")),
+          { publicationTestControl } as never,
+        ),
+        (error: unknown) => error === injectedFailure,
+      );
+
+      assert.equal(fs.lstatSync(path.join(scenarioRoot, "latest")).isDirectory(), true);
+      assert.equal(fs.readFileSync(path.join(scenarioRoot, "latest", "index.json"), "utf8"), originalLatestPointer);
+      assert.equal(fs.readFileSync(path.join(scenarioRoot, "latest", "summary.json"), "utf8"), originalLatestSummary);
+      assert.equal(fs.readFileSync(path.join(scenarioRoot, "latest.index.json"), "utf8"), originalLatestIndex);
+      assert.deepEqual(
+        fs.readdirSync(scenarioRoot).filter((entry) => entry.startsWith(".legacy-latest-")),
+        [],
+      );
+      assert.equal(fs.existsSync(path.join(scenarioRoot, ".publication.lock")), false);
+    }
+  } finally {
+    if (previous === undefined) delete process.env.HARNESS_ARTIFACTS_DIR;
+    else process.env.HARNESS_ARTIFACTS_DIR = previous;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Phase 128 killed complete generation is reaped without removing the current pointer target", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "phase-128-complete-generation-recovery-"));
+  const previous = process.env.HARNESS_ARTIFACTS_DIR;
+  process.env.HARNESS_ARTIFACTS_DIR = root;
+  const children: ReturnType<typeof spawn>[] = [];
+  try {
+    await writeScenarioArtifacts("phase-128-processes", result(safeMetadata("generation-baseline")));
+    const scenarioRoot = path.join(root, "phase-128-processes");
+    const baselineTarget = fs.realpathSync(path.join(scenarioRoot, "latest"));
+
+    const ready = path.join(root, "generation-renamed.ready");
+    const release = path.join(root, "generation-renamed.release");
+    const killedOwner = spawnPublicationChild(root, "generation-killed", "generation-renamed", ready, release);
+    children.push(killedOwner);
+    await waitForFile(ready);
+    assert.equal(fs.realpathSync(path.join(scenarioRoot, "latest")), baselineTarget);
+    const completeBeforeKill = fs.readdirSync(scenarioRoot)
+      .filter((entry) => entry.startsWith("generation-"))
+      .map((entry) => path.join(scenarioRoot, entry));
+    const killedGeneration = completeBeforeKill.find((entry) => entry !== baselineTarget);
+    assert.notEqual(killedGeneration, undefined);
+    assert.equal(killedOwner.kill("SIGKILL"), true);
+    const killed = await waitForChild(killedOwner);
+    assert.equal(killed.code, null);
+    assert.equal(killed.signal, "SIGKILL");
+
+    const survivor = spawnPublicationChild(
+      root,
+      "generation-survivor",
+      "none",
+      path.join(root, "generation-survivor.ready"),
+      path.join(root, "generation-survivor.release"),
+    );
+    children.push(survivor);
+    const recovered = await waitForChild(survivor);
+    assert.equal(recovered.code, 0, `survivor stdout=${recovered.stdout} stderr=${recovered.stderr}`);
+    assert.equal(recovered.signal, null);
+    assert.match(recovered.stdout, /^success\s*$/);
+    assert.equal(fs.existsSync(killedGeneration!), false);
+    assert.match(readPublishedArtifact("phase-128-processes", "summary.json"), /generation-survivor/);
+    const referencedGeneration = fs.realpathSync(path.join(scenarioRoot, "latest"));
+    assert.equal(fs.existsSync(referencedGeneration), true);
+    assert.deepEqual(
+      fs.readdirSync(scenarioRoot).filter((entry) => entry.startsWith("generation-")),
+      [path.basename(referencedGeneration)],
+    );
+  } finally {
+    for (const child of children) {
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    }
+    if (previous === undefined) delete process.env.HARNESS_ARTIFACTS_DIR;
+    else process.env.HARNESS_ARTIFACTS_DIR = previous;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Phase 128 pre-owner temp lock identity prevents live sibling garbage collection", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "phase-128-pre-owner-lock-"));
+  const previous = process.env.HARNESS_ARTIFACTS_DIR;
+  process.env.HARNESS_ARTIFACTS_DIR = root;
+  const children: ReturnType<typeof spawn>[] = [];
+  try {
+    const ready = path.join(root, "pre-owner.ready");
+    const release = path.join(root, "pre-owner.release");
+    const owner = spawnPublicationChild(root, "pre-owner-a", "pre-owner", ready, release);
+    children.push(owner);
+    await waitForFile(ready);
+    const scenarioRoot = path.join(root, "phase-128-processes");
+    assert.equal(fs.existsSync(path.join(scenarioRoot, ".publication.lock")), false);
+    const candidates = fs.readdirSync(scenarioRoot)
+      .filter((entry) => entry.startsWith(".publication-lock-") && entry.endsWith(".tmp"));
+    assert.equal(candidates.length, 1);
+    assert.equal(fs.existsSync(path.join(scenarioRoot, candidates[0]!, "owner.json")), false);
+    assert.match(candidates[0]!, new RegExp(`^\\.publication-lock-${owner.pid}-[a-f0-9-]+\\.tmp$`, "i"));
+
+    const sibling = spawnPublicationChild(
+      root,
+      "pre-owner-b",
+      "none",
+      path.join(root, "pre-owner-b.ready"),
+      path.join(root, "pre-owner-b.release"),
+    );
+    children.push(sibling);
+    const siblingResult = await waitForChild(sibling);
+    assert.equal(siblingResult.code, 0, `sibling stdout=${siblingResult.stdout} stderr=${siblingResult.stderr}`);
+    assert.equal(fs.existsSync(path.join(scenarioRoot, candidates[0]!)), true);
+
+    fs.writeFileSync(release, "release", "utf8");
+    const ownerResult = await waitForChild(owner);
+    assert.equal(ownerResult.code, 0, `owner stdout=${ownerResult.stdout} stderr=${ownerResult.stderr}`);
+    assert.match(ownerResult.stdout, /^success\s*$/);
+    assert.equal(fs.existsSync(path.join(scenarioRoot, candidates[0]!)), false);
+    assert.match(readPublishedArtifact("phase-128-processes", "summary.json"), /pre-owner-a/);
+  } finally {
+    for (const child of children) {
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    }
+    if (previous === undefined) delete process.env.HARNESS_ARTIFACTS_DIR;
+    else process.env.HARNESS_ARTIFACTS_DIR = previous;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Phase 128 malformed and out-of-range lock owner PIDs are recoverable residue", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "phase-128-owner-pid-"));
+  const previous = process.env.HARNESS_ARTIFACTS_DIR;
+  process.env.HARNESS_ARTIFACTS_DIR = root;
+  try {
+    for (const [name, pid] of [["out-of-range", 2_147_483_648], ["malformed", "not-a-pid"]] as const) {
+      const scenarioName = `phase-128-owner-${name}`;
+      const scenarioRoot = path.join(root, scenarioName);
+      fs.mkdirSync(path.join(scenarioRoot, ".publication.lock"), { recursive: true });
+      fs.writeFileSync(path.join(scenarioRoot, ".publication.lock", "owner.json"), JSON.stringify({ pid }), "utf8");
+      await writeScenarioArtifacts(scenarioName, result(safeMetadata(`owner-${name}`)));
+      assert.equal(fs.existsSync(path.join(scenarioRoot, ".publication.lock")), false);
+      assert.match(readPublishedArtifact(scenarioName, "summary.json"), new RegExp(`owner-${name}`));
+    }
+  } finally {
+    if (previous === undefined) delete process.env.HARNESS_ARTIFACTS_DIR;
+    else process.env.HARNESS_ARTIFACTS_DIR = previous;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Phase 128 pointer token read errors fail closed and preserve the prior latest", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "phase-128-pointer-token-"));
+  const previous = process.env.HARNESS_ARTIFACTS_DIR;
+  process.env.HARNESS_ARTIFACTS_DIR = root;
+  try {
+    const scenarioRoot = path.join(root, "phase-128-pointer-token");
+    fs.mkdirSync(path.join(scenarioRoot, "latest", "index.json"), { recursive: true });
+    fs.writeFileSync(path.join(scenarioRoot, "latest", "summary.json"), "prior-summary", "utf8");
+    await assert.rejects(
+      writeScenarioArtifacts("phase-128-pointer-token", result(safeMetadata("should-not-publish"))),
+      (error: unknown) => (error as NodeJS.ErrnoException).code === "EISDIR",
+    );
+    assert.equal(fs.lstatSync(path.join(scenarioRoot, "latest")).isDirectory(), true);
+    assert.equal(fs.lstatSync(path.join(scenarioRoot, "latest", "index.json")).isDirectory(), true);
+    assert.equal(fs.readFileSync(path.join(scenarioRoot, "latest", "summary.json"), "utf8"), "prior-summary");
+    assert.equal(fs.existsSync(path.join(scenarioRoot, ".publication.lock")), false);
+  } finally {
+    if (previous === undefined) delete process.env.HARNESS_ARTIFACTS_DIR;
+    else process.env.HARNESS_ARTIFACTS_DIR = previous;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Phase 128 directory fsync faults fail closed at generation and pointer durability boundaries", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "phase-128-fsync-fault-"));
+  const previous = process.env.HARNESS_ARTIFACTS_DIR;
+  process.env.HARNESS_ARTIFACTS_DIR = root;
+  try {
+    for (const stage of ["generation-root", "pointer-root"] as const) {
+      const scenarioName = `phase-128-fsync-${stage}`;
+      await writeScenarioArtifacts(scenarioName, result(safeMetadata(`${stage}-baseline`)));
+      const prior = readPublishedArtifact(scenarioName, "summary.json");
+      const injected = new Error(`injected ${stage} fsync failure`);
+      let observed = false;
+      await assert.rejects(
+        writeScenarioArtifacts(
+          scenarioName,
+          result(safeMetadata(`${stage}-replacement`)),
+          {
+            publicationTestControl: {
+              beforeDirectoryFsync: (currentStage: string) => {
+                if (currentStage !== stage) return;
+                observed = true;
+                throw injected;
+              },
+            },
+          } as never,
+        ),
+        (error: unknown) => error === injected,
+      );
+      assert.equal(observed, true);
+      assert.equal(readPublishedArtifact(scenarioName, "summary.json"), prior);
+      assert.equal(fs.existsSync(path.join(root, scenarioName, ".publication.lock")), false);
+    }
+  } finally {
+    if (previous === undefined) delete process.env.HARNESS_ARTIFACTS_DIR;
+    else process.env.HARNESS_ARTIFACTS_DIR = previous;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Phase 128 cleanup faults preserve primary identity, release ownership, and avoid ambiguous commit failure", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "phase-128-cleanup-fault-"));
+  const previous = process.env.HARNESS_ARTIFACTS_DIR;
+  process.env.HARNESS_ARTIFACTS_DIR = root;
+  try {
+    for (const cleanupOperation of ["remove-pointer", "restore-legacy-latest", "remove-lock"] as const) {
+      const scenarioName = `phase-128-cleanup-${cleanupOperation}`;
+      await writeScenarioArtifacts(scenarioName, result(safeMetadata(`${cleanupOperation}-baseline`)));
+      const prior = readPublishedArtifact(scenarioName, "summary.json");
+      const primary = new Error(`primary ${cleanupOperation} failure`);
+      const cleanupFault = new Error(`cleanup ${cleanupOperation} failure`);
+      let cleanupObserved = false;
+      await assert.rejects(
+        writeScenarioArtifacts(
+          scenarioName,
+          result(safeMetadata(`${cleanupOperation}-replacement`)),
+          {
+            publicationTestControl: {
+              afterPointerRename: () => {
+                throw primary;
+              },
+              beforeCleanupOperation: (operation: string) => {
+                if (operation !== cleanupOperation || cleanupObserved) return;
+                cleanupObserved = true;
+                throw cleanupFault;
+              },
+            },
+          } as never,
+        ),
+        (error: unknown) => error === primary,
+      );
+      assert.equal(cleanupObserved, true);
+      assert.equal(readPublishedArtifact(scenarioName, "summary.json"), prior);
+      assert.equal(fs.existsSync(path.join(root, scenarioName, ".publication.lock")), false);
+      await writeScenarioArtifacts(scenarioName, result(safeMetadata(`${cleanupOperation}-survivor`)));
+      assert.match(readPublishedArtifact(scenarioName, "summary.json"), new RegExp(`${cleanupOperation}-survivor`));
+    }
+
+    const committedScenario = "phase-128-cleanup-after-commit";
+    await writeScenarioArtifacts(committedScenario, result(safeMetadata("committed-baseline")));
+    let durableCleanupObserved = false;
+    await writeScenarioArtifacts(
+      committedScenario,
+      result(safeMetadata("committed-replacement")),
+      {
+        publicationTestControl: {
+          beforeCleanupOperation: (operation: string) => {
+            if (operation !== "remove-legacy-latest" || durableCleanupObserved) return;
+            durableCleanupObserved = true;
+            throw new Error("post-commit cleanup fault");
+          },
+        },
+      } as never,
+    );
+    assert.equal(durableCleanupObserved, true);
+    assert.match(readPublishedArtifact(committedScenario, "summary.json"), /committed-replacement/);
+    assert.equal(fs.existsSync(path.join(root, committedScenario, ".publication.lock")), false);
   } finally {
     if (previous === undefined) delete process.env.HARNESS_ARTIFACTS_DIR;
     else process.env.HARNESS_ARTIFACTS_DIR = previous;

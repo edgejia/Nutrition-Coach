@@ -70,8 +70,38 @@ export class ArtifactPublicationConflict extends Error {
 
 /** Explicit publication checkpoints used only by disposable process controls. */
 export interface ArtifactPublicationTestControl {
+  /** Called after the PID-bearing temp directory exists but before owner.json. */
+  afterTemporaryLockCreate?: () => void;
+  /** Called after owner.json is durable but before the lock becomes visible. */
+  beforeLockPublish?: () => void;
   afterLock?: () => void;
   afterTemporaryGeneration?: () => void;
+  afterGenerationRename?: () => void;
+  /** Called after legacy latest content is moved aside and before pointer creation. */
+  afterLegacyMigration?: () => void;
+  /** Called immediately before the atomic latest pointer rename. */
+  beforePointerRename?: () => void;
+  /** Called after pointer rename and before the durability fsync. */
+  afterPointerRename?: () => void;
+  beforeDirectoryFsync?: (stage:
+    | "lock-temp"
+    | "lock-root"
+    | "generation-temp"
+    | "generation-root"
+    | "legacy-root"
+    | "pointer-root"
+    | "cleanup-root") => void;
+  beforeCleanupOperation?: (operation:
+    | "remove-temporary-lock"
+    | "remove-temporary-generation"
+    | "remove-generation"
+    | "remove-pointer"
+    | "restore-legacy-index"
+    | "restore-legacy-latest"
+    | "remove-pointer-temp"
+    | "remove-legacy-index"
+    | "remove-legacy-latest"
+    | "remove-lock") => void;
 }
 
 export interface ScenarioArtifactWriteOptions {
@@ -98,6 +128,36 @@ const TRACE_KEYS = new Set(["eventNames", "counts"]);
 const FILE_KEYS = new Set(["path", "sha256", "byteLength"]);
 const SAFE_METADATA_KEY = /^[a-z][a-zA-Z0-9_:-]*$/;
 const SAFE_IDENTIFIER = /^[a-z0-9][a-z0-9_.:-]*$/i;
+const UUID_LIKE = /(?:^|[^0-9a-f])[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}(?:$|[^0-9a-f])/i;
+const FORBIDDEN_METADATA_MAP_KEYS = new Set([
+  "mealid",
+  "foodname",
+  "deviceid",
+  "userid",
+  "assetid",
+  "imageassetid",
+  "imageurl",
+  "sessiontoken",
+  "resumetoken",
+  "authorization",
+  "cookie",
+  "prompt",
+  "message",
+  "reply",
+  "replytext",
+  "assistantreply",
+  "response",
+  "content",
+  "transcript",
+  "sse",
+  "rawsse",
+  "rawtranscript",
+  "events",
+  "data",
+  "providerpayload",
+  "payload",
+  "dom",
+]);
 const SHA256 = /^[0-9a-f]{64}$/i;
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const TRACE_EVENT_NAMES = new Set([
@@ -122,7 +182,7 @@ const ERROR_CATEGORIES = new Set<ScenarioErrorCategory>([
   "interrupted",
   "artifact_allowlist_violation",
 ]);
-const POLICY_FACT_KEYS = new Set(["step", "tool", "policyClass", "decision", "ruleId", "proposalId"]);
+const POLICY_FACT_KEYS = new Set(["step", "tool", "policyClass", "decision", "ruleId"]);
 const POLICY_DB_INVARIANT_KEYS = new Set([
   "step",
   "mealCountBefore",
@@ -151,6 +211,15 @@ function safePathSegment(key: string): string {
   return SAFE_METADATA_KEY.test(key) ? key : "[unknown]";
 }
 
+function isSafeMetadataIdentifier(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    SAFE_IDENTIFIER.test(value) &&
+    !UUID_LIKE.test(value) &&
+    !/^sk-[a-z0-9_-]+$/i.test(value)
+  );
+}
+
 function violation(pathText: string): never {
   throw new ArtifactSchemaViolation(pathText);
 }
@@ -177,19 +246,7 @@ function requireSafeMap(
       violation(`${pathText}.[unknown]`);
     }
     const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
-    if (new Set([
-      "reply",
-      "replytext",
-      "assistantreply",
-      "transcript",
-      "sse",
-      "rawsse",
-      "rawtranscript",
-      "events",
-      "data",
-      "providerpayload",
-      "dom",
-    ]).has(normalized)) {
+    if (FORBIDDEN_METADATA_MAP_KEYS.has(normalized)) {
       violation(`${pathText}.${key}`);
     }
     if (valueType === "count") {
@@ -220,7 +277,7 @@ function validateTrace(value: unknown, pathText: string): NonNullable<ScenarioMe
 }
 
 function requireSafeIdentifier(value: unknown, pathText: string): string {
-  if (typeof value !== "string" || !SAFE_IDENTIFIER.test(value)) {
+  if (!isSafeMetadataIdentifier(value)) {
     violation(pathText);
   }
   return value;
@@ -246,7 +303,6 @@ function validatePolicyFacts(value: unknown, pathText: string): ScenarioPolicyFa
       policyClass: policyClass as ScenarioPolicyFactMetadata["policyClass"],
       decision: decision as ScenarioPolicyFactMetadata["decision"],
       ruleId: requireSafeIdentifier(entry.ruleId, `${itemPath}.ruleId`),
-      ...(entry.proposalId === undefined ? {} : { proposalId: requireSafeIdentifier(entry.proposalId, `${itemPath}.proposalId`) }),
     };
   });
 }
@@ -343,7 +399,10 @@ function validateFiles(value: unknown, pathText: string): NonNullable<ScenarioMe
       path.isAbsolute(entry.path) ||
       entry.path.includes("..") ||
       entry.path.includes("\\") ||
-      entry.path.includes("\0")
+      entry.path.includes("\0") ||
+      UUID_LIKE.test(entry.path) ||
+      /(?:^|\/)api\/assets(?:\/|$)/i.test(entry.path) ||
+      /(?:^|\/)(?:uploads|upload-staging)(?:\/|$)/i.test(entry.path)
     ) {
       violation(`${itemPath}.path`);
     }
@@ -367,10 +426,10 @@ export function validateScenarioMetadata(value: ScenarioMetadata): ScenarioMetad
     violation("metadata");
   }
   requireExactKeys(value, METADATA_KEYS, "metadata");
-  if (typeof value.scenarioId !== "string" || !SAFE_IDENTIFIER.test(value.scenarioId)) {
+  if (!isSafeMetadataIdentifier(value.scenarioId)) {
     violation("metadata.scenarioId");
   }
-  if (typeof value.scenarioName !== "string" || !SAFE_IDENTIFIER.test(value.scenarioName)) {
+  if (!isSafeMetadataIdentifier(value.scenarioName)) {
     violation("metadata.scenarioName");
   }
   if (value.status !== "pass" && value.status !== "fail") {
@@ -412,7 +471,7 @@ export function validateScenarioMetadata(value: ScenarioMetadata): ScenarioMetad
 }
 
 function safeStepName(value: string, pathText: string): string {
-  if (!SAFE_IDENTIFIER.test(value)) {
+  if (!isSafeMetadataIdentifier(value)) {
     violation(pathText);
   }
   return value;
@@ -431,21 +490,59 @@ function getArtifactsRoot(): string {
   return process.env.HARNESS_ARTIFACTS_DIR ?? DEFAULT_ARTIFACTS_ROOT;
 }
 
-function latestDir(scenarioName: string): string {
-  if (!/^[a-z0-9][a-z0-9._-]*$/i.test(scenarioName)) {
-    throw new Error(`Invalid scenario name: ${scenarioName}`);
+function validateScenarioPathName(scenarioName: string): void {
+  if (!/^[a-z0-9][a-z0-9._-]*$/i.test(scenarioName) || UUID_LIKE.test(scenarioName)) {
+    throw new Error("Invalid scenario name");
   }
-
-  const root = path.resolve(getArtifactsRoot());
-  const dir = path.resolve(root, scenarioName, "latest");
-  if (!dir.startsWith(`${root}${path.sep}`)) {
-    throw new Error(`Scenario artifact path escapes root: ${scenarioName}`);
-  }
-  return dir;
 }
 
-function scenarioRoot(scenarioName: string): string {
-  return path.dirname(latestDir(scenarioName));
+function realArtifactsRoot(create: boolean): string {
+  const configured = path.resolve(getArtifactsRoot());
+  if (create) fs.mkdirSync(configured, { recursive: true });
+  const stat = fs.statSync(configured);
+  if (!stat.isDirectory()) throw new Error("Scenario artifact path is invalid");
+  return fs.realpathSync(configured);
+}
+
+function resolveScenarioRoot(scenarioName: string, create: boolean): string {
+  validateScenarioPathName(scenarioName);
+  const root = realArtifactsRoot(create);
+  const candidate = path.join(root, scenarioName);
+  const existing = lstatIfPresent(candidate);
+  if (existing === undefined) {
+    if (!create) throw new Error("Scenario artifact path is invalid");
+    fs.mkdirSync(candidate);
+  } else if (existing.isSymbolicLink() || !existing.isDirectory()) {
+    throw new Error("Scenario artifact path is invalid");
+  }
+  const resolved = fs.realpathSync(candidate);
+  if (path.dirname(resolved) !== root) {
+    throw new Error("Scenario artifact path is invalid");
+  }
+  return resolved;
+}
+
+function resolvedLatestPointer(root: string, requirePointer: boolean): string | undefined {
+  const pointer = path.join(root, "latest");
+  const pointerStat = lstatIfPresent(pointer);
+  if (pointerStat === undefined) {
+    if (requirePointer) throw new Error("Published artifact pointer is invalid");
+    return undefined;
+  }
+  if (!pointerStat.isSymbolicLink()) {
+    if (!requirePointer && pointerStat.isDirectory()) return pointer;
+    throw new Error("Published artifact pointer is invalid");
+  }
+  let resolved: string;
+  try {
+    resolved = fs.realpathSync(pointer);
+  } catch {
+    throw new Error("Published artifact pointer is invalid");
+  }
+  if (path.dirname(resolved) !== root || !/^generation-[a-f0-9-]+$/i.test(path.basename(resolved))) {
+    throw new Error("Published artifact pointer is invalid");
+  }
+  return resolved;
 }
 
 function sha256Text(value: string): string {
@@ -453,12 +550,10 @@ function sha256Text(value: string): string {
 }
 
 function readPointerToken(root: string): string {
+  const pointer = resolvedLatestPointer(root, false);
+  if (pointer === undefined) return "";
   const indexPath = path.join(root, "latest", "index.json");
-  try {
-    return fs.readFileSync(indexPath, "utf8");
-  } catch {
-    return "";
-  }
+  return fs.readFileSync(indexPath, "utf8");
 }
 
 function fsyncFile(filePath: string): void {
@@ -478,23 +573,133 @@ function fsyncDirectory(directory: string): void {
     } finally {
       fs.closeSync(handle);
     }
-  } catch {
-    // Directory fsync is platform-dependent; file fsync and atomic rename remain required.
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    // Windows does not expose durable directory handles consistently. These
+    // codes specifically mean the platform rejected the directory fsync
+    // operation; all other open/fsync errors remain publication failures.
+    if (process.platform === "win32" && (code === "EINVAL" || code === "ENOTSUP" || code === "EPERM")) {
+      return;
+    }
+    throw error;
   }
 }
 
+function fsyncPublicationDirectory(
+  directory: string,
+  stage: Parameters<NonNullable<ArtifactPublicationTestControl["beforeDirectoryFsync"]>>[0],
+  testControl?: ArtifactPublicationTestControl,
+): void {
+  testControl?.beforeDirectoryFsync?.(stage);
+  fsyncDirectory(directory);
+}
+
 function garbageCollectGenerationResidue(root: string): void {
+  const latestPresent = lstatIfPresent(path.join(root, "latest")) !== undefined;
+  const resolvedPointer = latestPresent ? resolvedLatestPointer(root, false) : undefined;
   for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-    if (!entry.name.startsWith(".generation-") && !entry.name.startsWith(".latest-") && !entry.name.startsWith(".legacy-latest-")) {
+    if (
+      !entry.name.startsWith(".generation-") &&
+      !entry.name.startsWith("generation-") &&
+      !entry.name.startsWith(".latest-") &&
+      !entry.name.startsWith(".legacy-latest-") &&
+      !entry.name.startsWith(".publication-lock-")
+    ) {
       continue;
     }
+    if (entry.name.startsWith("generation-") && path.join(root, entry.name) === resolvedPointer) {
+      continue;
+    }
+    if (entry.name.startsWith(".publication-lock-")) {
+      // A sibling may be paused after writing durable owner metadata but
+      // before atomically publishing .publication.lock. Never reap a live
+      // owner window; only dead/malformed temp locks are residue.
+      const owner = readPendingLockOwner(path.join(root, entry.name));
+      if (owner !== undefined && processIsAlive(owner.pid)) continue;
+    }
+    // A legacy source may be the only recoverable prior pointer after a
+    // killed owner. Keep it while latest is absent; successful publication
+    // performs the cleanup after the new pointer is durable.
+    if (entry.name.startsWith(".legacy-latest-") && !latestPresent) continue;
     fs.rmSync(path.join(root, entry.name), { recursive: true, force: true });
+  }
+}
+
+/**
+ * Recover a complete legacy pointer left behind if a writer was killed after
+ * migration but before its replacement pointer became durable. This runs
+ * while the publication lock is held and before residue cleanup.
+ */
+function recoverLegacyLatestResidue(
+  root: string,
+  testControl?: ArtifactPublicationTestControl,
+): void {
+  if (lstatIfPresent(path.join(root, "latest")) !== undefined) return;
+  const candidates = fs.readdirSync(root)
+    .filter((entry) => entry.startsWith(".legacy-latest-") && !entry.endsWith(".index.json"));
+  if (candidates.length !== 1) return;
+  const legacyBase = path.join(root, candidates[0]!);
+  const legacyIndex = `${legacyBase}.index.json`;
+  const latest = path.join(root, "latest");
+  const latestIndex = path.join(root, "latest.index.json");
+  try {
+    fs.renameSync(legacyBase, latest);
+    if (lstatIfPresent(legacyIndex) !== undefined) {
+      fs.renameSync(legacyIndex, latestIndex);
+    }
+    fsyncDirectory(root);
+  } catch (error) {
+    // Roll back a partial move so a later attempt can recover one complete
+    // source, rather than leaving latest and latest.index mixed.
+    try {
+      if (lstatIfPresent(latest) !== undefined && lstatIfPresent(legacyBase) === undefined) {
+        runCleanupOperation(testControl, "restore-legacy-latest", () => {
+          fs.renameSync(latest, legacyBase);
+        });
+      }
+    } catch { /* preserve the recovery failure below */ }
+    try {
+      if (lstatIfPresent(latestIndex) !== undefined && lstatIfPresent(legacyIndex) === undefined) {
+        runCleanupOperation(testControl, "restore-legacy-index", () => {
+          fs.renameSync(latestIndex, legacyIndex);
+        });
+      }
+    } catch { /* preserve the recovery failure below */ }
+    throw error;
   }
 }
 
 interface LegacyLatestMigration {
   latest?: string;
   index?: string;
+}
+
+type CleanupOperation = Parameters<NonNullable<ArtifactPublicationTestControl["beforeCleanupOperation"]>>[0];
+
+function runCleanupOperation(
+  testControl: ArtifactPublicationTestControl | undefined,
+  operation: CleanupOperation,
+  action: () => void,
+): boolean {
+  try {
+    testControl?.beforeCleanupOperation?.(operation);
+  } catch {
+    // Fault controls model the first cleanup attempt failing. The unhooked
+    // operation below is the bounded recovery attempt.
+  }
+  try {
+    action();
+    return true;
+  } catch {
+    try {
+      action();
+      return true;
+    } catch {
+      // Cleanup residue is recoverable on the next lock owner. Never mask a
+      // primary publication error or turn a durable commit into failure.
+      return false;
+    }
+  }
 }
 
 function lstatIfPresent(filePath: string): fs.Stats | undefined {
@@ -506,12 +711,17 @@ function lstatIfPresent(filePath: string): fs.Stats | undefined {
   }
 }
 
-function migrateLegacyLatest(root: string): LegacyLatestMigration | undefined {
+function migrateLegacyLatest(
+  root: string,
+  testControl?: ArtifactPublicationTestControl,
+): LegacyLatestMigration | undefined {
   const pointer = path.join(root, "latest");
   const staleIndex = path.join(root, "latest.index.json");
   const pointerStat = lstatIfPresent(pointer);
   const staleIndexStat = lstatIfPresent(staleIndex);
-  const shouldMovePointer = pointerStat !== undefined && !pointerStat.isSymbolicLink();
+  // Retain a rollback source for either a legacy directory or an existing
+  // modern symlink until the replacement pointer is durably published.
+  const shouldMovePointer = pointerStat !== undefined;
   if (!shouldMovePointer && staleIndexStat === undefined) return undefined;
 
   const legacyBase = path.join(root, `.legacy-latest-${randomUUID()}`);
@@ -528,65 +738,202 @@ function migrateLegacyLatest(root: string): LegacyLatestMigration | undefined {
     }
     return migration;
   } catch (error) {
-    if (migration.index !== undefined) fs.renameSync(migration.index, staleIndex);
-    if (migration.latest !== undefined) fs.renameSync(migration.latest, pointer);
+    restoreLegacyLatest(root, migration, testControl);
     throw error;
   }
 }
 
-function restoreLegacyLatest(root: string, migration: LegacyLatestMigration | undefined): void {
+function restoreLegacyLatest(
+  root: string,
+  migration: LegacyLatestMigration | undefined,
+  testControl?: ArtifactPublicationTestControl,
+): void {
   if (migration === undefined) return;
-  if (migration.index !== undefined) fs.renameSync(migration.index, path.join(root, "latest.index.json"));
-  if (migration.latest !== undefined) fs.renameSync(migration.latest, path.join(root, "latest"));
+  if (migration.index !== undefined) {
+    runCleanupOperation(testControl, "restore-legacy-index", () => {
+      fs.renameSync(migration.index!, path.join(root, "latest.index.json"));
+    });
+  }
+  if (migration.latest !== undefined) {
+    runCleanupOperation(testControl, "restore-legacy-latest", () => {
+      fs.renameSync(migration.latest!, path.join(root, "latest"));
+    });
+  }
 }
 
-const activePublicationRoots = new Set<string>();
+interface PublicationOwner {
+  pid: number;
+  token: string;
+}
+
+interface PublicationLock {
+  path: string;
+  ownerToken: string;
+}
+
+const activePublicationOwners = new Map<string, string>();
+const MAX_OS_PID = 0x7fffffff;
+const PUBLICATION_OWNER_TOKEN = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+
+function isValidProcessId(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 && value <= MAX_OS_PID;
+}
 
 function processIsAlive(pid: number): boolean {
+  if (!isValidProcessId(pid)) return false;
   try {
     process.kill(pid, 0);
     return true;
   } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== "ESRCH";
+    // EPERM proves a process occupies the PID even though it is not
+    // signalable. ESRCH, range/type errors, and unknown failures do not prove
+    // liveness and must not strand a recoverable lock.
+    return (error as NodeJS.ErrnoException).code === "EPERM";
   }
 }
 
-function acquirePublicationLock(root: string): string {
+function readPublicationOwner(lock: string): PublicationOwner | undefined {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(path.join(lock, "owner.json"), "utf8")) as {
+      pid?: unknown;
+      token?: unknown;
+    };
+    if (isValidProcessId(parsed.pid) && typeof parsed.token === "string" && PUBLICATION_OWNER_TOKEN.test(parsed.token)) {
+      return { pid: parsed.pid, token: parsed.token };
+    }
+  } catch {
+    // Missing or malformed owner metadata is stale residue. Atomic lock
+    // publication means a live owner is never observed in this state.
+  }
+  return undefined;
+}
+
+function readPendingLockOwner(lock: string): PublicationOwner | undefined {
+  const metadataOwner = readPublicationOwner(lock);
+  if (metadataOwner !== undefined) return metadataOwner;
+  const match = /^\.publication-lock-(\d+)-([a-f0-9-]+)\.tmp$/i.exec(path.basename(lock));
+  if (!match) return undefined;
+  const encoded = Number(match[1]);
+  return isValidProcessId(encoded) && PUBLICATION_OWNER_TOKEN.test(match[2]!)
+    ? { pid: encoded, token: match[2]! }
+    : undefined;
+}
+
+function isExactActiveOwner(root: string, owner: PublicationOwner): boolean {
+  return owner.pid === process.pid && activePublicationOwners.get(root) === owner.token;
+}
+
+function releasePublicationLock(
+  root: string,
+  lock: string,
+  testControl?: ArtifactPublicationTestControl,
+  expectedOwnerToken?: string,
+): void {
+  if (expectedOwnerToken !== undefined && readPublicationOwner(lock)?.token !== expectedOwnerToken) {
+    return;
+  }
+  const removed = runCleanupOperation(testControl, "remove-lock", () => {
+    if (expectedOwnerToken !== undefined && readPublicationOwner(lock)?.token !== expectedOwnerToken) {
+      return;
+    }
+    fs.rmSync(lock, { recursive: true, force: true });
+  });
+  if (removed) return;
+  try {
+    if (lstatIfPresent(lock) === undefined) return;
+  } catch {
+    return;
+  }
+  try {
+    if (expectedOwnerToken !== undefined && readPublicationOwner(lock)?.token !== expectedOwnerToken) {
+      return;
+    }
+    // If the directory itself cannot be removed, invalidate its live-owner
+    // identity so the next writer can recover it instead of being stranded
+    // behind this process's still-live PID.
+    const ownerPath = path.join(lock, "owner.json");
+    fs.writeFileSync(ownerPath, JSON.stringify({ pid: 0 }), "utf8");
+    fsyncFile(ownerPath);
+    fsyncDirectory(root);
+  } catch {
+    // A filesystem that rejects both removal and marker invalidation cannot
+    // be repaired in-process; the primary result remains authoritative.
+  }
+}
+
+function acquirePublicationLock(root: string, testControl?: ArtifactPublicationTestControl): PublicationLock {
   const lock = path.join(root, ".publication.lock");
-  if (activePublicationRoots.has(root)) {
+  if (activePublicationOwners.has(root)) {
     throw new ArtifactPublicationConflict();
   }
-  const tryCreate = (): boolean => {
+
+  // The per-publication token distinguishes worker threads that share one PID
+  // and also identifies the owner before owner.json exists. PID reuse remains
+  // a bounded platform residual because Node exposes no portable process-start
+  // identity; a reused live PID may conservatively delay stale cleanup once.
+  const ownerToken = randomUUID();
+  const temporaryLock = path.join(root, `.publication-lock-${process.pid}-${ownerToken}.tmp`);
+  const createAndPublish = (): boolean => {
+    fs.mkdirSync(temporaryLock);
+    let lockPublished = false;
     try {
-      fs.mkdirSync(lock);
+      testControl?.afterTemporaryLockCreate?.();
+      const ownerPath = path.join(temporaryLock, "owner.json");
+      fs.writeFileSync(ownerPath, JSON.stringify({ pid: process.pid, token: ownerToken }), "utf8");
+      fsyncFile(ownerPath);
+      fsyncPublicationDirectory(temporaryLock, "lock-temp", testControl);
+      testControl?.beforeLockPublish?.();
+      // A rename of a directory onto an existing directory fails without
+      // replacing it, so exactly one pre-populated owner can win.
+      fs.renameSync(temporaryLock, lock);
+      lockPublished = true;
+      fsyncPublicationDirectory(root, "lock-root", testControl);
       return true;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+      if (lockPublished) {
+        releasePublicationLock(root, lock, testControl, ownerToken);
+      } else {
+        runCleanupOperation(
+          testControl,
+          "remove-temporary-lock",
+          () => fs.rmSync(temporaryLock, { recursive: true, force: true }),
+        );
+      }
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "EEXIST" || code === "ENOTEMPTY") {
+        return false;
+      }
       throw error;
     }
   };
 
-  if (!tryCreate()) {
-    let ownerPid: number | undefined;
-    try {
-      const parsed = JSON.parse(fs.readFileSync(path.join(lock, "owner.json"), "utf8")) as { pid?: unknown };
-      if (typeof parsed.pid === "number" && Number.isSafeInteger(parsed.pid) && parsed.pid > 0) {
-        ownerPid = parsed.pid;
-      }
-    } catch {
-      // Missing or malformed owner metadata is recoverable stale residue.
-    }
-    if (ownerPid !== undefined && ownerPid !== process.pid && processIsAlive(ownerPid)) {
-      throw new ArtifactPublicationConflict();
-    }
-    fs.rmSync(lock, { recursive: true, force: true });
-    if (!tryCreate()) {
-      throw new ArtifactPublicationConflict();
-    }
+  let published = false;
+  try {
+    published = createAndPublish();
+  } catch (error) {
+    if (error instanceof ArtifactPublicationConflict) throw error;
+    throw error;
   }
-  fs.writeFileSync(lock + "/owner.json", JSON.stringify({ pid: process.pid }), "utf8");
-  activePublicationRoots.add(root);
-  return lock;
+
+  if (!published) {
+    const owner = readPublicationOwner(lock);
+    if (owner !== undefined && (isExactActiveOwner(root, owner) || processIsAlive(owner.pid))) {
+      throw new ArtifactPublicationConflict();
+    }
+    // Missing/dead owner metadata is bounded stale residue. Remove only the
+    // stale lock, then retry the same atomic publish once.
+    releasePublicationLock(root, lock, testControl);
+    try {
+      published = createAndPublish();
+    } catch (error) {
+      if (error instanceof ArtifactPublicationConflict) throw error;
+      throw error;
+    }
+    if (!published) throw new ArtifactPublicationConflict();
+  }
+
+  activePublicationOwners.set(root, ownerToken);
+  return { path: lock, ownerToken };
 }
 
 function publishArtifactFiles(
@@ -594,9 +941,8 @@ function publishArtifactFiles(
   files: Record<string, string>,
   testControl?: ArtifactPublicationTestControl,
 ): void {
-  const root = scenarioRoot(scenarioName);
-  fs.mkdirSync(root, { recursive: true });
-  const lock = acquirePublicationLock(root);
+  const root = resolveScenarioRoot(scenarioName, true);
+  const lock = acquirePublicationLock(root, testControl);
 
   const generationId = randomUUID();
   const temporaryGeneration = path.join(root, `.generation-${generationId}.tmp`);
@@ -608,6 +954,7 @@ function publishArtifactFiles(
   let legacyMigration: LegacyLatestMigration | undefined;
   try {
     testControl?.afterLock?.();
+    recoverLegacyLatestResidue(root, testControl);
     garbageCollectGenerationResidue(root);
     const tokenBefore = readPointerToken(root);
     fs.mkdirSync(temporaryGeneration);
@@ -633,32 +980,73 @@ function publishArtifactFiles(
     const indexPath = path.join(temporaryGeneration, "index.json");
     fs.writeFileSync(indexPath, index, "utf8");
     fsyncFile(indexPath);
-    fsyncDirectory(temporaryGeneration);
+    fsyncPublicationDirectory(temporaryGeneration, "generation-temp", testControl);
     fs.renameSync(temporaryGeneration, generation);
-    fsyncDirectory(root);
+    testControl?.afterGenerationRename?.();
+    fsyncPublicationDirectory(root, "generation-root", testControl);
 
     const tokenAfter = readPointerToken(root);
     if (tokenAfter !== tokenBefore) {
       throw new ArtifactPublicationConflict();
     }
-    legacyMigration = migrateLegacyLatest(root);
-    garbageCollectGenerationResidue(root);
+    legacyMigration = migrateLegacyLatest(root, testControl);
+    // Keep the migrated rollback source until the replacement pointer has
+    // been renamed and fsynced. A fault before that point must restore it.
+    fsyncPublicationDirectory(root, "legacy-root", testControl);
+    testControl?.afterLegacyMigration?.();
     fs.symlinkSync(path.relative(root, generation), pointerTemp, "dir");
+    testControl?.beforePointerRename?.();
     fs.renameSync(pointerTemp, pointer);
     pointerReplaced = true;
-    fsyncDirectory(root);
+    testControl?.afterPointerRename?.();
+    fsyncPublicationDirectory(root, "pointer-root", testControl);
     published = true;
   } finally {
-    if (!published) {
-      fs.rmSync(temporaryGeneration, { recursive: true, force: true });
-      if (!pointerReplaced) {
-        fs.rmSync(generation, { recursive: true, force: true });
-        restoreLegacyLatest(root, legacyMigration);
+    try {
+      if (!published) {
+        runCleanupOperation(testControl, "remove-temporary-generation", () => {
+          fs.rmSync(temporaryGeneration, { recursive: true, force: true });
+        });
+        runCleanupOperation(testControl, "remove-generation", () => {
+          fs.rmSync(generation, { recursive: true, force: true });
+        });
+        if (pointerReplaced) {
+          // A rename followed by a durability fault is not a committed
+          // publication. Remove the new pointer before restoring its source.
+          runCleanupOperation(testControl, "remove-pointer", () => {
+            fs.rmSync(pointer, { recursive: true, force: true });
+          });
+        }
+        restoreLegacyLatest(root, legacyMigration, testControl);
+        runCleanupOperation(testControl, "remove-pointer-temp", () => {
+          fs.rmSync(pointerTemp, { force: true });
+        });
+      } else {
+        if (legacyMigration?.latest !== undefined) {
+          runCleanupOperation(testControl, "remove-legacy-latest", () => {
+            fs.rmSync(legacyMigration!.latest!, { recursive: true, force: true });
+          });
+        }
+        if (legacyMigration?.index !== undefined) {
+          runCleanupOperation(testControl, "remove-legacy-index", () => {
+            fs.rmSync(legacyMigration!.index!, { force: true });
+          });
+        }
+        // Once pointer-root fsync succeeds, cleanup errors are recoverable
+        // residue and must not report a committed latest as failed.
+        try {
+          garbageCollectGenerationResidue(root);
+          fsyncPublicationDirectory(root, "cleanup-root", testControl);
+        } catch {
+          // The next lock owner performs the same bounded residue sweep.
+        }
       }
-      fs.rmSync(pointerTemp, { force: true });
+    } finally {
+      releasePublicationLock(root, lock.path, testControl, lock.ownerToken);
+      if (activePublicationOwners.get(root) === lock.ownerToken) {
+        activePublicationOwners.delete(root);
+      }
     }
-    fs.rmSync(lock, { recursive: true, force: true });
-    activePublicationRoots.delete(root);
   }
 }
 
@@ -666,9 +1054,9 @@ export function readPublishedArtifact(scenarioName: string, fileName: string): s
   if (!/^[a-z0-9][a-z0-9.-]*\.json$/i.test(fileName)) {
     throw new Error("Invalid artifact file name");
   }
-  const root = scenarioRoot(scenarioName);
-  const pointer = path.join(root, "latest");
-  const indexPath = path.join(pointer, "index.json");
+  const root = resolveScenarioRoot(scenarioName, false);
+  const resolvedPointer = resolvedLatestPointer(root, true)!;
+  const indexPath = path.join(resolvedPointer, "index.json");
   const index = JSON.parse(fs.readFileSync(indexPath, "utf8")) as {
     generation?: string;
     files?: Record<string, { sha256?: string; byteLength?: number }>;
@@ -680,11 +1068,10 @@ export function readPublishedArtifact(scenarioName: string, fileName: string): s
   if (typeof index.generation !== "string" || !/^[-a-f0-9]+$/i.test(index.generation)) {
     throw new Error("Published artifact generation is invalid");
   }
-  const resolvedPointer = fs.realpathSync(pointer);
   if (path.basename(resolvedPointer) !== `generation-${index.generation}`) {
     throw new Error("Published artifact pointer mismatch");
   }
-  const content = fs.readFileSync(path.join(pointer, fileName), "utf8");
+  const content = fs.readFileSync(path.join(resolvedPointer, fileName), "utf8");
   if (sha256Text(content) !== entry.sha256 || Buffer.byteLength(content) !== entry.byteLength) {
     throw new Error("Published artifact manifest mismatch");
   }
@@ -949,7 +1336,7 @@ function buildSafeConsoleSummary(
 }
 
 function redactIdentifier(value: string): string {
-  return /^[a-z0-9][a-z0-9._:-]*$/i.test(value)
+  return isSafeMetadataIdentifier(value)
     ? redactInternalToolIdentifiers(value)
     : REDACTED;
 }
@@ -980,7 +1367,7 @@ export async function writeScenarioArtifacts(
 ): Promise<void> {
   if (result.metadata === undefined) {
     const error = new ArtifactSchemaViolation("metadata");
-    const safeScenarioId = SAFE_IDENTIFIER.test(scenarioName) ? scenarioName : "unknown";
+    const safeScenarioId = isSafeMetadataIdentifier(scenarioName) ? scenarioName : "unknown";
     writeMetadataFailureEnvelope(scenarioName, {
       scenarioId: safeScenarioId,
       scenarioName: safeScenarioId,
@@ -1001,9 +1388,9 @@ function writeMetadataFailureEnvelope(
   metadata: ScenarioMetadata,
   error: ArtifactSchemaViolation,
 ): void {
-  const scenarioId = typeof metadata.scenarioId === "string" && SAFE_IDENTIFIER.test(metadata.scenarioId)
+  const scenarioId = isSafeMetadataIdentifier(metadata.scenarioId)
     ? metadata.scenarioId
-    : redactIdentifier(scenarioName);
+    : (isSafeMetadataIdentifier(scenarioName) ? scenarioName : "unknown");
   const envelope: ScenarioFailureEnvelope = {
     scenarioId,
     category: "artifact_allowlist_violation",
