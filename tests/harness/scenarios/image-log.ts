@@ -20,7 +20,6 @@ import path from "node:path";
 import { Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { rm, readdir, mkdir } from "node:fs/promises";
-import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import { validJpegBytes } from "../../fixtures/image-bytes.js";
@@ -199,19 +198,37 @@ function verifyLoggedMealReceiptShape(receipt: LoggedMealReceiptPayload | undefi
 const scenario: VerificationScenario = {
   name: "image-log",
 
-  async run(_ctx: ScenarioContext): Promise<ScenarioResult> {
+  async prepareApp() {
+    const { logLines, stream: logStream } = createLogCapture();
+    await mkdir(SCENARIO_UPLOADS_DIR, { recursive: true });
+    await mkdir(SCENARIO_ASSETS_DIR, { recursive: true });
+    const llm = new StreamingLLMProvider();
+    return {
+      appOptions: {
+        llmProvider: llm,
+        uploadsDir: SCENARIO_UPLOADS_DIR,
+        assetsDir: SCENARIO_ASSETS_DIR,
+        logger: { level: "info", stream: logStream },
+      },
+      state: { llm, logLines },
+    };
+  },
+
+  async run(ctx: ScenarioContext): Promise<ScenarioResult> {
     const steps: ScenarioStepResult[] = [];
     const artifacts: Record<string, unknown> = {};
     let failedStep: string | undefined;
     let uploadFilesBeforeCleanup: string[] = [];
-    const { logLines, stream: logStream } = createLogCapture();
+    const { llm, logLines } = ctx.prepared as {
+      llm: StreamingLLMProvider;
+      logLines: string[];
+    };
 
     // Boot our own app instance with the scenario-local uploads directory so
     // uploads never land in `server/uploads/`.
     await mkdir(SCENARIO_UPLOADS_DIR, { recursive: true });
     await mkdir(SCENARIO_ASSETS_DIR, { recursive: true });
 
-    const llm = new StreamingLLMProvider();
     // Round 1: tool call — log_food for 豬肉燒烤飯盒
     llm.queueRoundResponse({
       toolCalls: [
@@ -241,12 +258,7 @@ const scenario: VerificationScenario = {
       "豬肉燒烤飯盒，約 680 kcal。",
     ]);
 
-    const scenarioCtx = await createScenarioApp({
-      llmProvider: llm,
-      uploadsDir: SCENARIO_UPLOADS_DIR,
-      assetsDir: SCENARIO_ASSETS_DIR,
-      logger: { level: "info", stream: logStream },
-    });
+    const scenarioCtx = ctx;
 
     try {
       // ------------------------------------------------------------------
@@ -606,7 +618,6 @@ const scenario: VerificationScenario = {
       }
       steps.push(stepOk("verify_route_upload_cleanup", artifacts.route_upload_cleanup));
     } finally {
-      await scenarioCtx.close();
       uploadFilesBeforeCleanup = await readUploadFiles();
       await rm(SCENARIO_UPLOADS_DIR, { recursive: true, force: true });
       await rm(SCENARIO_ASSETS_DIR, { recursive: true, force: true });

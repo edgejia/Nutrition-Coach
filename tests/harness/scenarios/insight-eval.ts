@@ -1,4 +1,3 @@
-import { createScenarioApp } from "../app-fixture.js";
 import {
   buildInsightMetrics,
   loadInsightFixture,
@@ -59,7 +58,7 @@ function firstFailedAssertion(assertions: InsightAssertionResult[]): InsightAsse
 }
 
 async function runFixtureCase(
-  fixtureApp: Awaited<ReturnType<typeof createScenarioApp>>,
+  fixtureApp: ScenarioContext,
   testCase: InsightEvalCase,
 ): Promise<{ assertions: InsightAssertionResult[]; trace: Record<string, unknown> }> {
   const fixture = loadInsightFixture(testCase.fixtureName);
@@ -110,14 +109,14 @@ async function runFixtureCase(
 const scenario: VerificationScenario = {
   name: "insight-eval",
 
-  async run(_ctx: ScenarioContext): Promise<ScenarioResult> {
+  async run(ctx: ScenarioContext): Promise<ScenarioResult> {
     const scenarioName = "insight-eval";
     const steps: ScenarioStepResult[] = [];
     const artifacts: Record<string, unknown> = {
       traces: {},
       caseNames: [...STEP_NAMES],
     };
-    const fixture = await createScenarioApp({});
+    const fixture = ctx;
 
     const cases: InsightEvalCase[] = [
       {
@@ -155,7 +154,6 @@ const scenario: VerificationScenario = {
       },
     ];
 
-    try {
       for (const testCase of cases) {
         try {
           const actual = await runFixtureCase(fixture, testCase);
@@ -177,9 +175,6 @@ const scenario: VerificationScenario = {
         counts: { caseCount: cases.length },
         assertions: { allCasesPassed: true },
       });
-    } finally {
-      await fixture.close();
-    }
   },
 };
 

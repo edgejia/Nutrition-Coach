@@ -12,7 +12,6 @@ import path from "node:path";
 import { Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { mkdir, readdir, rm } from "node:fs/promises";
-import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { assertSSETerminalProof, collectEventSequence, parseSSEEvents, readStreamThroughClose } from "../sse.js";
 import { validJpegBytes, validPngBytes } from "../../fixtures/image-bytes.js";
@@ -111,6 +110,11 @@ function createLogCapture() {
   });
 
   return { logLines, stream };
+}
+
+function toCookieHeader(rawHeader: string | string[] | undefined): string {
+  const values = Array.isArray(rawHeader) ? rawHeader : rawHeader ? [rawHeader] : [];
+  return values.map((value) => value.split(";", 1)[0]).join("; ");
 }
 
 function hasRouteUploadCleanupLog(logLines: string[]): boolean {
@@ -359,6 +363,8 @@ function verifyFallbackTraceContract(
 }
 
 async function runSubScenario(
+  baseContext: ScenarioContext,
+  logLines: string[],
   label: string,
   setupLLM: (llm: StreamingLLMProvider) => void,
   assertions: (params: {
@@ -375,24 +381,29 @@ async function runSubScenario(
     imageBytes?: ArrayBuffer;
     imageType?: string;
     imageFilename?: string;
-    llmTraceRecorderFactory?: () => LlmTraceRecorder | undefined;
   } = {},
 ): Promise<{ steps: ScenarioStepResult[]; artifacts: Record<string, unknown>; ok: boolean; failedStep?: string }> {
   const steps: ScenarioStepResult[] = [];
   const artifacts: Record<string, unknown> = {};
 
-  const llm = new StreamingLLMProvider();
+  const llm = baseContext.llmProvider as StreamingLLMProvider;
+  llm.reset();
   setupLLM(llm);
-  const { logLines, stream: logStream } = createLogCapture();
-
-  const uploadsDir = `${UPLOADS_DIR}-${label}`;
+  const uploadsDir = UPLOADS_DIR;
   await mkdir(uploadsDir, { recursive: true });
-  const scenarioCtx = await createScenarioApp({
-    llmProvider: llm,
-    uploadsDir,
-    logger: { level: "info", stream: logStream },
-    ...(options.llmTraceRecorderFactory !== undefined ? { llmTraceRecorderFactory: options.llmTraceRecorderFactory } : {}),
+  const deviceRes = await baseContext.app.inject({
+    method: "POST",
+    url: "/api/device",
+    payload: { goal: "fat_loss" },
   });
+  if (deviceRes.statusCode !== 200 && deviceRes.statusCode !== 201) {
+    throw new Error(`image-log-failure sub-scenario device seed failed: ${deviceRes.statusCode}`);
+  }
+  const scenarioCtx: ScenarioContext = {
+    ...baseContext,
+    deviceId: (deviceRes.json() as { deviceId: string }).deviceId,
+    cookieHeader: toCookieHeader(deviceRes.headers["set-cookie"]),
+  };
 
   try {
     const form = new FormData();
@@ -477,7 +488,6 @@ async function runSubScenario(
     steps.push(stepOk(`${label}_assert`, result.evidence));
     return { steps, artifacts, ok: true };
   } finally {
-    await scenarioCtx.close();
     await rm(uploadsDir, { recursive: true, force: true });
   }
 }
@@ -485,17 +495,39 @@ async function runSubScenario(
 const scenario: VerificationScenario = {
   name: "image-log-failure",
 
-  async run(_ctx: ScenarioContext): Promise<ScenarioResult> {
+  async prepareApp() {
+    const { logLines, stream: logStream } = createLogCapture();
+    await mkdir(UPLOADS_DIR, { recursive: true });
+    const llm = new StreamingLLMProvider();
+    const recorder = createLlmTraceRecorder();
+    return {
+      appOptions: {
+        llmProvider: llm,
+        uploadsDir: UPLOADS_DIR,
+        llmTraceRecorderFactory: () => recorder,
+        logger: { level: "info", stream: logStream },
+      },
+      state: { logLines, recorder },
+    };
+  },
+
+  async run(ctx: ScenarioContext): Promise<ScenarioResult> {
     const allSteps: ScenarioStepResult[] = [];
     const allArtifacts: Record<string, unknown> = {};
+    const { logLines, recorder } = ctx.prepared as {
+      logLines: string[];
+      recorder: ReturnType<typeof createLlmTraceRecorder>;
+    };
 
     // ------------------------------------------------------------------
     // Sub-scenario A: chatRound round 1 throws (image analysis failure)
     // Expected: fallback in history, done.didLogMeal false, no meal.
     // ------------------------------------------------------------------
-    const subARecorder = createLlmTraceRecorder();
+    const subARecorder = recorder;
     const subAUserMealText = "(圖片)";
     const subA = await runSubScenario(
+      ctx,
+      logLines,
       "sub_a_analysis_fail",
       (llm) => {
         llm.queueRoundError(new LLMProviderError(PROVIDER_METADATA_FIXTURE));
@@ -558,7 +590,6 @@ const scenario: VerificationScenario = {
       },
       {
         message: subAUserMealText,
-        llmTraceRecorderFactory: () => subARecorder,
       },
     );
     allSteps.push(...subA.steps);
@@ -598,6 +629,8 @@ const scenario: VerificationScenario = {
     // Expected: fallback wording in history, no meal, done event emitted.
     // ------------------------------------------------------------------
     const subB = await runSubScenario(
+      ctx,
+      logLines,
       "sub_b_tool_fail",
       (llm) => {
         llm.queueRoundResponse({
@@ -677,6 +710,8 @@ const scenario: VerificationScenario = {
     // Expected: meal remains in DB and done.didLogMeal true.
     // ------------------------------------------------------------------
     const subC = await runSubScenario(
+      ctx,
+      logLines,
       "sub_c_reply_fail",
       (llm) => {
         llm.queueRoundResponse({
@@ -752,6 +787,8 @@ const scenario: VerificationScenario = {
       imageBytes: ArrayBuffer,
       imageFilename: string,
     ) => runSubScenario(
+      ctx,
+      logLines,
       label,
       (llm) => {
         llm.queueRoundResponse({

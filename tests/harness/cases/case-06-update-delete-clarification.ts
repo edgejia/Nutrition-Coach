@@ -5,7 +5,7 @@ import {
   type BehaviorAssertionResult,
   type BehaviorCaseOutcome,
 } from "../behavior-assertions.js";
-import { createScenarioApp } from "../app-fixture.js";
+import type { ScenarioAppFactory } from "../app-fixture.js";
 import { parseSSEEvents } from "../sse.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { createLlmTraceRecorder } from "../../../server/orchestrator/llm-trace.js";
@@ -55,10 +55,10 @@ const CASES: ClarificationSubCase[] = [
   },
 ];
 
-export async function runCase06UpdateDeleteClarification(): Promise<BehaviorCaseOutcome> {
+export async function runCase06UpdateDeleteClarification(createApp: ScenarioAppFactory): Promise<BehaviorCaseOutcome> {
   const subCases = [];
   for (const subCase of CASES) {
-    subCases.push(await withFixedDate(() => runAmbiguousMealSubCase(subCase)));
+    subCases.push(await withFixedDate(() => runAmbiguousMealSubCase(createApp, subCase)));
   }
 
   const assertions = subCases.flatMap((subCase) => subCase.assertions);
@@ -86,13 +86,13 @@ export async function runCase06UpdateDeleteClarification(): Promise<BehaviorCase
   };
 }
 
-async function runAmbiguousMealSubCase(subCase: ClarificationSubCase): Promise<{
+async function runAmbiguousMealSubCase(createApp: ScenarioAppFactory, subCase: ClarificationSubCase): Promise<{
   assertions: BehaviorAssertionResult[];
   evidence: ClarificationSubCaseEvidence;
 }> {
   const llmProvider = new StreamingLLMProvider();
   const recorder = createLlmTraceRecorder();
-  const ctx = await createScenarioApp({
+  const ctx = await createApp({
     llmProvider,
     llmTraceRecorderFactory: () => recorder,
   });

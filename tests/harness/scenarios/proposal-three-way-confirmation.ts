@@ -17,7 +17,6 @@ import { MEAL_DELETE_PROPOSAL_KIND } from "../../../server/services/meal-delete-
 import {
   assertPolicyEvidenceHasNoForbiddenFields,
 } from "../policy-assertions.js";
-import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { buildPositiveScenarioResult } from "../positive-metadata.js";
 import type {
@@ -315,7 +314,7 @@ function actionEventExists(history: HistoryBody, input: {
   );
 }
 
-function createPublishCounter(fixture: Awaited<ReturnType<typeof createScenarioApp>>) {
+function createPublishCounter(fixture: ScenarioContext) {
   const counts = { dailySummary: 0, goals: 0 };
   const originalPublishDailySummary = fixture.services.publisher.publishDailySummary.bind(
     fixture.services.publisher,
@@ -347,19 +346,31 @@ function toMealCount(meals: unknown[]): number {
 const scenario: VerificationScenario = {
   name: SCENARIO_NAME,
 
-  async run(_ctx: ScenarioContext): Promise<ScenarioResult> {
-    const steps: ScenarioStepResult[] = [];
-    const artifacts = evidenceArtifacts();
+  prepareApp() {
     const provider = new StreamingLLMProvider();
     const traceRecorders: Array<ReturnType<typeof createLlmTraceRecorder>> = [];
-    const fixture = await createScenarioApp({
-      llmProvider: provider,
-      llmTraceRecorderFactory() {
-        const recorder = createLlmTraceRecorder();
-        traceRecorders.push(recorder);
-        return recorder;
+    return {
+      appOptions: {
+        llmProvider: provider,
+        admissionLimiterOptions: { budgets: { provider: { maxRequests: 100, maxConcurrent: 3 } } },
+        llmTraceRecorderFactory() {
+          const recorder = createLlmTraceRecorder();
+          traceRecorders.push(recorder);
+          return recorder;
+        },
       },
-    });
+      state: { provider, traceRecorders },
+    };
+  },
+
+  async run(ctx: ScenarioContext): Promise<ScenarioResult> {
+    const steps: ScenarioStepResult[] = [];
+    const artifacts = evidenceArtifacts();
+    const { provider, traceRecorders } = ctx.prepared as {
+      provider: StreamingLLMProvider;
+      traceRecorders: Array<ReturnType<typeof createLlmTraceRecorder>>;
+    };
+    const fixture = ctx;
     const publish = createPublishCounter(fixture);
     const readMeals = () => fixture.services.foodLoggingService.getMealsByDate(
       fixture.deviceId,
@@ -999,8 +1010,6 @@ const scenario: VerificationScenario = {
         error instanceof Error ? error.message : String(error),
       ));
       return failResult(steps, failedStepName, artifacts);
-    } finally {
-      await fixture.close();
     }
   },
 };

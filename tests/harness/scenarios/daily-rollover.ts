@@ -5,7 +5,6 @@
  * while keeping artifact generation owned by the harness runner.
  */
 
-import { createScenarioApp } from "../app-fixture.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import type { VerificationScenario, ScenarioContext, ScenarioResult, ScenarioStepResult } from "../scenario-types.js";
 import { currentAppDate, formatLocalDate } from "../../../server/lib/time.js";
@@ -143,14 +142,13 @@ function parseDailySummaryEnvelope(data: string): DailySummaryEnvelope {
 const dailyRolloverScenario: VerificationScenario = {
   name: "daily-rollover",
 
-  async run(_ctx: ScenarioContext): Promise<ScenarioResult> {
+  async run(ctx: ScenarioContext): Promise<ScenarioResult> {
     const scenarioName = "daily-rollover";
     const steps: ScenarioStepResult[] = [];
     const artifacts: Record<string, unknown> = {};
-    const fixture = await createScenarioApp({});
+    const fixture = ctx;
     let afterMealForMutation: { id: string; mealRevisionId: string } | undefined;
 
-    try {
       try {
         const pingRes = await fetch(`${fixture.address}/api/meals`, {
           headers: { cookie: fixture.cookieHeader },
@@ -385,9 +383,6 @@ const dailyRolloverScenario: VerificationScenario = {
       return buildPositiveScenarioResult(scenarioName, true, steps, undefined, {
         counts: { expectedStepCount: STEP_NAMES.length, passedStepCount: passedCount },
       });
-    } finally {
-      await fixture.close();
-    }
   },
 };
 

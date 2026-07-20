@@ -6,6 +6,7 @@
  * deterministic LLM provider, seeds one device, starts the server on an
  * ephemeral port, and returns handles needed by scenarios.
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import { StreamingLLMProvider } from "./streaming-llm.js";
 import type { AppOptions, AppServices } from "../../server/app.js";
 import type { LLMProvider } from "../../server/llm/types.js";
@@ -27,6 +28,40 @@ export interface ScenarioAppOptions {
   llmTraceRecorderFactory?: () => LlmTraceRecorder | undefined;
   /** Optional Fastify logger config for scenarios that assert structured route logs. */
   logger?: AppOptions["logger"];
+  /** Runner-owned admission budgets for high-volume deterministic scenarios. */
+  admissionLimiterOptions?: AppOptions["admissionLimiterOptions"];
+  /** Internal lifecycle owner; only the runner may set this value. */
+  lifecycleOwner?: "runner";
+}
+
+export type ScenarioAppFactory = (
+  options: Omit<ScenarioAppOptions, "lifecycleOwner">,
+) => Promise<ScenarioAppContext>;
+
+export interface ScenarioAppLifecycleObserver {
+  onCreate?: () => void;
+  onClose?: () => void;
+}
+
+const lifecycleObservers = new AsyncLocalStorage<ScenarioAppLifecycleObserver>();
+interface ScenarioAppLifecycleScope {
+  runnerAppActive: boolean;
+}
+
+const lifecycleScopes = new AsyncLocalStorage<ScenarioAppLifecycleScope>();
+const RUNNER_NESTED_FIXTURE = Symbol("runner-nested-fixture");
+
+export async function withScenarioAppLifecycleObserver<T>(
+  observer: ScenarioAppLifecycleObserver,
+  run: () => Promise<T>,
+): Promise<T> {
+  return lifecycleObservers.run(observer, run);
+}
+
+export async function withScenarioAppLifecycleScope<T>(run: () => Promise<T>): Promise<T> {
+  const activeScope = lifecycleScopes.getStore();
+  if (activeScope) return run();
+  return lifecycleScopes.run({ runnerAppActive: false }, run);
 }
 
 export interface ScenarioAppContext {
@@ -39,6 +74,8 @@ export interface ScenarioAppContext {
   cookieHeader: string;
   /** In-process service handles for deterministic harness setup. */
   services: ScenarioAppServices;
+  /** Provider configured by the runner before app boot. */
+  llmProvider: LLMProvider;
   /** Shut down the app and release the port. */
   close(): Promise<void>;
   /** Number of runner-owned close attempts; nested fixtures must not call this. */
@@ -91,11 +128,23 @@ function toCookieHeader(rawHeader: string | string[] | undefined) {
  * The caller is responsible for calling `ctx.close()` after the scenario
  * completes (or fails), typically in a `finally` block.
  */
-export async function createScenarioApp(
+async function createScenarioAppInternal(
   opts: ScenarioAppOptions,
+  nestedOwner?: symbol,
 ): Promise<ScenarioAppContext> {
   // TZ must be set before server boot for day-boundary correctness.
   process.env.TZ = "Asia/Taipei";
+  const lifecycleScope = lifecycleScopes.getStore();
+  const lifecycleOwner = opts.lifecycleOwner ?? "standalone";
+  const runnerNestedBoot = nestedOwner === RUNNER_NESTED_FIXTURE;
+  if (lifecycleScope?.runnerAppActive && !runnerNestedBoot) {
+    throw new ScenarioAppLifecycleError("boot", 0, "complete");
+  }
+  if (runnerNestedBoot && !lifecycleScope?.runnerAppActive) {
+    throw new ScenarioAppLifecycleError("boot", 0, "complete");
+  }
+  if (lifecycleOwner === "runner" && lifecycleScope) lifecycleScope.runnerAppActive = true;
+  lifecycleObservers.getStore()?.onCreate?.();
   const { buildApp } = await import("../../server/app.js");
 
   const llmProvider = opts.llmProvider ?? new StreamingLLMProvider();
@@ -108,6 +157,7 @@ export async function createScenarioApp(
     ...(opts.assetsDir !== undefined ? { assetsDir: opts.assetsDir } : {}),
     ...(opts.llmTraceRecorderFactory !== undefined ? { llmTraceRecorderFactory: opts.llmTraceRecorderFactory } : {}),
     ...(opts.logger !== undefined ? { logger: opts.logger } : {}),
+    ...(opts.admissionLimiterOptions !== undefined ? { admissionLimiterOptions: opts.admissionLimiterOptions } : {}),
     onServicesReady: (readyServices: AppServices) => {
       services = {
         assetService: readyServices.assetService,
@@ -129,9 +179,11 @@ export async function createScenarioApp(
   try {
     app = await buildApp(buildOpts);
   } catch {
+    if (lifecycleOwner === "runner" && lifecycleScope) lifecycleScope.runnerAppActive = false;
     throw new ScenarioAppLifecycleError("boot", 0, "complete");
   }
   if (!services) {
+    if (lifecycleOwner === "runner" && lifecycleScope) lifecycleScope.runnerAppActive = false;
     throw new Error("createScenarioApp: services were not captured during app boot");
   }
 
@@ -144,6 +196,8 @@ export async function createScenarioApp(
     try {
       if (app.server.listening) await app.close();
       closed = true;
+      lifecycleObservers.getStore()?.onClose?.();
+      if (lifecycleOwner === "runner" && lifecycleScope) lifecycleScope.runnerAppActive = false;
     } catch {
       throw new ScenarioAppLifecycleError("close", 1, "incomplete");
     }
@@ -183,7 +237,27 @@ export async function createScenarioApp(
     deviceId,
     cookieHeader,
     services,
+    llmProvider,
     close,
     get closeCalls() { return closeCalls; },
   };
+}
+
+export async function createScenarioApp(
+  opts: ScenarioAppOptions,
+): Promise<ScenarioAppContext> {
+  return createScenarioAppInternal(opts);
+}
+
+/**
+ * Create the only factory allowed to boot nested fixtures in a runner-owned
+ * lifecycle scope. Direct createScenarioApp() calls remain fail-closed.
+ */
+export function createRunnerOwnedNestedScenarioAppFactory(): ScenarioAppFactory {
+  const lifecycleScope = lifecycleScopes.getStore();
+  if (!lifecycleScope) {
+    throw new ScenarioAppLifecycleError("boot", 0, "complete");
+  }
+  lifecycleScope.runnerAppActive = true;
+  return (options) => createScenarioAppInternal(options, RUNNER_NESTED_FIXTURE);
 }

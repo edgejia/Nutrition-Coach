@@ -16,7 +16,6 @@ import {
   assertPolicyFact,
   assertVisibleOutcomeSummary,
 } from "../policy-assertions.js";
-import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { buildPositiveScenarioResult } from "../positive-metadata.js";
 import type {
@@ -167,19 +166,31 @@ function summarizeProposal(input: {
 const scenario: VerificationScenario = {
   name: SCENARIO_NAME,
 
-  async run(_ctx: ScenarioContext): Promise<ScenarioResult> {
-    const steps: ScenarioStepResult[] = [];
-    const artifacts = evidenceArtifacts();
+  prepareApp() {
     const provider = new StreamingLLMProvider();
     const traceRecorders: Array<ReturnType<typeof createLlmTraceRecorder>> = [];
-    const fixture = await createScenarioApp({
-      llmProvider: provider,
-      llmTraceRecorderFactory() {
-        const recorder = createLlmTraceRecorder();
-        traceRecorders.push(recorder);
-        return recorder;
+    return {
+      appOptions: {
+        llmProvider: provider,
+        admissionLimiterOptions: { budgets: { provider: { maxRequests: 100, maxConcurrent: 3 } } },
+        llmTraceRecorderFactory() {
+          const recorder = createLlmTraceRecorder();
+          traceRecorders.push(recorder);
+          return recorder;
+        },
       },
-    });
+      state: { provider, traceRecorders },
+    };
+  },
+
+  async run(ctx: ScenarioContext): Promise<ScenarioResult> {
+    const steps: ScenarioStepResult[] = [];
+    const artifacts = evidenceArtifacts();
+    const { provider, traceRecorders } = ctx.prepared as {
+      provider: StreamingLLMProvider;
+      traceRecorders: Array<ReturnType<typeof createLlmTraceRecorder>>;
+    };
+    const fixture = ctx;
 
     const publishCounts = {
       dailySummary: 0,
@@ -468,7 +479,7 @@ const scenario: VerificationScenario = {
         tool: "propose_meal_numeric_correction",
         policyClass: "confirm-first",
         decision: "allowed",
-        ruleId: "meal_numeric_proposal_approval_consume",
+        ruleId: "typed_meal_estimate_approve",
         proposalId: proposal.proposalId,
       });
       assertPolicyDbInvariant(confirmDbInvariant, {
@@ -892,8 +903,8 @@ const scenario: VerificationScenario = {
       assertPolicyFact(stalePolicyFact, {
         tool: "propose_meal_numeric_correction",
         policyClass: "confirm-first",
-        decision: "allowed",
-        ruleId: "meal_numeric_proposal_approval_consume",
+        decision: "blocked",
+        ruleId: "typed_meal_estimate_approve",
         proposalId: staleSetup.proposal.proposalId,
       });
       assertPolicyDbInvariant(staleDbInvariant, {
@@ -1111,8 +1122,6 @@ const scenario: VerificationScenario = {
       const failedStep = STEP_NAMES.find((stepName) => !steps.some((step) => step.name === stepName)) ?? SCENARIO_NAME;
       steps.push(fail(failedStep, error instanceof Error ? error.message : String(error)));
       return failResult(steps, failedStep, artifacts);
-    } finally {
-      await fixture.close();
     }
   },
 };

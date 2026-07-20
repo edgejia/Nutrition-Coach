@@ -16,13 +16,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdir, readdir, rm } from "node:fs/promises";
 import type { FastifyReply } from "fastify";
-import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import { validJpegBytes } from "../../fixtures/image-bytes.js";
 import { buildPositiveScenarioResult } from "../positive-metadata.js";
 import { RealtimePublisher } from "../../../server/realtime/publisher.js";
-import type { createScenarioApp as createScenarioAppFn } from "../app-fixture.js";
 import type {
   VerificationScenario,
   ScenarioContext,
@@ -30,7 +28,7 @@ import type {
   ScenarioStepResult,
 } from "../scenario-types.js";
 
-type ScenarioAppContext = Awaited<ReturnType<typeof createScenarioAppFn>>;
+type ScenarioAppContext = ScenarioContext;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPLOADS_DIR = path.resolve(__dirname, "..", "tmp", "boundary-contracts", "uploads");
@@ -66,6 +64,24 @@ function makeJpegBytes(): ArrayBuffer {
 
 async function waitForFinally(): Promise<void> {
   await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
+async function createFreshDeviceContext(baseContext: ScenarioContext): Promise<ScenarioContext> {
+  const response = await baseContext.app.inject({
+    method: "POST",
+    url: "/api/device",
+    payload: { goal: "fat_loss" },
+  });
+  if (response.statusCode !== 200 && response.statusCode !== 201) {
+    throw new Error(`boundary-contracts device seed failed: ${response.statusCode}`);
+  }
+  const rawCookies = response.headers["set-cookie"];
+  const cookieValues = Array.isArray(rawCookies) ? rawCookies : rawCookies ? [rawCookies] : [];
+  return {
+    ...baseContext,
+    deviceId: (response.json() as { deviceId: string }).deviceId,
+    cookieHeader: cookieValues.map((value) => value.split(";", 1)[0]).join("; "),
+  };
 }
 
 async function assertUploadsEmpty(
@@ -167,18 +183,20 @@ async function collectAssetEvidence(params: {
   };
 }
 
-async function runUploadCleanup(): Promise<ScenarioResult> {
+async function runUploadCleanup(baseContext: ScenarioContext): Promise<ScenarioResult> {
   const scenarioName = "upload-cleanup";
   const steps: ScenarioStepResult[] = [];
   const artifacts: Record<string, unknown> = {};
 
   await rm(UPLOADS_DIR, { recursive: true, force: true });
   await mkdir(UPLOADS_DIR, { recursive: true });
-  const assetsDir = `${ASSETS_DIR}-upload-cleanup`;
+  const assetsDir = ASSETS_DIR;
   await rm(assetsDir, { recursive: true, force: true });
   await mkdir(assetsDir, { recursive: true });
+  const fixture = await createFreshDeviceContext(baseContext);
 
-  const llm = new StreamingLLMProvider();
+  const llm = fixture.llmProvider as StreamingLLMProvider;
+  llm.reset();
   llm.queueRoundResponse({
     toolCalls: [{
       id: "call_bc_img",
@@ -191,7 +209,6 @@ async function runUploadCleanup(): Promise<ScenarioResult> {
   });
   llm.queueChatStream(["已記錄", "蛋炒飯！"]);
 
-  const fixture = await createScenarioApp({ llmProvider: llm, uploadsDir: UPLOADS_DIR, assetsDir });
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 
   try {
@@ -279,27 +296,27 @@ async function runUploadCleanup(): Promise<ScenarioResult> {
     return buildPositiveScenarioResult(scenarioName, true, steps, undefined);
   } finally {
     await reader?.cancel().catch(() => {});
-    await fixture.close();
     await rm(UPLOADS_DIR, { recursive: true, force: true });
     await rm(assetsDir, { recursive: true, force: true });
   }
 }
 
-async function runUploadCleanupFailure(): Promise<ScenarioResult> {
+async function runUploadCleanupFailure(baseContext: ScenarioContext): Promise<ScenarioResult> {
   const scenarioName = "upload-cleanup-failure";
   const steps: ScenarioStepResult[] = [];
   const artifacts: Record<string, unknown> = {};
 
   await rm(UPLOADS_DIR, { recursive: true, force: true });
   await mkdir(UPLOADS_DIR, { recursive: true });
-  const assetsDir = `${ASSETS_DIR}-upload-cleanup-failure`;
+  const assetsDir = ASSETS_DIR;
   await rm(assetsDir, { recursive: true, force: true });
   await mkdir(assetsDir, { recursive: true });
+  const fixture = await createFreshDeviceContext(baseContext);
 
-  const llm = new StreamingLLMProvider();
+  const llm = fixture.llmProvider as StreamingLLMProvider;
+  llm.reset();
   llm.queueRoundError(new Error("forced orchestrator failure for C4"));
 
-  const fixture = await createScenarioApp({ llmProvider: llm, uploadsDir: UPLOADS_DIR, assetsDir });
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 
   try {
@@ -387,7 +404,6 @@ async function runUploadCleanupFailure(): Promise<ScenarioResult> {
     return buildPositiveScenarioResult(scenarioName, true, steps, undefined);
   } finally {
     await reader?.cancel().catch(() => {});
-    await fixture.close();
     await rm(UPLOADS_DIR, { recursive: true, force: true });
     await rm(assetsDir, { recursive: true, force: true });
   }
@@ -471,18 +487,25 @@ async function runStalePublisher(): Promise<ScenarioResult> {
 const scenario: VerificationScenario = {
   name: "boundary-contracts",
 
-  async run(_ctx: ScenarioContext): Promise<ScenarioResult> {
+  prepareApp() {
+    const llmProvider = new StreamingLLMProvider();
+    return {
+      appOptions: { llmProvider, uploadsDir: UPLOADS_DIR, assetsDir: ASSETS_DIR },
+    };
+  },
+
+  async run(ctx: ScenarioContext): Promise<ScenarioResult> {
     const steps: ScenarioStepResult[] = [];
     const artifacts: Record<string, unknown> = {};
 
-    const uploadResult = await runUploadCleanup();
+    const uploadResult = await runUploadCleanup(ctx);
     steps.push(...uploadResult.steps.map((step) => ({ ...step, name: `upload-cleanup:${step.name}` })));
     artifacts.uploadCleanup = uploadResult.artifacts;
     if (!uploadResult.ok) {
       return failResult("boundary-contracts", steps, `upload-cleanup:${uploadResult.failedStep ?? "unknown"}`, artifacts);
     }
 
-    const uploadFailureResult = await runUploadCleanupFailure();
+    const uploadFailureResult = await runUploadCleanupFailure(ctx);
     steps.push(...uploadFailureResult.steps.map((step) => ({ ...step, name: `upload-cleanup-failure:${step.name}` })));
     artifacts.uploadCleanupFailure = uploadFailureResult.artifacts;
     if (!uploadFailureResult.ok) {

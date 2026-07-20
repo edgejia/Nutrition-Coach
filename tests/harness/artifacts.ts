@@ -492,6 +492,54 @@ function garbageCollectGenerationResidue(root: string): void {
   }
 }
 
+interface LegacyLatestMigration {
+  latest?: string;
+  index?: string;
+}
+
+function lstatIfPresent(filePath: string): fs.Stats | undefined {
+  try {
+    return fs.lstatSync(filePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+function migrateLegacyLatest(root: string): LegacyLatestMigration | undefined {
+  const pointer = path.join(root, "latest");
+  const staleIndex = path.join(root, "latest.index.json");
+  const pointerStat = lstatIfPresent(pointer);
+  const staleIndexStat = lstatIfPresent(staleIndex);
+  const shouldMovePointer = pointerStat !== undefined && !pointerStat.isSymbolicLink();
+  if (!shouldMovePointer && staleIndexStat === undefined) return undefined;
+
+  const legacyBase = path.join(root, `.legacy-latest-${randomUUID()}`);
+  const migration: LegacyLatestMigration = {};
+  try {
+    if (shouldMovePointer) {
+      fs.renameSync(pointer, legacyBase);
+      migration.latest = legacyBase;
+    }
+    if (staleIndexStat !== undefined) {
+      const legacyIndex = `${legacyBase}.index.json`;
+      fs.renameSync(staleIndex, legacyIndex);
+      migration.index = legacyIndex;
+    }
+    return migration;
+  } catch (error) {
+    if (migration.index !== undefined) fs.renameSync(migration.index, staleIndex);
+    if (migration.latest !== undefined) fs.renameSync(migration.latest, pointer);
+    throw error;
+  }
+}
+
+function restoreLegacyLatest(root: string, migration: LegacyLatestMigration | undefined): void {
+  if (migration === undefined) return;
+  if (migration.index !== undefined) fs.renameSync(migration.index, path.join(root, "latest.index.json"));
+  if (migration.latest !== undefined) fs.renameSync(migration.latest, path.join(root, "latest"));
+}
+
 const activePublicationRoots = new Set<string>();
 
 function processIsAlive(pid: number): boolean {
@@ -557,6 +605,7 @@ function publishArtifactFiles(
   const pointerTemp = path.join(root, `.latest-${generationId}.tmp`);
   let published = false;
   let pointerReplaced = false;
+  let legacyMigration: LegacyLatestMigration | undefined;
   try {
     testControl?.afterLock?.();
     garbageCollectGenerationResidue(root);
@@ -592,6 +641,8 @@ function publishArtifactFiles(
     if (tokenAfter !== tokenBefore) {
       throw new ArtifactPublicationConflict();
     }
+    legacyMigration = migrateLegacyLatest(root);
+    garbageCollectGenerationResidue(root);
     fs.symlinkSync(path.relative(root, generation), pointerTemp, "dir");
     fs.renameSync(pointerTemp, pointer);
     pointerReplaced = true;
@@ -602,6 +653,7 @@ function publishArtifactFiles(
       fs.rmSync(temporaryGeneration, { recursive: true, force: true });
       if (!pointerReplaced) {
         fs.rmSync(generation, { recursive: true, force: true });
+        restoreLegacyLatest(root, legacyMigration);
       }
       fs.rmSync(pointerTemp, { force: true });
     }

@@ -6,7 +6,6 @@
  */
 
 import { Writable } from "node:stream";
-import { createScenarioApp } from "../app-fixture.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { LLMProviderError } from "../../../server/llm/errors.js";
@@ -217,13 +216,29 @@ function buildPrivacyEvidence(
 const scenario: VerificationScenario = {
   name: SCENARIO_NAME,
 
-  async run(_ctx: ScenarioContext): Promise<ScenarioResult> {
-    const steps: ScenarioStepResult[] = [];
-    const artifacts: Record<string, unknown> = {};
-    sseEventNames = [];
+  prepareApp() {
     const { logLines, stream: logStream } = createLogCapture();
     const provider = new StreamingLLMProvider();
     const recorder = createLlmTraceRecorder();
+    return {
+      appOptions: {
+        llmProvider: provider,
+        llmTraceRecorderFactory: () => recorder,
+        logger: { level: "info", stream: logStream },
+      },
+      state: { provider, recorder, logLines },
+    };
+  },
+
+  async run(ctx: ScenarioContext): Promise<ScenarioResult> {
+    const steps: ScenarioStepResult[] = [];
+    const artifacts: Record<string, unknown> = {};
+    sseEventNames = [];
+    const { provider, recorder, logLines } = ctx.prepared as {
+      provider: StreamingLLMProvider;
+      recorder: ReturnType<typeof createLlmTraceRecorder>;
+      logLines: string[];
+    };
     provider.queueRoundError(new LLMProviderError(AUTH_PROVIDER_METADATA_FIXTURE));
 
     let trace: LlmTraceArtifact | undefined;
@@ -231,11 +246,7 @@ const scenario: VerificationScenario = {
     let routeFallbackTurnId: string | undefined;
     let traceRouteFallbackTurnId: string | undefined;
 
-    const fixture = await createScenarioApp({
-      llmProvider: provider,
-      llmTraceRecorderFactory: () => recorder,
-      logger: { level: "info", stream: logStream },
-    });
+    const fixture = ctx;
 
     const failScenario = (failedStepName: string): ScenarioResult => {
       trace = recorder.build({ scenario: SCENARIO_NAME, status: "fail" });
@@ -546,7 +557,6 @@ const scenario: VerificationScenario = {
         trace: projectTrace(trace),
       });
     } finally {
-      await fixture.close();
     }
   },
 };

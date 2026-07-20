@@ -10,7 +10,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdir, rm } from "node:fs/promises";
-import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { collectEventSequence, parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import { validJpegBytes } from "../../fixtures/image-bytes.js";
@@ -212,7 +211,17 @@ async function waitForDailySummaryCount(
 const scenario: VerificationScenario = {
   name: "meal-delete-consistency",
 
-  async run(_ctx: ScenarioContext): Promise<ScenarioResult> {
+  async prepareApp() {
+    const provider = new StreamingLLMProvider();
+    await mkdir(SCENARIO_UPLOADS_DIR, { recursive: true });
+    await mkdir(SCENARIO_ASSETS_DIR, { recursive: true });
+    return {
+      appOptions: { llmProvider: provider, uploadsDir: SCENARIO_UPLOADS_DIR, assetsDir: SCENARIO_ASSETS_DIR },
+      state: { provider },
+    };
+  },
+
+  async run(ctx: ScenarioContext): Promise<ScenarioResult> {
     const scenarioName = "meal-delete-consistency";
     const steps: ScenarioStepResult[] = [];
     const artifacts: Record<string, unknown> = {};
@@ -221,7 +230,7 @@ const scenario: VerificationScenario = {
     await mkdir(SCENARIO_UPLOADS_DIR, { recursive: true });
     await mkdir(SCENARIO_ASSETS_DIR, { recursive: true });
 
-    const provider = new StreamingLLMProvider();
+    const { provider } = ctx.prepared as { provider: StreamingLLMProvider };
     provider.queueRoundResponse({
       toolCalls: [
         {
@@ -249,11 +258,7 @@ const scenario: VerificationScenario = {
       "如果之後要修正這筆午餐也可以直接告訴我。",
     ]);
 
-    const fixture = await createScenarioApp({
-      llmProvider: provider,
-      uploadsDir: SCENARIO_UPLOADS_DIR,
-      assetsDir: SCENARIO_ASSETS_DIR,
-    });
+    const fixture = ctx;
 
     let sseController: AbortController | undefined;
     let sseTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -848,7 +853,6 @@ const scenario: VerificationScenario = {
         sseController.abort();
       }
       if (fixture) {
-        await fixture.close();
       }
       await rm(SCENARIO_ROOT, { recursive: true, force: true });
     }

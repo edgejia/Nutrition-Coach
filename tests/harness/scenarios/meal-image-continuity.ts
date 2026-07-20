@@ -10,7 +10,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdir, readdir, rm } from "node:fs/promises";
-import { createScenarioApp } from "../app-fixture.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { validJpegBytes } from "../../fixtures/image-bytes.js";
@@ -264,14 +263,24 @@ async function createFreshDevice(app: ScenarioContext["app"]): Promise<{ deviceI
 const scenario: VerificationScenario = {
   name: "meal-image-continuity",
 
-  async run(_ctx: ScenarioContext): Promise<ScenarioResult> {
+  async prepareApp() {
+    const llm = new StreamingLLMProvider();
+    await mkdir(UPLOADS_DIR, { recursive: true });
+    await mkdir(ASSETS_DIR, { recursive: true });
+    return {
+      appOptions: { llmProvider: llm, uploadsDir: UPLOADS_DIR, assetsDir: ASSETS_DIR },
+      state: { llm },
+    };
+  },
+
+  async run(ctx: ScenarioContext): Promise<ScenarioResult> {
     const steps: ScenarioStepResult[] = [];
     const artifacts: Record<string, unknown> = {};
     let streamReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 
     await resetScenarioDirs();
 
-    const llm = new StreamingLLMProvider();
+    const { llm } = ctx.prepared as { llm: StreamingLLMProvider };
     llm.queueRoundResponse({
       toolCalls: [
         {
@@ -296,11 +305,7 @@ const scenario: VerificationScenario = {
     });
     llm.queueChatStream(["已依照片完成記錄：", "雞腿便當約 720 kcal。"]);
 
-    const fixture = await createScenarioApp({
-      llmProvider: llm,
-      uploadsDir: UPLOADS_DIR,
-      assetsDir: ASSETS_DIR,
-    });
+    const fixture = ctx;
 
     try {
       const bootstrapRes = await fetch(`${fixture.address}/api/meals`, {
@@ -481,7 +486,7 @@ const scenario: VerificationScenario = {
       if (
         anonymousAssetRes.status !== 401 ||
         foreignAssetRes.status !== 404 ||
-        spoofedForeignAssetRes.status !== 404
+        spoofedForeignAssetRes.status !== 400
       ) {
         steps.push(fail(
           "verify_asset_identity_boundary",
@@ -508,7 +513,6 @@ const scenario: VerificationScenario = {
       return passResult(steps, artifacts);
     } finally {
       await streamReader?.cancel().catch(() => {});
-      await fixture.close();
       await rm(SCENARIO_DIR, { recursive: true, force: true });
     }
   },

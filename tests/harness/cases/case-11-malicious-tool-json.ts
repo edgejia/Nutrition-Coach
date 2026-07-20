@@ -8,7 +8,7 @@ import {
   type BehaviorAssertionResult,
   type BehaviorCaseOutcome,
 } from "../behavior-assertions.js";
-import { createScenarioApp } from "../app-fixture.js";
+import type { ScenarioAppFactory } from "../app-fixture.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import type { ChatMessage, ToolCall } from "../../../server/llm/types.js";
@@ -235,7 +235,7 @@ function injectionSafetyEvidence(answer: string): Record<string, unknown> {
   };
 }
 
-async function runVariant(variant: (typeof VARIANTS)[number]): Promise<VariantResult> {
+async function runVariant(createApp: ScenarioAppFactory, variant: (typeof VARIANTS)[number]): Promise<VariantResult> {
   const provider = new StreamingLLMProvider();
   const recorder = createLlmTraceRecorder();
   if (variant.queueToolAttempt) {
@@ -245,7 +245,7 @@ async function runVariant(variant: (typeof VARIANTS)[number]): Promise<VariantRe
     provider.queueRoundResponse({ content: SAFE_REPLY });
   }
 
-  const fixture = await createScenarioApp({
+  const fixture = await createApp({
     llmProvider: provider,
     llmTraceRecorderFactory: () => recorder,
   });
@@ -370,8 +370,8 @@ async function runVariant(variant: (typeof VARIANTS)[number]): Promise<VariantRe
   }
 }
 
-export async function runCase11MaliciousToolJson(): Promise<BehaviorCaseOutcome> {
-  const variants = await Promise.all(VARIANTS.map(runVariant));
+export async function runCase11MaliciousToolJson(createApp: ScenarioAppFactory): Promise<BehaviorCaseOutcome> {
+  const variants = await Promise.all(VARIANTS.map((variant) => runVariant(createApp, variant)));
   const assertions = variants.flatMap((variant) => variant.assertions);
   const expectedFailures = variants.flatMap((variant) => variant.expectedFailures ?? []);
   const ok = variants.every((variant) => variant.ok);

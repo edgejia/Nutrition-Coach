@@ -1,6 +1,5 @@
 import { createLlmTraceRecorder } from "../../../server/orchestrator/llm-trace.js";
 import { validPngBytes } from "../../fixtures/image-bytes.js";
-import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { buildPositiveScenarioResult } from "../positive-metadata.js";
 import type { LlmTraceArtifact } from "../../../server/orchestrator/llm-trace.js";
@@ -242,7 +241,16 @@ function assertNoMealWrite(response: ChatResponsePayload, label: string) {
 const scenario: VerificationScenario = {
   name: "meal-intent-routing",
 
-  async run(_ctx: ScenarioContext): Promise<ScenarioResult> {
+  prepareApp() {
+    const provider = new StreamingLLMProvider();
+    const recorder = createLlmTraceRecorder();
+    return {
+      appOptions: { llmProvider: provider, llmTraceRecorderFactory: () => recorder },
+      state: { provider, recorder },
+    };
+  },
+
+  async run(ctx: ScenarioContext): Promise<ScenarioResult> {
     const scenarioName = "meal-intent-routing";
     const steps: ScenarioStepResult[] = [];
     const artifacts: Record<string, unknown> = {
@@ -253,8 +261,10 @@ const scenario: VerificationScenario = {
         liveModelCalls: false,
       },
     };
-    const provider = new StreamingLLMProvider();
-    const recorder = createLlmTraceRecorder();
+    const { provider, recorder } = ctx.prepared as {
+      provider: StreamingLLMProvider;
+      recorder: ReturnType<typeof createLlmTraceRecorder>;
+    };
     const trace = (status: "pass" | "fail") => recorder.build({ scenario: scenarioName, status });
     const failScenario = (stepName: string, error: unknown): ScenarioResult => {
       const message = error instanceof Error ? error.message : String(error);
@@ -262,10 +272,7 @@ const scenario: VerificationScenario = {
       return failResult(scenarioName, steps, stepName, artifacts, trace("fail"));
     };
 
-    const fixture = await createScenarioApp({
-      llmProvider: provider,
-      llmTraceRecorderFactory: () => recorder,
-    });
+    const fixture = ctx;
 
     try {
       try {
@@ -274,7 +281,7 @@ const scenario: VerificationScenario = {
           throw new Error(`expected empty bootstrap meals, got ${meals.length}`);
         }
         artifacts.bootstrap = {
-          auth: "cookieHeader from createScenarioApp; no raw deviceId selector",
+          auth: "runner-provided cookieHeader; no raw deviceId selector",
           mealsSnapshot: meals,
         };
         steps.push(pass("bootstrap", { meals: meals.length }));
@@ -582,7 +589,6 @@ const scenario: VerificationScenario = {
 
       return passResult(scenarioName, steps, artifacts, trace("pass"));
     } finally {
-      await fixture.close();
     }
   },
 };

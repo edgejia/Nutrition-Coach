@@ -8,7 +8,7 @@ import {
   type BehaviorAssertionResult,
   type BehaviorCaseOutcome,
 } from "../behavior-assertions.js";
-import { createScenarioApp } from "../app-fixture.js";
+import type { ScenarioAppFactory } from "../app-fixture.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import type { ChatMessage } from "../../../server/llm/types.js";
@@ -164,12 +164,12 @@ function historyRefusalEvidence(answer: string): Record<string, unknown> {
   };
 }
 
-export async function runCase13HistoryToolLikeInjection(): Promise<BehaviorCaseOutcome> {
+export async function runCase13HistoryToolLikeInjection(createApp: ScenarioAppFactory): Promise<BehaviorCaseOutcome> {
   const provider = new StreamingLLMProvider();
   const recorder = createLlmTraceRecorder();
   provider.queueRoundResponse({ content: SAFE_REPLY });
 
-  const fixture = await createScenarioApp({
+  const fixture = await createApp({
     llmProvider: provider,
     llmTraceRecorderFactory: () => recorder,
   });

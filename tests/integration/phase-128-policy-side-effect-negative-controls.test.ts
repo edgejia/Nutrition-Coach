@@ -12,6 +12,7 @@ import { goalProposalTargetSignature } from "../../server/services/goal-proposal
 import { DEFAULT_SESSION_ID } from "../../server/services/turn-state.js";
 import { readPublishedArtifact, writeScenarioArtifacts } from "../harness/artifacts.js";
 import { assertPolicyEvidenceHasNoForbiddenFields } from "../harness/policy-assertions.js";
+import { runScenarioByName } from "../harness/run.js";
 import policySideEffectScenario from "../harness/scenarios/policy-side-effect-gate.js";
 
 function cookieHeader(raw: string | string[] | undefined): string {
@@ -58,6 +59,13 @@ function effectSnapshot(services: AppServices, deviceId: string, publishCounts: 
     dailyPublishes: publishCounts.daily,
     goalsPublishes: publishCounts.goals,
   };
+}
+
+async function runPolicyScenario() {
+  return runScenarioByName("phase-128-policy-side-effect", {
+    loadScenario: async () => policySideEffectScenario,
+    writeScenarioArtifacts: async () => {},
+  });
 }
 
 test("Phase 128 policy proof binds action authority to the backend card and makes approved replay zero-mutation", async () => {
@@ -163,7 +171,7 @@ test("Phase 128 policy evidence rejects raw arguments and keeps stale/idempotent
 });
 
 test("Phase 128 policy scenario records backend proposal-card identity invariants", async () => {
-  const result = await policySideEffectScenario.run({} as never);
+  const result = await runPolicyScenario();
   assert.equal(result.ok, true);
   const approval = result.metadata?.policyDbInvariants?.find(
     (entry) => entry.step === "confirm-first_propose_approve_meal_numeric",
@@ -188,7 +196,7 @@ test("Phase 128 policy disk snapshot preserves backend proposal-card identity bo
   const previous = process.env.HARNESS_ARTIFACTS_DIR;
   process.env.HARNESS_ARTIFACTS_DIR = root;
   try {
-    const result = await policySideEffectScenario.run({} as never);
+    const result = await runPolicyScenario();
     await writeScenarioArtifacts("phase-128-policy-disk", result);
     const snapshots = JSON.parse(readPublishedArtifact("phase-128-policy-disk", "snapshots.json")) as {
       policyDbInvariants?: Array<Record<string, unknown>>;

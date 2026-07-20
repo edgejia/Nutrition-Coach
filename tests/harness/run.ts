@@ -14,7 +14,13 @@
  *   - Exits with code 1 on failure
  */
 
-import { createScenarioApp, ScenarioAppLifecycleError, type ScenarioAppContext } from "./app-fixture.js";
+import {
+  createScenarioApp,
+  createRunnerOwnedNestedScenarioAppFactory,
+  ScenarioAppLifecycleError,
+  withScenarioAppLifecycleScope,
+  type ScenarioAppContext,
+} from "./app-fixture.js";
 import { writeRunnerFailureArtifacts, writeScenarioArtifacts, type RunnerFailureEnvelope } from "./artifacts.js";
 import type { VerificationScenario, ScenarioResult } from "./scenario-types.js";
 
@@ -80,6 +86,13 @@ export async function runScenarioByName(
   scenarioName: string,
   options: ScenarioRunnerOptions = {},
 ): Promise<ScenarioResult> {
+  return withScenarioAppLifecycleScope(() => runScenarioByNameInScope(scenarioName, options));
+}
+
+async function runScenarioByNameInScope(
+  scenarioName: string,
+  options: ScenarioRunnerOptions,
+): Promise<ScenarioResult> {
   const signal = options.signal;
   const loadScenario = options.loadScenario ?? (async (name: string) => {
     const scenarioModule = (await import(`./scenarios/${name}.js`)) as {
@@ -99,6 +112,7 @@ export async function runScenarioByName(
   const writeArtifacts = options.writeScenarioArtifacts ?? writeScenarioArtifacts;
   const faultStage = options.faultInjection?.stage;
   let ctx: ScenarioAppContext | undefined;
+  const nestedContexts: ScenarioAppContext[] = [];
   let result: ScenarioResult | undefined;
   let failure: ReturnType<typeof classifyFailure> | undefined;
 
@@ -109,7 +123,23 @@ export async function runScenarioByName(
     if (faultStage === "boot" || faultStage === "seed" || faultStage === "listen") {
       throw new ScenarioAppLifecycleError(faultStage, 0, "complete");
     }
-    ctx = await createApp({});
+    const preparation = scenario.prepareApp ? await scenario.prepareApp() : {};
+    ctx = await createApp({
+      ...(preparation.appOptions ?? {}),
+      lifecycleOwner: "runner",
+    });
+    const createNestedApp = createRunnerOwnedNestedScenarioAppFactory();
+    const trackedCreateApp = async (options: Parameters<typeof createNestedApp>[0]) => {
+      const nested = await createNestedApp(options);
+      nestedContexts.push(nested);
+      return {
+        ...nested,
+        // Scenario code may retain its standalone finally/close shape, but
+        // the actual nested app remains exclusively runner-closed below.
+        close: async () => {},
+        get closeCalls() { return nested.closeCalls; },
+      };
+    };
     if (faultStage === "close") {
       const originalContext = ctx;
       const originalClose = originalContext.close.bind(originalContext);
@@ -129,18 +159,35 @@ export async function runScenarioByName(
       app: ctx.app,
       address: ctx.address,
       deviceId: ctx.deviceId,
+      cookieHeader: ctx.cookieHeader,
+      services: ctx.services,
+      llmProvider: ctx.llmProvider,
+      createApp: trackedCreateApp,
+      prepared: preparation.state,
       signal,
     });
     throwIfInterrupted(signal);
   } catch (error) {
     failure = classifyFailure(error, ctx, signal);
   } finally {
+    let closeError: unknown;
+    for (const nested of [...nestedContexts].reverse()) {
+      if (nested.closeCalls !== 0) continue;
+      try {
+        await nested.close();
+      } catch (error) {
+        closeError ??= error;
+      }
+    }
     if (ctx && ctx.closeCalls === 0) {
       try {
         await ctx.close();
       } catch (error) {
-        failure = classifyFailure(error, ctx, signal, "close");
+        closeError ??= error;
       }
+    }
+    if (closeError !== undefined && ctx) {
+      failure = classifyFailure(closeError, ctx, signal, "close");
     }
   }
 

@@ -8,6 +8,13 @@ import { parseSSEEvents, collectEventSequence, readStreamThroughClose, readStrea
 import { StreamingLLMProvider } from "../harness/streaming-llm.js";
 import type { VerificationScenario, ScenarioContext, ScenarioResult, ScenarioStepResult } from "../harness/scenario-types.js";
 
+function assertRunnerManagedScenarioSource(source: string): void {
+  assert.match(source, /\bprepareApp\s*\(/, "scenario must define prepareApp");
+  assert.match(source, /async\s+run\(ctx: ScenarioContext\)/, "scenario must consume the runner context in run(ctx)");
+  assert.match(source, /\bctx\.prepared\b/, "scenario must consume prepared runner state from ctx");
+  assert.doesNotMatch(source, /\bcreateScenarioApp\b/, "scenario must not call createScenarioApp");
+}
+
 describe("harness-foundation", () => {
   test("scenario types have correct shape", () => {
     // Verify the interfaces are importable and have the expected contract shape.
@@ -239,12 +246,15 @@ describe("harness-foundation", () => {
       "verify_meal_edit_payload",
       "verify_asset_identity_boundary",
       "verify_upload_cleanup",
-      "createScenarioApp",
+      "prepareApp",
+      "async run(ctx: ScenarioContext)",
+      "ctx.prepared",
       "StreamingLLMProvider",
     ]) {
       assert.match(source, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     }
 
+    assertRunnerManagedScenarioSource(source);
     assert.doesNotMatch(source, /foodName.*find|calories.*find|protein.*find|loggedAt.*find/);
   });
 
@@ -261,12 +271,33 @@ describe("harness-foundation", () => {
       "verify_history",
       "replyCopy",
       "securityNotes",
-      "createScenarioApp",
+      "prepareApp",
+      "async run(ctx: ScenarioContext)",
+      "ctx.prepared",
       "StreamingLLMProvider",
     ]) {
       assert.match(source, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     }
 
+    assertRunnerManagedScenarioSource(source);
     assert.doesNotMatch(source, /OpenAIProvider|OPENAI_API_KEY|process\.env\.OPENAI/);
+  });
+
+  test("scenario source contract rejects nested createScenarioApp lifecycle ownership", () => {
+    const staleSource = [
+      'const scenario: VerificationScenario = {',
+      '  prepareApp() { return {}; },',
+      '  async run(ctx: ScenarioContext) {',
+      '    const prepared = ctx.prepared;',
+      '    const fixture = await createScenarioApp({});',
+      '    return useRunnerContext(ctx, fixture, prepared);',
+      '  },',
+      '};',
+    ].join("\n");
+
+    assert.throws(
+      () => assertRunnerManagedScenarioSource(staleSource),
+      /scenario must not call createScenarioApp/,
+    );
   });
 });

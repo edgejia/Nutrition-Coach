@@ -499,13 +499,30 @@ test("Phase 128 next publication recovers stale owner residue and swaps one poin
     fs.mkdirSync(path.join(scenarioRoot, ".publication.lock"), { recursive: true });
     fs.mkdirSync(path.join(scenarioRoot, ".generation-interrupted.tmp"), { recursive: true });
     fs.writeFileSync(path.join(scenarioRoot, ".generation-interrupted.tmp", "partial.json"), "partial");
+    fs.mkdirSync(path.join(scenarioRoot, "latest"), { recursive: true });
+    fs.writeFileSync(path.join(scenarioRoot, "latest", "index.json"), "legacy-pointer");
+    fs.writeFileSync(path.join(scenarioRoot, "latest", "summary.json"), "legacy-summary");
+    fs.writeFileSync(path.join(scenarioRoot, "latest.index.json"), "legacy-index-residue");
+
+    const oldSwapSource = path.join(scenarioRoot, ".latest-red-first");
+    fs.mkdirSync(path.join(scenarioRoot, ".generation-red-first.tmp"));
+    fs.symlinkSync(".generation-red-first.tmp", oldSwapSource, "dir");
+    assert.throws(
+      () => fs.renameSync(oldSwapSource, path.join(scenarioRoot, "latest")),
+      (error: unknown) => (error as NodeJS.ErrnoException).code === "EISDIR",
+    );
+    fs.rmSync(oldSwapSource, { force: true });
 
     await writeScenarioArtifacts("phase-128-recovery", result(safeMetadata("recovered")));
 
     assert.equal(fs.existsSync(path.join(scenarioRoot, ".publication.lock")), false);
     assert.equal(fs.existsSync(path.join(scenarioRoot, ".generation-interrupted.tmp")), false);
-    assert.equal(fs.existsSync(path.join(scenarioRoot, "latest", "index.json")), true);
+    assert.equal(fs.lstatSync(path.join(scenarioRoot, "latest")).isSymbolicLink(), true);
     assert.equal(fs.existsSync(path.join(scenarioRoot, "latest.index.json")), false);
+    assert.deepEqual(
+      fs.readdirSync(scenarioRoot).filter((entry) => entry.startsWith(".legacy-latest-")),
+      [],
+    );
     assert.match(readPublishedArtifact("phase-128-recovery", "summary.json"), /recovered/);
   } finally {
     if (previous === undefined) delete process.env.HARNESS_ARTIFACTS_DIR;

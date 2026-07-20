@@ -6,6 +6,8 @@
  */
 
 import type { FastifyInstance } from "fastify";
+import type { ScenarioAppFactory, ScenarioAppOptions, ScenarioAppServices } from "./app-fixture.js";
+import type { LLMProvider } from "../../server/llm/types.js";
 
 /**
  * Context passed into each scenario's `run()` method.
@@ -15,7 +17,18 @@ export interface ScenarioContext {
   app: FastifyInstance;
   address: string;
   deviceId: string;
+  cookieHeader: string;
+  services: ScenarioAppServices;
+  llmProvider: LLMProvider;
+  /** Runner-owned factory for isolated nested fixtures; the runner closes them. */
+  createApp: ScenarioAppFactory;
+  prepared?: unknown;
   signal?: AbortSignal;
+}
+
+export interface ScenarioAppPreparation {
+  appOptions?: Omit<ScenarioAppOptions, "lifecycleOwner">;
+  state?: unknown;
 }
 
 /**
@@ -134,5 +147,6 @@ export interface ScenarioResult {
  */
 export interface VerificationScenario {
   name: string;
+  prepareApp?: () => ScenarioAppPreparation | Promise<ScenarioAppPreparation>;
   run(ctx: ScenarioContext): Promise<ScenarioResult>;
 }

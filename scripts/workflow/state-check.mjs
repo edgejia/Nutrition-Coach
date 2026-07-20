@@ -500,6 +500,7 @@ function collectDisk(snapshot) {
         if (summaryStatus === "complete") completeSummaryIds.add(summaryId);
         continue;
       }
+      if (file.name === `${phaseId}-SEAL.json`) continue;
       if (!isAllowedAuxiliaryFile(file.name, phaseId)) {
         errors.push({ code: "disk_unknown_phase_entry", phase: phaseId, entry: file.name });
       }

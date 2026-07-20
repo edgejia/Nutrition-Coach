@@ -107,21 +107,29 @@ function parseDailySummaryFrame(data: string): DailySummary {
 const textLogScenario: VerificationScenario = {
   name: "text-log",
 
-  async run(_ctx: ScenarioContext): Promise<ScenarioResult> {
-    // _ctx is provided by run.ts but unused here: the scenario creates its own fixture
-    // with an explicitly controlled StreamingLLMProvider so it can queue deterministic
-    // LLM responses. run.ts will close its own ctx in the finally block separately.
+  prepareApp() {
+    const provider = new StreamingLLMProvider();
+    const recorder = createLlmTraceRecorder();
+    return {
+      appOptions: {
+        llmProvider: provider,
+        llmTraceRecorderFactory: () => recorder,
+      },
+      state: { provider, recorder },
+    };
+  },
+
+  async run(ctx: ScenarioContext): Promise<ScenarioResult> {
     const scenarioName = "text-log";
     const steps: ScenarioStepResult[] = [];
     const artifacts: Record<string, unknown> = {};
     let llmTrace: Record<string, unknown> | undefined;
     let finalAssistantContent: string | undefined;
     let streamedReplyText = "";
-
-    // Create our own app fixture with a controlled LLM provider.
-    const { createScenarioApp } = await import("../app-fixture.js");
-    const provider = new StreamingLLMProvider();
-    const recorder = createLlmTraceRecorder();
+    const { provider, recorder } = ctx.prepared as {
+      provider: StreamingLLMProvider;
+      recorder: ReturnType<typeof createLlmTraceRecorder>;
+    };
     const buildTrace = (status: "pass" | "fail"): Record<string, unknown> => {
       return recorder.build({ scenario: scenarioName, status }) as unknown as Record<string, unknown>;
     };
@@ -152,12 +160,8 @@ const textLogScenario: VerificationScenario = {
         },
       ],
     });
-    const fixture = await createScenarioApp({
-      llmProvider: provider,
-      llmTraceRecorderFactory: () => recorder,
-    });
+    const fixture = ctx;
 
-    try {
       // ------------------------------------------------------------------
       // Step 1: bootstrap
       // ------------------------------------------------------------------
@@ -856,9 +860,6 @@ const textLogScenario: VerificationScenario = {
           },
         },
       });
-    } finally {
-      await fixture.close();
-    }
   },
 };
 

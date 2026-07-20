@@ -7,7 +7,7 @@ import {
   type BehaviorAssertionResult,
   type BehaviorCaseOutcome,
 } from "../behavior-assertions.js";
-import { createScenarioApp, type ScenarioAppContext } from "../app-fixture.js";
+import { type ScenarioAppContext, type ScenarioAppFactory } from "../app-fixture.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { createLlmTraceRecorder } from "../../../server/orchestrator/llm-trace.js";
@@ -198,11 +198,12 @@ function buildPersistedDiff(input: {
 
 export async function runUnsafeNutritionOutputGuardCase(
   input: UnsafeNutritionOutputGuardCaseInput,
+  createApp: ScenarioAppFactory,
 ): Promise<BehaviorCaseOutcome> {
   const provider = new StreamingLLMProvider();
   const recorder = createLlmTraceRecorder();
   provider.queueRoundResponse({ content: input.unsafeModelReply });
-  const fixture = await createScenarioApp({
+  const fixture = await createApp({
     llmProvider: provider,
     llmTraceRecorderFactory: () => recorder,
   });

@@ -1,7 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdir, rm } from "node:fs/promises";
-import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import { validJpegBytes } from "../../fixtures/image-bytes.js";
@@ -166,7 +165,7 @@ async function fetchHistory(address: string, cookieHeader: string): Promise<Hist
 }
 
 async function runProteinTrustCase(
-  fixture: Awaited<ReturnType<typeof createScenarioApp>>,
+  fixture: ScenarioContext,
   llm: StreamingLLMProvider,
   trustCase: ProteinTrustCase,
 ): Promise<Record<string, unknown>> {
@@ -270,19 +269,25 @@ async function runProteinTrustCase(
 const scenario: VerificationScenario = {
   name: "protein-trust",
 
-  async run(_ctx: ScenarioContext): Promise<ScenarioResult> {
+  async prepareApp() {
+    const llm = new StreamingLLMProvider();
+    await mkdir(SCENARIO_UPLOADS_DIR, { recursive: true });
+    await mkdir(SCENARIO_ASSETS_DIR, { recursive: true });
+    return {
+      appOptions: { llmProvider: llm, uploadsDir: SCENARIO_UPLOADS_DIR, assetsDir: SCENARIO_ASSETS_DIR },
+      state: { llm },
+    };
+  },
+
+  async run(ctx: ScenarioContext): Promise<ScenarioResult> {
     const steps: ScenarioStepResult[] = [];
     const artifacts: Record<string, unknown> = { caseNames: [...STEP_NAMES] };
 
     await mkdir(SCENARIO_UPLOADS_DIR, { recursive: true });
     await mkdir(SCENARIO_ASSETS_DIR, { recursive: true });
 
-    const llm = new StreamingLLMProvider();
-    const fixture = await createScenarioApp({
-      llmProvider: llm,
-      uploadsDir: SCENARIO_UPLOADS_DIR,
-      assetsDir: SCENARIO_ASSETS_DIR,
-    });
+    const { llm } = ctx.prepared as { llm: StreamingLLMProvider };
+    const fixture = ctx;
 
     const cases: ProteinTrustCase[] = [
       {
@@ -389,7 +394,6 @@ const scenario: VerificationScenario = {
         assertions: { allCasesPassed: true, detailedChecksCompleted: true },
       });
     } finally {
-      await fixture.close();
       await rm(path.resolve(__dirname, "..", "tmp", "protein-trust"), {
         recursive: true,
         force: true,
