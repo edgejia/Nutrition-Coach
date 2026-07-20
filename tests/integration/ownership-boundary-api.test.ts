@@ -1,12 +1,14 @@
 process.env.TZ = "Asia/Taipei";
 
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import test from "node:test";
+import { after, before, describe, test } from "node:test";
 import ts from "typescript";
 import { createGuestSessionService } from "../../server/services/guest-session.js";
+import { runScenarioByName } from "../harness/run.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -29,12 +31,25 @@ const CLIENT_TRANSPORT_FILES = [
   "client/src/sse.ts",
 ] as const;
 
-const GENERATED_ARTIFACT_FILES = [
-  "tests/harness/artifacts/guest-session-hardening/latest/scenario-result.json",
-  "tests/harness/artifacts/guest-session-hardening/latest/snapshots.json",
-  "tests/harness/artifacts/guest-session-hardening/latest/steps.json",
-  "tests/harness/artifacts/guest-session-hardening/latest/summary.json",
+const GENERATED_ARTIFACT_FILE_NAMES = [
+  "scenario-result.json",
+  "snapshots.json",
+  "steps.json",
+  "summary.json",
 ] as const;
+
+const GUEST_SESSION_SCENARIO_NAME = "guest-session-hardening";
+
+let guestSessionArtifactRoot: string | undefined;
+
+function guestSessionArtifactPath(fileName: string) {
+  assert.ok(guestSessionArtifactRoot, "guest-session-hardening artifacts must be prepared before inspection");
+  return path.join(guestSessionArtifactRoot, GUEST_SESSION_SCENARIO_NAME, "latest", fileName);
+}
+
+async function readGuestSessionArtifact(fileName: string) {
+  return readFile(guestSessionArtifactPath(fileName), "utf8");
+}
 
 const EXPECTED_REVOCATION_STEP_NAMES = [
   "copied_token_valid_until_logout",
@@ -527,16 +542,16 @@ function inspectArtifactValue(value: unknown, pathSegments: readonly string[], f
 
 export async function assertGeneratedArtifactsAreMetadataOnly() {
   const failures: string[] = [];
-  for (const relativePath of GENERATED_ARTIFACT_FILES) {
-    const parsed = JSON.parse(await readProjectFile(relativePath)) as unknown;
-    inspectArtifactValue(parsed, [relativePath], failures);
+  for (const fileName of GENERATED_ARTIFACT_FILE_NAMES) {
+    const parsed = JSON.parse(await readGuestSessionArtifact(fileName)) as unknown;
+    inspectArtifactValue(parsed, [`${GUEST_SESSION_SCENARIO_NAME}/latest/${fileName}`], failures);
   }
   assert.deepEqual(failures, [], "Generated guest-session-hardening artifacts must remain metadata-only");
 }
 
 async function assertGuestSessionHardeningPositiveMetadataArtifacts() {
   const snapshots = JSON.parse(
-    await readProjectFile("tests/harness/artifacts/guest-session-hardening/latest/snapshots.json"),
+    await readGuestSessionArtifact("snapshots.json"),
   ) as {
     assertions?: Record<string, unknown>;
     counts?: Record<string, unknown>;
@@ -553,7 +568,7 @@ async function assertGuestSessionHardeningPositiveMetadataArtifacts() {
   });
 
   const steps = JSON.parse(
-    await readProjectFile("tests/harness/artifacts/guest-session-hardening/latest/steps.json"),
+    await readGuestSessionArtifact("steps.json"),
   ) as Array<{ name?: unknown; status?: unknown; actual?: unknown }>;
   const rawSelectorStep = steps.find((step) => step.name === "raw_selector_fail_closed");
   assert.equal(rawSelectorStep?.status, "pass");
@@ -562,10 +577,10 @@ async function assertGuestSessionHardeningPositiveMetadataArtifacts() {
 
 async function assertGuestSessionHardeningRevocationArtifacts() {
   const steps = JSON.parse(
-    await readProjectFile("tests/harness/artifacts/guest-session-hardening/latest/steps.json"),
+    await readGuestSessionArtifact("steps.json"),
   ) as Array<{ name?: unknown; status?: unknown; actual?: unknown }>;
   const summary = JSON.parse(
-    await readProjectFile("tests/harness/artifacts/guest-session-hardening/latest/summary.json"),
+    await readGuestSessionArtifact("summary.json"),
   ) as {
     scenarioId?: unknown;
     status?: unknown;
@@ -598,16 +613,44 @@ test("client protected transports do not send raw ownership selectors", async ()
   await assertClientDoesNotSendRawProtectedSelectors();
 });
 
-test("guest-session-hardening artifacts retain the raw-selector check as positive metadata", async () => {
-  await assertGuestSessionHardeningPositiveMetadataArtifacts();
-});
+describe("guest-session-hardening artifact contracts", () => {
+  let temporaryArtifactsRoot: string | undefined;
 
-test("guest-session-hardening artifacts prove guest-session revocation behavior", async () => {
-  await assertGuestSessionHardeningRevocationArtifacts();
-});
+  before(async () => {
+    temporaryArtifactsRoot = await mkdtemp(path.join(tmpdir(), "nutrition-ownership-boundary-api-"));
+    guestSessionArtifactRoot = temporaryArtifactsRoot;
 
-test("guest-session-hardening generated artifacts are metadata-only", async () => {
-  await assertGeneratedArtifactsAreMetadataOnly();
+    const previousArtifactsRoot = process.env.HARNESS_ARTIFACTS_DIR;
+    process.env.HARNESS_ARTIFACTS_DIR = temporaryArtifactsRoot;
+    try {
+      const result = await runScenarioByName(GUEST_SESSION_SCENARIO_NAME);
+      assert.equal(result.ok, true, result.consoleSummary);
+    } finally {
+      if (previousArtifactsRoot === undefined) delete process.env.HARNESS_ARTIFACTS_DIR;
+      else process.env.HARNESS_ARTIFACTS_DIR = previousArtifactsRoot;
+    }
+  });
+
+  after(async () => {
+    const root = temporaryArtifactsRoot;
+    temporaryArtifactsRoot = undefined;
+    guestSessionArtifactRoot = undefined;
+    if (root !== undefined) {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("guest-session-hardening artifacts retain the raw-selector check as positive metadata", async () => {
+    await assertGuestSessionHardeningPositiveMetadataArtifacts();
+  });
+
+  test("guest-session-hardening artifacts prove guest-session revocation behavior", async () => {
+    await assertGuestSessionHardeningRevocationArtifacts();
+  });
+
+  test("guest-session-hardening generated artifacts are metadata-only", async () => {
+    await assertGeneratedArtifactsAreMetadataOnly();
+  });
 });
 
 test("generated artifact privacy scanner rejects raw guest-session token values", () => {
