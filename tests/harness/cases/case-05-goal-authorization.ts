@@ -6,7 +6,7 @@ import {
   type BehaviorAssertionResult,
   type BehaviorCaseOutcome,
 } from "../behavior-assertions.js";
-import { createScenarioApp } from "../app-fixture.js";
+import type { ScenarioAppFactory } from "../app-fixture.js";
 import { parseSSEEvents } from "../sse.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 
@@ -32,9 +32,9 @@ interface GoalSubCaseEvidence {
 
 const MUTATION_TOOLS = new Set(["log_food", "update_meal", "delete_meal", "update_goals"]);
 
-export async function runCase05GoalAuthorization(): Promise<BehaviorCaseOutcome> {
-  const positive = await runExplicitNumericGoalUpdate();
-  const negative = await runVagueGoalIntent();
+export async function runCase05GoalAuthorization(createApp: ScenarioAppFactory): Promise<BehaviorCaseOutcome> {
+  const positive = await runExplicitNumericGoalUpdate(createApp);
+  const negative = await runVagueGoalIntent(createApp);
   const assertions = [...positive.assertions, ...negative.assertions];
   const ok = assertions.every((assertion) => assertion.ok);
 
@@ -49,12 +49,12 @@ export async function runCase05GoalAuthorization(): Promise<BehaviorCaseOutcome>
   };
 }
 
-async function runExplicitNumericGoalUpdate(): Promise<{
+async function runExplicitNumericGoalUpdate(createApp: ScenarioAppFactory): Promise<{
   assertions: BehaviorAssertionResult[];
   evidence: GoalSubCaseEvidence;
 }> {
   const llmProvider = new StreamingLLMProvider();
-  const ctx = await createScenarioApp({ llmProvider });
+  const ctx = await createApp({ llmProvider });
 
   try {
     const beforeTargets = await readTargets(ctx.address, ctx.cookieHeader);
@@ -120,12 +120,12 @@ async function runExplicitNumericGoalUpdate(): Promise<{
   }
 }
 
-async function runVagueGoalIntent(): Promise<{
+async function runVagueGoalIntent(createApp: ScenarioAppFactory): Promise<{
   assertions: BehaviorAssertionResult[];
   evidence: GoalSubCaseEvidence;
 }> {
   const llmProvider = new StreamingLLMProvider();
-  const ctx = await createScenarioApp({ llmProvider });
+  const ctx = await createApp({ llmProvider });
 
   try {
     const beforeTargets = await readTargets(ctx.address, ctx.cookieHeader);

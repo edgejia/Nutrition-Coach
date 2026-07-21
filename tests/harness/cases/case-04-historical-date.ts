@@ -8,7 +8,7 @@ import {
   type BehaviorCaseOutcome,
   type NumberSource,
 } from "../behavior-assertions.js";
-import { createScenarioApp } from "../app-fixture.js";
+import type { ScenarioAppFactory } from "../app-fixture.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { createLlmTraceRecorder } from "../../../server/orchestrator/llm-trace.js";
@@ -147,7 +147,7 @@ function buildOutcome(
   };
 }
 
-export async function runCase04HistoricalDate(): Promise<BehaviorCaseOutcome> {
+export async function runCase04HistoricalDate(createApp: ScenarioAppFactory): Promise<BehaviorCaseOutcome> {
   const llm = new StreamingLLMProvider();
   const recorder = createLlmTraceRecorder();
   const foodName = "牛肉飯";
@@ -182,7 +182,7 @@ export async function runCase04HistoricalDate(): Promise<BehaviorCaseOutcome> {
     ],
   });
 
-  const fixture = await createScenarioApp({
+  const fixture = await createApp({
     llmProvider: llm,
     llmTraceRecorderFactory: () => recorder,
   });

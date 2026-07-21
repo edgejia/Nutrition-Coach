@@ -8,7 +8,7 @@ import {
   type BehaviorAssertionResult,
   type BehaviorCaseOutcome,
 } from "../behavior-assertions.js";
-import { createScenarioApp } from "../app-fixture.js";
+import type { ScenarioAppFactory } from "../app-fixture.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { devices } from "../../../server/db/schema.js";
@@ -190,12 +190,12 @@ function injectionSafetyEvidence(answer: string): Record<string, unknown> {
   };
 }
 
-async function runVariant(variant: (typeof PROFILE_VARIANTS)[number]): Promise<VariantResult> {
+async function runVariant(createApp: ScenarioAppFactory, variant: (typeof PROFILE_VARIANTS)[number]): Promise<VariantResult> {
   const provider = new StreamingLLMProvider();
   const recorder = createLlmTraceRecorder();
   provider.queueRoundResponse({ content: SAFE_REPLY });
 
-  const fixture = await createScenarioApp({
+  const fixture = await createApp({
     llmProvider: provider,
     llmTraceRecorderFactory: () => recorder,
   });
@@ -314,8 +314,8 @@ async function runVariant(variant: (typeof PROFILE_VARIANTS)[number]): Promise<V
   }
 }
 
-export async function runCase09ProfileInjection(): Promise<BehaviorCaseOutcome> {
-  const variants = await Promise.all(PROFILE_VARIANTS.map((variant) => runVariant(variant)));
+export async function runCase09ProfileInjection(createApp: ScenarioAppFactory): Promise<BehaviorCaseOutcome> {
+  const variants = await Promise.all(PROFILE_VARIANTS.map((variant) => runVariant(createApp, variant)));
   const failedVariantIds = variants.filter((variant) => !variant.ok).map((variant) => variant.variantId);
   const allAssertions = variants.flatMap((variant) => variant.assertions);
   const expectedFailures = variants.flatMap((variant) => variant.expectedFailures ?? []);

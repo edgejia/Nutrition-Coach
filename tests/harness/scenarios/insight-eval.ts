@@ -1,4 +1,3 @@
-import { createScenarioApp } from "../app-fixture.js";
 import {
   buildInsightMetrics,
   loadInsightFixture,
@@ -8,6 +7,7 @@ import {
 } from "../insight-fixtures.js";
 import { evaluateInsightAnswer, type InsightAssertionResult } from "../insight-assertions.js";
 import { buildInsightTraceArtifact } from "../llm-trace.js";
+import { buildPositiveScenarioResult } from "../positive-metadata.js";
 import type {
   VerificationScenario,
   ScenarioContext,
@@ -50,13 +50,7 @@ function failResult(
   failedStepName: string,
   artifacts: Record<string, unknown>,
 ): ScenarioResult {
-  return {
-    ok: false,
-    failedStep: failedStepName,
-    steps,
-    artifacts,
-    consoleSummary: `FAIL ${scenarioName} ${failedStepName}`,
-  };
+  return buildPositiveScenarioResult(scenarioName, false, steps, failedStepName);
 }
 
 function firstFailedAssertion(assertions: InsightAssertionResult[]): InsightAssertionResult | undefined {
@@ -64,7 +58,7 @@ function firstFailedAssertion(assertions: InsightAssertionResult[]): InsightAsse
 }
 
 async function runFixtureCase(
-  fixtureApp: Awaited<ReturnType<typeof createScenarioApp>>,
+  fixtureApp: ScenarioContext,
   testCase: InsightEvalCase,
 ): Promise<{ assertions: InsightAssertionResult[]; trace: Record<string, unknown> }> {
   const fixture = loadInsightFixture(testCase.fixtureName);
@@ -115,14 +109,14 @@ async function runFixtureCase(
 const scenario: VerificationScenario = {
   name: "insight-eval",
 
-  async run(_ctx: ScenarioContext): Promise<ScenarioResult> {
+  async run(ctx: ScenarioContext): Promise<ScenarioResult> {
     const scenarioName = "insight-eval";
     const steps: ScenarioStepResult[] = [];
     const artifacts: Record<string, unknown> = {
       traces: {},
       caseNames: [...STEP_NAMES],
     };
-    const fixture = await createScenarioApp({});
+    const fixture = ctx;
 
     const cases: InsightEvalCase[] = [
       {
@@ -160,7 +154,6 @@ const scenario: VerificationScenario = {
       },
     ];
 
-    try {
       for (const testCase of cases) {
         try {
           const actual = await runFixtureCase(fixture, testCase);
@@ -178,15 +171,10 @@ const scenario: VerificationScenario = {
         }
       }
 
-      return {
-        ok: true,
-        steps,
-        artifacts,
-        consoleSummary: `PASS insight-eval ${steps.filter((step) => step.ok).length}/${steps.length}`,
-      };
-    } finally {
-      await fixture.close();
-    }
+      return buildPositiveScenarioResult(scenarioName, true, steps, undefined, {
+        counts: { caseCount: cases.length },
+        assertions: { allCasesPassed: true },
+      });
   },
 };
 

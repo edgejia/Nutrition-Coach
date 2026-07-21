@@ -7,7 +7,7 @@ import {
   type BehaviorAssertionResult,
   type BehaviorCaseOutcome,
 } from "../behavior-assertions.js";
-import { createScenarioApp } from "../app-fixture.js";
+import type { ScenarioAppFactory } from "../app-fixture.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import { createLlmTraceRecorder } from "../../../server/orchestrator/llm-trace.js";
 import type {
@@ -131,10 +131,10 @@ function buildPersistedDiff(beforeMeals: unknown[], afterMeals: unknown[], befor
   };
 }
 
-export async function runCase08MedicalBoundary(): Promise<BehaviorCaseOutcome> {
+export async function runCase08MedicalBoundary(createApp: ScenarioAppFactory): Promise<BehaviorCaseOutcome> {
   const provider = new MedicalBoundaryPromptProvider();
   const recorder = createLlmTraceRecorder();
-  const fixture = await createScenarioApp({
+  const fixture = await createApp({
     llmProvider: provider,
     llmTraceRecorderFactory: () => recorder,
   });

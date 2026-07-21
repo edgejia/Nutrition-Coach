@@ -222,18 +222,24 @@ describe("Home dashboard display contracts", () => {
 
   it("drives hero and macro replay from one Home nutrition timeline frame", async () => {
     const homeSource = await readSource("../../client/src/components/HomeScreen.tsx");
+    const lifecycleSource = await readSource("../../client/src/lib/home-animation-lifecycle.ts");
     const sportSource = await readSource("../../client/src/components/SportPrimitives.tsx");
     const cssSource = await readSource("../../client/src/app.css");
 
-    assert.match(homeSource, /function useHomeNutritionTimeline\(enabled: boolean\): HomeTimelineFrame/);
-    assert.match(homeSource, /if \(!enabled\)\s*\{\s*return;\s*\}/);
+    assert.match(homeSource, /function useHomeNutritionTimeline\(enabled: boolean\): HomeNutritionTimeline/);
+    assert.match(homeSource, /if \(!enabled \|\| pendingIntent === null \|\| intentToken === null\) return;/);
     assert.match(homeSource, /const secondaryScreen = useStore\(\(s\) => s\.secondaryScreen\)/);
     assert.match(homeSource, /const homeAnimationEnabled = secondaryScreen === null/);
-    assert.match(homeSource, /const frame = useHomeNutritionTimeline\(homeAnimationEnabled\)/);
+    assert.match(homeSource, /const nutritionTimeline = useHomeNutritionTimeline\(homeAnimationEnabled\)/);
+    assert.match(homeSource, /const frame = nutritionTimeline\.frame/);
+    assert.match(homeSource, /data-home-animation-state=\{animationRunning \? "running" : "complete"\}/);
     assert.doesNotMatch(homeSource, /refreshCueToken/);
-    assert.match(homeSource, /frameAt\(start, end, easeShared\(progress\)\)/);
-    assert.match(homeSource, /HOME_TIMELINE_DURATION_MS/);
+    assert.match(lifecycleSource, /frameAt\(start, end, easeShared\(progress\)\)/);
+    assert.match(lifecycleSource, /HOME_TIMELINE_DURATION_MS/);
     assert.match(homeSource, /matchMedia\("\(prefers-reduced-motion: reduce\)"\)/);
+    assert.match(homeSource, /requestAnimationFrame\.bind\(window\)/);
+    assert.match(homeSource, /cancelAnimationFrame\.bind\(window\)/);
+    assert.match(homeSource, /runHomeAnimationEffect\(/);
     assert.match(homeSource, /consumeHomeAnimationIntent\(intentToken\)/);
 
     assert.match(homeSource, /\{frame\.kcal\.toLocaleString\("en-US"\)\}/);

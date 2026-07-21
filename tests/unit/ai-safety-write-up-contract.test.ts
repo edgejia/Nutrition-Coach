@@ -4,7 +4,7 @@ import path from "node:path";
 import { describe, it } from "node:test";
 import ts from "typescript";
 
-const DOC_PATH = "docs/ai-safety.md";
+const DOC_PATH = "docs/ai-safety-case.md";
 const CONTRACT_PATH = "tests/unit/ai-safety-write-up-contract.test.ts";
 const LEDGER_HEADING = "## Claim ledger";
 const INLINE_LINK_PATTERN = /(!?)\[([^\]\n]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;

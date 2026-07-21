@@ -246,6 +246,36 @@ describe("workflow state invariant checker", () => {
     );
   });
 
+  it("accepts only the matching phase verification seal and rejects mismatched or unknown files", async () => {
+    const matching = await copyState();
+    await fs.writeFile(path.join(matching.planningRoot, "phases/115-active/115-SEAL.json"), "{}\n");
+    const matchingResult = checkWorkflowState(matching.planningRoot);
+    assert.equal(matchingResult.status, "pass");
+    assert.deepEqual(matchingResult.errors, []);
+
+    const mismatched = await copyState();
+    await fs.writeFile(path.join(mismatched.planningRoot, "phases/115-active/114-SEAL.json"), "{}\n");
+    assert.ok(
+      checkWorkflowState(mismatched.planningRoot).errors.some(
+        (error: { code: string; phase?: string; entry?: string }) =>
+          error.code === "disk_unknown_phase_entry" &&
+          error.phase === "115" &&
+          error.entry === "114-SEAL.json",
+      ),
+    );
+
+    const unknown = await copyState();
+    await fs.writeFile(path.join(unknown.planningRoot, "phases/115-active/rogue.bin"), "unknown\n");
+    assert.ok(
+      checkWorkflowState(unknown.planningRoot).errors.some(
+        (error: { code: string; phase?: string; entry?: string }) =>
+          error.code === "disk_unknown_phase_entry" &&
+          error.phase === "115" &&
+          error.entry === "rogue.bin",
+      ),
+    );
+  });
+
   it("accepts frozen auxiliary artifacts and ignores archived attempts as active evidence", async () => {
     const fixture = await copyState();
     const result = checkWorkflowState(fixture.planningRoot);

@@ -166,9 +166,16 @@ const companionProofs = [
   {
     path: "tests/unit/verification-artifacts.test.ts",
     required: [
-      /summary\.json redacts untrusted console/,
-      /raw prompt and message keys are omitted/,
-      /persisted artifacts redact TRACE-04 forbidden probe strings/,
+      /fails closed when positive metadata is accompanied by arbitrary evidence/,
+      /redacts sensitive values recursively in memory/,
+      /redacts unsafe prompt metadata and internal tool identifiers/,
+    ],
+  },
+  {
+    path: "tests/unit/insight-trace-artifacts.test.ts",
+    required: [
+      /buildInsightTraceArtifact writes detailed redacted failure traces/,
+      /rejects legacy insight trace evidence instead of persisting arbitrary trace fields/,
     ],
   },
   {

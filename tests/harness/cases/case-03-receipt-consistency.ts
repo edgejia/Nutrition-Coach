@@ -1,8 +1,3 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import {
   type BehaviorAssertionResult,
@@ -13,17 +8,15 @@ import {
 } from "../behavior-assertions.js";
 import { parseSSEEvents } from "../sse.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
-import { buildApp } from "../../../server/app.js";
-import { applyMigrations } from "../../../server/db/migrate.js";
 import {
-  chatMealReceipts,
-  chatMessages,
   mealRevisionItems,
   mealRevisions,
   mealTransactions,
 } from "../../../server/db/schema.js";
+import type { AppDatabase } from "../../../server/db/client.js";
 import { formatLocalDate } from "../../../server/lib/time.js";
 import { createLlmTraceRecorder } from "../../../server/orchestrator/llm-trace.js";
+import type { ScenarioAppFactory } from "../app-fixture.js";
 
 type TraceFinalReplySource =
   | "renderer"
@@ -273,56 +266,32 @@ function assertTraceFinalReplyShape(
     : fail("trace_final_reply_shape", `Expected trace final reply shape ${expected}, got ${actual}`, evidence);
 }
 
-function toCookieHeader(rawHeader: string | string[] | undefined): string {
-  const values = Array.isArray(rawHeader) ? rawHeader : rawHeader ? [rawHeader] : [];
-  return values.map((value) => value.split(";", 1)[0]).join("; ");
-}
-
-async function createMigratedDbPath(tmpRoot: string): Promise<string> {
-  const dbPath = join(tmpRoot, "case-03.sqlite");
-  const sqlite = new Database(dbPath);
-  try {
-    applyMigrations(sqlite);
-  } finally {
-    sqlite.close();
-  }
-  return dbPath;
-}
-
 async function readPersistedRevisionRows(
-  dbPath: string,
+  db: AppDatabase,
   deviceId: string,
   mealId: string,
 ): Promise<PersistedRevisionRow[]> {
-  const sqlite = new Database(dbPath, { readonly: true });
-  try {
-    const db = drizzle(sqlite, {
-      schema: { chatMealReceipts, chatMessages, mealRevisionItems, mealRevisions, mealTransactions },
-    });
-    return await db
-      .select({
-        mealId: mealTransactions.id,
-        mealRevisionId: mealRevisions.id,
-        loggedAt: mealTransactions.loggedAt,
-        foodName: mealRevisionItems.foodName,
-        position: mealRevisionItems.position,
-        calories: mealRevisionItems.calories,
-        protein: mealRevisionItems.protein,
-        carbs: mealRevisionItems.carbs,
-        fat: mealRevisionItems.fat,
-      })
-      .from(mealTransactions)
-      .innerJoin(mealRevisions, eq(mealTransactions.currentRevisionId, mealRevisions.id))
-      .innerJoin(mealRevisionItems, eq(mealRevisionItems.revisionId, mealRevisions.id))
-      .where(and(
-        eq(mealTransactions.deviceId, deviceId),
-        eq(mealTransactions.id, mealId),
-        isNull(mealTransactions.deletedAt),
-      ))
-      .orderBy(asc(mealRevisionItems.position));
-  } finally {
-    sqlite.close();
-  }
+  return await db
+    .select({
+      mealId: mealTransactions.id,
+      mealRevisionId: mealRevisions.id,
+      loggedAt: mealTransactions.loggedAt,
+      foodName: mealRevisionItems.foodName,
+      position: mealRevisionItems.position,
+      calories: mealRevisionItems.calories,
+      protein: mealRevisionItems.protein,
+      carbs: mealRevisionItems.carbs,
+      fat: mealRevisionItems.fat,
+    })
+    .from(mealTransactions)
+    .innerJoin(mealRevisions, eq(mealTransactions.currentRevisionId, mealRevisions.id))
+    .innerJoin(mealRevisionItems, eq(mealRevisionItems.revisionId, mealRevisions.id))
+    .where(and(
+      eq(mealTransactions.deviceId, deviceId),
+      eq(mealTransactions.id, mealId),
+      isNull(mealTransactions.deletedAt),
+    ))
+    .orderBy(asc(mealRevisionItems.position));
 }
 
 function parseDonePayload(rawSse: string): DonePayload {
@@ -367,9 +336,8 @@ function buildExecutionErrorOutcome(error: unknown): BehaviorCaseOutcome {
   };
 }
 
-export async function runCase03ReceiptConsistency(): Promise<BehaviorCaseOutcome> {
+export async function runCase03ReceiptConsistency(createApp: ScenarioAppFactory): Promise<BehaviorCaseOutcome> {
   process.env.TZ = "Asia/Taipei";
-  const tmpRoot = await mkdtemp(join(tmpdir(), "nutrition-case-03-"));
   const provider = new StreamingLLMProvider();
   const recorder = createLlmTraceRecorder();
 
@@ -406,25 +374,11 @@ export async function runCase03ReceiptConsistency(): Promise<BehaviorCaseOutcome
   });
 
   try {
-    const dbPath = await createMigratedDbPath(tmpRoot);
-    const app = await buildApp({
-      dbPath,
+    const fixture = await createApp({
       llmProvider: provider,
       llmTraceRecorderFactory: () => recorder,
     });
-    try {
-      const deviceRes = await app.inject({
-        method: "POST",
-        url: "/api/device",
-        payload: { goal: "fat_loss" },
-      });
-      if (deviceRes.statusCode !== 200 && deviceRes.statusCode !== 201) {
-        throw new Error(`CASE-03 device bootstrap failed with ${deviceRes.statusCode}`);
-      }
-
-      const deviceId = (deviceRes.json() as { deviceId: string }).deviceId;
-      const cookieHeader = toCookieHeader(deviceRes.headers["set-cookie"]);
-      const address = await app.listen({ port: 0, host: "127.0.0.1" });
+    const { address, cookieHeader, deviceId } = fixture;
 
       const form = new FormData();
       form.append("message", "我吃了一份雞胸沙拉");
@@ -482,7 +436,7 @@ export async function runCase03ReceiptConsistency(): Promise<BehaviorCaseOutcome
       );
 
       const persistedRevisionFacts = normalizePersistedRevisionFacts(
-        await readPersistedRevisionRows(dbPath, deviceId, doneLoggedMealFacts.mealId),
+        await readPersistedRevisionRows(fixture.services.db, deviceId, doneLoggedMealFacts.mealId),
         traceFinalReplySource,
         traceFinalReplyShape,
       );
@@ -548,12 +502,7 @@ export async function runCase03ReceiptConsistency(): Promise<BehaviorCaseOutcome
           },
         },
       };
-    } finally {
-      await app.close();
-    }
   } catch (error) {
     return buildExecutionErrorOutcome(error);
-  } finally {
-    await rm(tmpRoot, { recursive: true, force: true });
   }
 }

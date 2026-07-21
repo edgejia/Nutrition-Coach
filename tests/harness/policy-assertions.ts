@@ -28,6 +28,12 @@ export interface PolicyDbInvariantExpectation {
   pendingPreserved?: boolean;
   dailySummaryPublishCount?: number;
   goalsPublishCount?: number;
+  proposalCardCount?: number;
+  actionEventCount?: number;
+  mutationOutcomeCount?: number;
+  proposalCardPresent?: boolean;
+  proposalCardKindMatches?: boolean;
+  proposalCardProposalIdMatches?: boolean;
 }
 
 export interface VisibleOutcomeExpectation {
@@ -108,6 +114,12 @@ const POLICY_DB_INVARIANT_ALLOWED_KEYS = new Set([
   "pendingPreserved",
   "dailySummaryPublishCount",
   "goalsPublishCount",
+  "proposalCardCount",
+  "actionEventCount",
+  "mutationOutcomeCount",
+  "proposalCardPresent",
+  "proposalCardKindMatches",
+  "proposalCardProposalIdMatches",
 ]);
 
 const VISIBLE_OUTCOME_ALLOWED_KEYS = new Set([
@@ -238,6 +250,11 @@ function assertBooleanMap(
     return;
   }
   assert.notEqual(actual, undefined, `visible outcome ${label} missing`);
+  assert.deepEqual(
+    Object.keys(actual ?? {}).sort(),
+    Object.keys(expected).sort(),
+    `visible outcome ${label} fields mismatch`,
+  );
   for (const [field, expectedValue] of Object.entries(expected)) {
     assert.equal(
       actual?.[field],

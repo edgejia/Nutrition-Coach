@@ -8,7 +8,7 @@ Nutrition Coach is an AI meal logging app. Users can log meals with text or phot
 
 - User problem: make meal logging with text or photos a low-friction entry point, then turn each entry into structured records that remain inspectable.
 - Engineering thesis: use trustworthy LLM application engineering for the hard boundaries—typed contracts, confirm-first proposals, backend authority, committed receipts, and deterministic evidence.
-- Verification path: the [30-minute reviewer tour](docs/tour.md) is the canonical Traditional-Chinese tour; this English README is its synchronized auxiliary entry, not a promise of a full English companion.
+- Verification path: the [30-minute reviewer tour](docs/reviewer-tour.md) is the canonical Traditional-Chinese tour; this English README is its synchronized auxiliary entry, not a promise of a full English companion.
 
 ## Project Highlights
 
@@ -70,7 +70,7 @@ Main boundaries:
 - `server/llm/*`: owns the provider interface, OpenAI implementation, and mock providers.
 - `client/src/api.ts`, `client/src/sse.ts`, and `client/src/store.ts`: own client transport and state boundaries.
 
-More detail: [docs/architecture.md](docs/architecture.md)
+More detail: [docs/system-architecture.md](docs/system-architecture.md)
 
 ## Local Development
 
@@ -149,6 +149,8 @@ yarn verify:harness -- provider-auth-failure-localization
 
 `yarn release:check` verifies the `TZ=Asia/Taipei` runtime contract, TypeScript, the Node test suite, capability / behavior matrix generated-doc drift, and the frontend build. Tests use mocked or harness LLM providers; CI does not call the live OpenAI API.
 
+For v3.5, source/release evidence is bound to the committed source SHA; `workflow:state-check`, active planning artifact provenance/seals, and `yarn release:check` do not imply production/runtime, Cloudflare Tunnel, public-smoke, or subjective visual readiness.
+
 `yarn native:check` is specialized native dependency evidence for Sharp upgrades, `better-sqlite3` upgrades, and v3.1 source-release review; it is not a replacement for `yarn release:check` and does not authorize production runtime refresh, Cloudflare Tunnel changes, public smoke, tag movement, or `main` promotion.
 
 ## Environment Variables
@@ -181,6 +183,8 @@ Production mode serves the API and built frontend files from the same Fastify se
 
 The production order is: reach PR-ready state on a non-`main` branch → PR policy and `Release Check` → maintainer merge decision into `main` → post-merge local archive from updated `main` → separately approved runtime refresh. PRs, CI, and closeout never authorize production operations automatically; a paused GSD workflow cannot be bypassed by skipping or fabricating the archive.
 
+The original v3.4.1 five-phase runtime/demo plan is formally terminated; its one-page [postmortem](docs/deploy/archive/v3.4.1-postmortem.md) remains historical evidence, and Phases 114–118 must not be resumed or continued. The deployment authority now keeps only three gates: source release, runtime safety and refresh, and public validation. B01/R05/R06 and named-Tunnel procedures under those gates still require their own explicit approvals.
+
 First run source preflight at the intentionally selected merged-source SHA in a clean, non-serving verification checkout. `release:check` runs the frontend build and rewrites `dist/client`, so it must never run in the active runtime checkout. The command blocks below define canonical ordering only; they are not one combined approval bundle:
 
 ```bash
@@ -190,7 +194,7 @@ cp .env.example .env
 yarn release:check
 ```
 
-Only after re-verifying the source SHA, PR merge, and post-merge archive may the active runtime checkout be selected separately. Before `yarn db:migrate` in that checkout, separately approve and complete the B01 quiesced backup and restore-readiness proof in [Production storage recovery](docs/deploy/production-recovery.md). R05 migration and R06 build/start retain separate approvals, and only R06 may rewrite the runtime checkout's `dist/client`.
+Only after re-verifying the source SHA, PR merge, and post-merge archive may the active runtime checkout be selected separately. Before `yarn db:migrate` in that checkout, separately approve and complete the B01 quiesced backup and restore-readiness proof in [Production storage recovery](docs/deploy/storage-recovery.md). R05 migration and R06 build/start retain separate approvals, and only R06 may rewrite the runtime checkout's `dist/client`.
 
 ```bash
 yarn db:migrate
@@ -198,7 +202,7 @@ yarn build
 yarn start
 ```
 
-Cloudflare Tunnel procedure: [docs/deploy/cloudflare-tunnel.md](docs/deploy/cloudflare-tunnel.md)
+Cloudflare Tunnel procedure: [docs/deploy/production-runtime.md](docs/deploy/production-runtime.md)
 
 ## Next Steps
 
@@ -208,7 +212,7 @@ Cloudflare Tunnel procedure: [docs/deploy/cloudflare-tunnel.md](docs/deploy/clou
 
 ## Related Docs
 
-- [Architecture](docs/architecture.md)
-- [Production storage recovery](docs/deploy/production-recovery.md)
-- [Cloudflare Tunnel procedure](docs/deploy/cloudflare-tunnel.md)
+- [Architecture](docs/system-architecture.md)
+- [Production storage recovery](docs/deploy/storage-recovery.md)
+- [Cloudflare Tunnel procedure](docs/deploy/production-runtime.md)
 - [ADR](docs/adr/)

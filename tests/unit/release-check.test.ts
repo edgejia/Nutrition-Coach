@@ -86,11 +86,13 @@ describe("release:check timezone contract", () => {
     assert.match(script, /signed receipts require both/);
     assert.match(script, /MAX_RELEASE_DURATION_MS = 18 \* 60 \* 1000/);
     assert.match(script, /spawn\(YARN_BIN, args/);
-    assert.match(script, /env: \{ \.\.\.process\.env, \.\.\.envOverrides \}/);
+    assert.match(script, /function releaseChildEnvironment\(envOverrides = \{\}\)/);
+    assert.match(script, /sanitizedGitEnvironment\(inherited\)/);
+    assert.doesNotMatch(script, /env: \{ \.\.\.process\.env, \.\.\.envOverrides \}/);
     assert.match(script, /signalChildGroup\(child, "SIGTERM"\)/);
     assert.match(script, /signalChildGroup\(child, "SIGKILL"\)/);
     assert.match(script, /result\.error \|\| result\.status !== 0/);
-    assert.match(script, /--no-replace-objects/);
+    assert.match(script, /runAuthoritativeGit/);
     assert.match(script, /cwd: projectRoot/);
   });
 

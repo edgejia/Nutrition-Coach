@@ -6,10 +6,13 @@ const {
   NUTRITION_SAFETY_CALORIE_FLOOR,
   UNSAFE_CALORIE_FLOOR_REASON,
   analyzeUnsafeNutritionGuidance,
+  canonicalizeNutritionSafetyText,
   checkNutritionSafetyTargets,
+  decideNutritionSafetyBoundary,
   hasSafeUnsafeNutritionBoundaryReply,
   hasUnsafeNutritionGuidance,
   isUnsafeCalorieFloorReason,
+  resolveBufferedNutritionReply,
 } = policy;
 
 import { describe, it } from "node:test";
@@ -124,5 +127,31 @@ describe("unsafe-reply scan delta, per-macro, and digit-boundary contexts (UAT-2
 
   it("still flags sub-floor macro totals marked as a combined sum", () => {
     assert.equal(hasUnsafeNutritionGuidance("目標碳水 100g，共約 900 kcal。"), true);
+  });
+});
+
+describe("canonical buffered nutrition boundary", () => {
+  it("normalizes fullwidth and Arabic-Indic numbers before the unsafe decision", () => {
+    assert.equal(canonicalizeNutritionSafetyText("每天只吃 １，０００ kcal"), "每天只吃 1,000 kcal");
+    assert.equal(hasUnsafeNutritionGuidance("每天只吃 ١٠٠٠ kcal"), true);
+    assert.equal(hasUnsafeNutritionGuidance("每日目標 １２００ kcal"), false);
+    assert.equal(decideNutritionSafetyBoundary("每天只吃 ١٠٠٠ kcal").safe, false);
+  });
+
+  it("preserves legitimate refusal and factual logged-intake totals", () => {
+    assert.equal(hasUnsafeNutritionGuidance("我不建議每天只吃 800 kcal。"), false);
+    assert.equal(
+      hasUnsafeNutritionGuidance("今天已記錄早餐 100 kcal、午餐 200 kcal、晚餐 200 kcal。"),
+      false,
+    );
+  });
+
+  it("replaces a late unsafe frame before the buffered reply is released", () => {
+    const buffered = resolveBufferedNutritionReply({
+      userMessage: "你好",
+      reply: ["可以先這樣做。", "每天只吃 800 kcal。"].join(""),
+      fallbackText: "安全替代回覆",
+    });
+    assert.deepEqual(buffered, { reply: "安全替代回覆", usedFallback: true });
   });
 });

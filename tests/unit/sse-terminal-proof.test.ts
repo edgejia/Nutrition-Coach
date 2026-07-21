@@ -38,6 +38,8 @@ describe("SSE terminal proof", () => {
     assert.equal(proof.evidence.closed, true);
     assert.equal(proof.evidence.firstDoneObserved, true);
     assert.equal(proof.evidence.firstDoneIndex, 1);
+    assert.equal(proof.evidence.doneCount, 1);
+    assert.equal(proof.evidence.exactlyOneDone, true);
     assert.equal(proof.evidence.noPostDoneChunkOrStatus, true);
     assert.equal(typeof proof.evidence.rawLength, "number");
     assert.ok(proof.evidence.rawLength > 0);
@@ -61,6 +63,7 @@ describe("SSE terminal proof", () => {
     assert.equal(proof.evidence.closed, true);
     assert.equal(proof.evidence.firstDoneObserved, true);
     assert.equal(proof.evidence.firstDoneIndex, 1);
+    assert.equal(proof.evidence.doneCount, 1);
     assert.equal(proof.evidence.noPostDoneChunkOrStatus, true);
     assert.equal(proof.evidence.nonEmptyChunkBeforeDone, true);
     assert.deepEqual(proof.evidence.postDoneEventNames, []);
@@ -103,6 +106,36 @@ describe("SSE terminal proof", () => {
     assert.equal(proof.evidence.noPostDoneChunkOrStatus, false);
   });
 
+  test("fails duplicate done terminals", async () => {
+    const collection = await readStreamThroughClose(
+      streamFromFrames([
+        'event: chunk\ndata: {"token":"hello"}\n\n',
+        'event: done\ndata: {}\n\n',
+        'event: done\ndata: {}\n\n',
+      ]).getReader(),
+      { maxReads: 10, readTimeoutMs: 1000 },
+    );
+
+    const proof = assertSSETerminalProof(collection);
+
+    assert.equal(proof.ok, false);
+    assert.equal(proof.error, "SSE stream must include exactly one done");
+    assert.equal(proof.evidence.doneCount, 2);
+  });
+
+  test("fails a closed stream with no done terminal", async () => {
+    const collection = await readStreamThroughClose(
+      streamFromFrames(['event: chunk\ndata: {"token":"hello"}\n\n']).getReader(),
+      { maxReads: 10, readTimeoutMs: 1000 },
+    );
+
+    const proof = assertSSETerminalProof(collection);
+
+    assert.equal(proof.ok, false);
+    assert.equal(proof.error, "SSE stream did not include done");
+    assert.equal(proof.evidence.doneCount, 0);
+  });
+
   test("summarizes structured terminal metadata without raw event payloads", async () => {
     const collection = await readStreamThroughClose(
       streamFromFrames([
@@ -114,6 +147,8 @@ describe("SSE terminal proof", () => {
 
     assert.deepEqual(Object.keys(summarizeSSETerminalProof(collection)).sort(), [
       "closed",
+      "doneCount",
+      "exactlyOneDone",
       "firstDoneIndex",
       "firstDoneObserved",
       "noPostDoneChunkOrStatus",

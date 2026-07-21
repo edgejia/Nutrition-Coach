@@ -2,9 +2,8 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { config } from "../../../server/config.js";
-import { createScenarioApp } from "../app-fixture.js";
-import { StreamingLLMProvider } from "../streaming-llm.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
+import { buildPositiveScenarioResult } from "../positive-metadata.js";
 import type { VerificationScenario, ScenarioContext, ScenarioResult, ScenarioStepResult } from "../scenario-types.js";
 
 interface DailyTargets {
@@ -73,7 +72,7 @@ function failResult(
   failedStepName: string,
   artifacts: Record<string, unknown>,
 ): ScenarioResult {
-  return { ok: false, failedStep: failedStepName, steps, artifacts, consoleSummary: `FAIL ${scenarioName} ${failedStepName}` };
+  return buildPositiveScenarioResult(scenarioName, false, steps, failedStepName);
 }
 
 const STEP_NAMES = [
@@ -329,7 +328,7 @@ function responseHeadersFromInject(
 }
 
 function createBrowserSession(
-  app: Awaited<ReturnType<typeof createScenarioApp>>["app"],
+  app: ScenarioContext["app"],
   initialCookieHeader?: string,
 ) {
   const jar = parseCookieHeader(initialCookieHeader);
@@ -392,7 +391,7 @@ async function loadFreshStore(tag: string) {
 }
 
 async function runStoreFlow(params: {
-  app: Awaited<ReturnType<typeof createScenarioApp>>["app"];
+  app: ScenarioContext["app"];
   storageSeed: Record<string, string | undefined>;
   initialCookieHeader?: string;
   tag: string;
@@ -425,16 +424,19 @@ async function runStoreFlow(params: {
 const scenario: VerificationScenario = {
   name: "guest-session-hardening",
 
-  async run(_ctx: ScenarioContext): Promise<ScenarioResult> {
-    const steps: ScenarioStepResult[] = [];
-    const artifacts: Record<string, unknown> = {};
-    const llmProvider = new StreamingLLMProvider();
+  async prepareApp() {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "nutrition-guest-session-hardening-"));
     const assetsDir = path.join(tempRoot, "assets");
     const stagedAssetPath = path.join(tempRoot, "tamper-proof.png");
     await writeFile(stagedAssetPath, Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]));
+    return { appOptions: { assetsDir }, state: { tempRoot, stagedAssetPath } };
+  },
 
-    const fixture = await createScenarioApp({ llmProvider, assetsDir });
+  async run(ctx: ScenarioContext): Promise<ScenarioResult> {
+    const steps: ScenarioStepResult[] = [];
+    const artifacts: Record<string, unknown> = {};
+    const { tempRoot, stagedAssetPath } = ctx.prepared as { tempRoot: string; stagedAssetPath: string };
+    const fixture = ctx;
 
     try {
       let migratedSession: GuestSessionBootstrapResult | undefined;
@@ -1204,14 +1206,11 @@ const scenario: VerificationScenario = {
         return failResult("guest-session-hardening", steps, missingStepNames[0], artifacts);
       }
 
-      return {
-        ok: true,
-        steps,
-        artifacts,
-        consoleSummary: `PASS guest-session-hardening ${steps.filter((step) => step.ok).length}/${STEP_NAMES.length}`,
-      };
+      return buildPositiveScenarioResult("guest-session-hardening", true, steps, undefined, {
+        counts: { expectedStepCount: STEP_NAMES.length },
+        assertions: { allRevocationStepsPassed: true, metadataOnly: true },
+      });
     } finally {
-      await fixture.close();
       await rm(tempRoot, { recursive: true, force: true });
     }
   },

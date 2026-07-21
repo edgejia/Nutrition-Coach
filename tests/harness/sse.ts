@@ -43,6 +43,7 @@ export interface CollectedSSEStream {
   events: Array<{ event: string; data: string }>;
   closed: boolean;
   firstDoneIndex: number;
+  doneCount: number;
   eventsAfterFirstDone: Array<{ event: string; data: string }>;
   nonEmptyChunkBeforeDone: boolean;
   reads: number;
@@ -52,6 +53,8 @@ export interface SSETerminalProofEvidence {
   closed: boolean;
   firstDoneObserved: boolean;
   firstDoneIndex: number;
+  doneCount: number;
+  exactlyOneDone: boolean;
   noPostDoneChunkOrStatus: boolean;
   postDoneEventNames: string[];
   terminalViolationEvents: string[];
@@ -96,6 +99,8 @@ export function summarizeSSETerminalProof(collection: CollectedSSEStream): SSETe
     closed: collection.closed,
     firstDoneObserved: collection.firstDoneIndex !== -1,
     firstDoneIndex: collection.firstDoneIndex,
+    doneCount: collection.doneCount,
+    exactlyOneDone: collection.doneCount === 1,
     noPostDoneChunkOrStatus: terminalViolationEvents.length === 0,
     postDoneEventNames,
     terminalViolationEvents,
@@ -112,6 +117,12 @@ export function assertSSETerminalProof(collection: CollectedSSEStream): SSETermi
   }
   if (!evidence.firstDoneObserved) {
     return { ok: false, error: "SSE stream did not include done", evidence };
+  }
+  if (!evidence.exactlyOneDone) {
+    return { ok: false, error: "SSE stream must include exactly one done", evidence };
+  }
+  if (!evidence.nonEmptyChunkBeforeDone) {
+    return { ok: false, error: "SSE stream must include non-empty content before done", evidence };
   }
   if (!evidence.noPostDoneChunkOrStatus) {
     return { ok: false, error: "SSE emitted chunk/status after first done", evidence };
@@ -144,12 +155,14 @@ async function readWithTimeout(
 function summarizeCollectedSSE(raw: string, closed: boolean, reads: number): CollectedSSEStream {
   const events = parseSSEEvents(raw);
   const firstDoneIndex = events.findIndex((event) => event.event === "done");
+  const doneCount = events.filter((event) => event.event === "done").length;
   const eventsBeforeDone = firstDoneIndex === -1 ? events : events.slice(0, firstDoneIndex);
   return {
     raw,
     events,
     closed,
     firstDoneIndex,
+    doneCount,
     eventsAfterFirstDone: firstDoneIndex === -1 ? [] : events.slice(firstDoneIndex + 1),
     nonEmptyChunkBeforeDone: eventsBeforeDone.some((event) => {
       if (event.event !== "chunk") {

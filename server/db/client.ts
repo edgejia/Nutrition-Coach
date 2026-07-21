@@ -2,12 +2,15 @@ import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import * as schema from "./schema.js";
 import { applyMigrations } from "./migrate.js";
+import { validateRuntimeSchema } from "./schema-manifest.js";
 
 export type AppDatabase = ReturnType<typeof createDb>;
 
 const requiredTables = [
   "devices",
   "chat_messages",
+  "chat_meal_receipts",
+  "chat_mutation_outcomes",
   "assets",
   "meal_transactions",
   "meal_revisions",
@@ -44,6 +47,7 @@ export function createDb(dbPath: string, opts?: { allowInMemoryBootstrap?: boole
       applyMigrations(sqlite);
     } else {
       validateRequiredSchema(sqlite);
+      validateRuntimeSchema(sqlite);
     }
 
     return drizzle(sqlite, { schema });

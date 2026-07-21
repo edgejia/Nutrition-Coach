@@ -9,7 +9,7 @@ import {
   type BehaviorCaseOutcome,
   type NumberSource,
 } from "../behavior-assertions.js";
-import { createScenarioApp } from "../app-fixture.js";
+import type { ScenarioAppFactory } from "../app-fixture.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { createLlmTraceRecorder } from "../../../server/orchestrator/llm-trace.js";
@@ -153,7 +153,7 @@ function buildOutcome(
   };
 }
 
-export async function runCase02UncertainQuantity(): Promise<BehaviorCaseOutcome> {
+export async function runCase02UncertainQuantity(createApp: ScenarioAppFactory): Promise<BehaviorCaseOutcome> {
   const llm = new StreamingLLMProvider();
   const recorder = createLlmTraceRecorder();
   const foodName = "雞肉沙拉";
@@ -188,7 +188,7 @@ export async function runCase02UncertainQuantity(): Promise<BehaviorCaseOutcome>
   const { normalizeLogFoodArgs } = await import("../../../server/orchestrator/tools.js");
   const normalizedToolArgs = normalizeLogFoodArgs(toolArgs, userText);
 
-  const fixture = await createScenarioApp({
+  const fixture = await createApp({
     llmProvider: llm,
     llmTraceRecorderFactory: () => recorder,
   });

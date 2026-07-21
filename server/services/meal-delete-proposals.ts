@@ -1,6 +1,6 @@
 import type { AppDatabase } from "../db/client.js";
 import type { MealPeriod } from "../lib/meal-period.js";
-import { createTurnStateService } from "./turn-state.js";
+import { createTurnStateService, type SyncTransactionClient } from "./turn-state.js";
 
 export const MEAL_DELETE_PROPOSAL_KIND = "meal_delete_proposal";
 export const MEAL_DELETE_PROPOSAL_TTL_MS = 30 * 60 * 1000;
@@ -95,6 +95,20 @@ export function createMealDeleteProposalService(db: AppDatabase) {
       return payload as MealDeleteProposalPayload | undefined;
     },
 
+    getLatestSync({
+      deviceId,
+      sessionId,
+    }: {
+      deviceId: string;
+      sessionId: string;
+    }, client?: SyncTransactionClient): MealDeleteProposalPayload | undefined {
+      return turnStateService.getStateSync<MealDeleteProposalPayload>({
+        deviceId,
+        sessionId,
+        kind: MEAL_DELETE_PROPOSAL_KIND,
+      }, client);
+    },
+
     async consumeLatest({
       deviceId,
       sessionId,
@@ -116,6 +130,26 @@ export function createMealDeleteProposalService(db: AppDatabase) {
       return payload as MealDeleteProposalPayload | undefined;
     },
 
+    consumeLatestSync({
+      deviceId,
+      sessionId,
+      proposalId,
+      expectedMealRevisionId,
+    }: {
+      deviceId: string;
+      sessionId: string;
+      proposalId: string;
+      expectedMealRevisionId: string;
+    }, client?: SyncTransactionClient): MealDeleteProposalPayload | undefined {
+      return turnStateService.consumeStateSync<MealDeleteProposalPayload>({
+        deviceId,
+        sessionId,
+        kind: MEAL_DELETE_PROPOSAL_KIND,
+        proposalId,
+        expectedMealRevisionId,
+      }, client);
+    },
+
     async clear({
       deviceId,
       sessionId,
@@ -128,6 +162,17 @@ export function createMealDeleteProposalService(db: AppDatabase) {
         sessionId,
         kind: MEAL_DELETE_PROPOSAL_KIND,
       });
+    },
+
+    clearSync({ deviceId, sessionId }: {
+      deviceId: string;
+      sessionId: string;
+    }, client?: SyncTransactionClient): void {
+      turnStateService.clearStateSync({
+        deviceId,
+        sessionId,
+        kind: MEAL_DELETE_PROPOSAL_KIND,
+      }, client);
     },
   };
 }

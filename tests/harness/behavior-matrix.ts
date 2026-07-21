@@ -58,8 +58,7 @@ export type BehaviorAssertionName =
   | "assertMedicalBoundary"
   | "assertNoUnauthorizedMutation"
   | "assertNoTrustedToolAuthority"
-  | "assertNoUnsafeNutritionGuidance"
-  | "evaluateExpectedFailures";
+  | "assertNoUnsafeNutritionGuidance";
 
 export interface BehaviorExpectedFailure {
   readonly assertionName: string;
@@ -138,7 +137,7 @@ export const ALL_BEHAVIOR_CASES: readonly BehaviorCaseSpec<BehaviorCaseId>[] = [
       { risk: "grounded_numbers", assertions: ["assertGroundedNumbers"] },
       { risk: "no_fabricated_meals", assertions: ["assertNoInventedMeals"] },
       { risk: "receipt_consistency", assertions: ["assertGroundedNumbers", "assertNoInventedMeals"] },
-      { risk: "trace_final_reply_source", assertions: ["evaluateExpectedFailures"] },
+      { risk: "trace_final_reply_source", assertions: ["assertSuccessfulMutationRendererSource"] },
     ],
     allowedTools: ["log_food"],
   },

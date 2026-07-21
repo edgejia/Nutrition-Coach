@@ -7,7 +7,7 @@ import {
   type BehaviorAssertionResult,
   type BehaviorCaseOutcome,
 } from "../behavior-assertions.js";
-import { createScenarioApp } from "../app-fixture.js";
+import type { ScenarioAppFactory } from "../app-fixture.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { createLlmTraceRecorder } from "../../../server/orchestrator/llm-trace.js";
@@ -108,12 +108,12 @@ function disclosureRefusalEvidence(answer: string): Record<string, unknown> {
   };
 }
 
-export async function runCase10PromptToolDisclosure(): Promise<BehaviorCaseOutcome> {
+export async function runCase10PromptToolDisclosure(createApp: ScenarioAppFactory): Promise<BehaviorCaseOutcome> {
   const provider = new StreamingLLMProvider();
   const recorder = createLlmTraceRecorder();
   provider.queueRoundResponse({ content: SAFE_REPLY });
 
-  const fixture = await createScenarioApp({
+  const fixture = await createApp({
     llmProvider: provider,
     llmTraceRecorderFactory: () => recorder,
   });

@@ -14,7 +14,6 @@ import {
   assertPolicyFact,
   assertVisibleOutcomeSummary,
 } from "../policy-assertions.js";
-import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import type {
   VerificationScenario,
@@ -61,12 +60,69 @@ const STEP_NAMES = [
   "confirm-first_double_confirmation_reject",
 ] as const;
 
-function pass(name: string, actual?: unknown): ScenarioStepResult {
-  return { name, ok: true, actual };
+function pass(name: string, _actual?: unknown): ScenarioStepResult {
+  return { name, ok: true };
 }
 
-function fail(name: string, error: string, actual?: unknown): ScenarioStepResult {
-  return { name, ok: false, error, actual };
+function fail(name: string, _error: string, _actual?: unknown): ScenarioStepResult {
+  return { name, ok: false, errorCategory: "assertion_failed" };
+}
+
+function metadataStepName(value: unknown): string {
+  return String(value ?? "unknown");
+}
+
+function buildPolicyMetadata(
+  status: "pass" | "fail",
+  artifacts: ReturnType<typeof evidenceArtifacts>,
+  steps: ScenarioStepResult[],
+): NonNullable<ScenarioResult["metadata"]> {
+  const evidence = artifacts.evidence as Array<Record<string, unknown>>;
+  const policyFacts = evidence.flatMap((entry) => {
+    const fact = entry.policyFact;
+    if (fact === undefined || fact === null || typeof fact !== "object") return [];
+    const value = fact as Record<string, unknown>;
+    return [{
+      step: metadataStepName(entry.step),
+      tool: String(value.tool),
+      policyClass: value.policyClass as "direct-execute" | "execute-and-report" | "clarify-first" | "confirm-first",
+      decision: value.decision as "allowed" | "blocked",
+      ruleId: String(value.ruleId),
+    }];
+  });
+  const policyDbInvariants = evidence.flatMap((entry) => {
+    const invariant = entry.dbInvariant;
+    if (invariant === undefined || invariant === null || typeof invariant !== "object") return [];
+    return [{ step: metadataStepName(entry.step), ...(invariant as Record<string, unknown>) }];
+  });
+  const visibleOutcomes = evidence.flatMap((entry) => {
+    const outcome = entry.visibleOutcome;
+    if (outcome === undefined || outcome === null || typeof outcome !== "object") return [];
+    return [{ step: metadataStepName(entry.step), ...(outcome as Record<string, unknown>) }];
+  });
+  return {
+    scenarioId: SCENARIO_NAME,
+    scenarioName: SCENARIO_NAME,
+    status,
+    counts: {
+      stepCount: steps.length,
+      evidenceCount: evidence.length,
+      policyFactCount: policyFacts.length,
+      invariantCount: policyDbInvariants.length,
+      visibleOutcomeCount: visibleOutcomes.length,
+    },
+    assertions: {
+      metadataOnly: true,
+      rawArgumentsExcluded: true,
+      rawSseExcluded: true,
+      numericPayloadsExcluded: true,
+      databaseSnapshotsExcluded: true,
+    },
+    policyFacts,
+    policyDbInvariants,
+    visibleOutcomes,
+    ...(status === "fail" ? { errorCategory: "assertion_failed" as const } : {}),
+  };
 }
 
 function failResult(
@@ -78,7 +134,8 @@ function failResult(
     ok: false,
     failedStep: failedStepName,
     steps,
-    artifacts,
+    artifacts: {},
+    metadata: buildPolicyMetadata("fail", artifacts as ReturnType<typeof evidenceArtifacts>, steps),
     consoleSummary: `FAIL ${SCENARIO_NAME} ${failedStepName}`,
   };
 }
@@ -102,6 +159,12 @@ function summarizePolicyDbInvariant(input: {
   pendingPreserved?: boolean;
   dailySummaryPublishCount?: number;
   goalsPublishCount?: number;
+  proposalCardCount?: number;
+  actionEventCount?: number;
+  mutationOutcomeCount?: number;
+  proposalCardPresent?: boolean;
+  proposalCardKindMatches?: boolean;
+  proposalCardProposalIdMatches?: boolean;
 }) {
   return { ...input };
 }
@@ -174,19 +237,30 @@ function sameTargets(
 const scenario: VerificationScenario = {
   name: SCENARIO_NAME,
 
-  async run(_ctx: ScenarioContext): Promise<ScenarioResult> {
-    const steps: ScenarioStepResult[] = [];
-    const artifacts = evidenceArtifacts();
+  prepareApp() {
     const provider = new StreamingLLMProvider();
     const traceRecorders: Array<ReturnType<typeof createLlmTraceRecorder>> = [];
-    const fixture = await createScenarioApp({
-      llmProvider: provider,
-      llmTraceRecorderFactory() {
-        const recorder = createLlmTraceRecorder();
-        traceRecorders.push(recorder);
-        return recorder;
+    return {
+      appOptions: {
+        llmProvider: provider,
+        llmTraceRecorderFactory() {
+          const recorder = createLlmTraceRecorder();
+          traceRecorders.push(recorder);
+          return recorder;
+        },
       },
-    });
+      state: { provider, traceRecorders },
+    };
+  },
+
+  async run(ctx: ScenarioContext): Promise<ScenarioResult> {
+    const steps: ScenarioStepResult[] = [];
+    const artifacts = evidenceArtifacts();
+    const { provider, traceRecorders } = ctx.prepared as {
+      provider: StreamingLLMProvider;
+      traceRecorders: Array<ReturnType<typeof createLlmTraceRecorder>>;
+    };
+    const fixture = ctx;
 
     const publishCounts = {
       dailySummary: 0,
@@ -432,6 +506,21 @@ const scenario: VerificationScenario = {
           sourceOperator: "half",
         },
       });
+      const approvalAssistant = await fixture.services.chatService.saveMessage(
+        fixture.deviceId,
+        "assistant",
+        "請確認這組餐點修改提案。",
+      );
+      await fixture.services.proposalCardService.saveAssistantProposalCard({
+        deviceId: fixture.deviceId,
+        assistantMessageId: approvalAssistant.id,
+        proposalId: approvalProposal.proposalId,
+        proposalKind: "meal_numeric",
+        proposalLane: "meal_mutation",
+        title: "請確認這組餐點修改提案。",
+        details: { rows: [{ label: "蛋白質", before: "36 g", after: "18 g" }] },
+        actions: { approveLabel: "套用", editLabel: "調整", rejectLabel: "取消" },
+      });
       const approvalMealsBefore = await fixture.services.foodLoggingService.getMealsByDate(fixture.deviceId, new Date());
       const approved = await postChat(fixture.address, fixture.cookieHeader, "套用餐點修改");
       const approvalTrace = traceRecorders.at(-1)?.build({ scenario: approveStep, status: "pass" });
@@ -439,6 +528,11 @@ const scenario: VerificationScenario = {
       const approvalPolicyFact = findPolicyFact(approvalTrace, "propose_meal_numeric_correction");
       const approvalMealsAfter = await fixture.services.foodLoggingService.getMealsByDate(fixture.deviceId, new Date());
       const approvedMeal = approvalMealsAfter.find((meal) => meal.id === approvalMeal.id);
+      const approvalCard = await fixture.services.proposalCardService.getLatestCardForProposal({
+        deviceId: fixture.deviceId,
+        proposalId: approvalProposal.proposalId,
+        proposalKind: "meal_numeric",
+      });
       const approvalDbInvariant = summarizePolicyDbInvariant({
         mealCountBefore: approvalMealsBefore.length,
         mealCountAfter: approvalMealsAfter.length,
@@ -446,6 +540,9 @@ const scenario: VerificationScenario = {
           deviceId: fixture.deviceId,
           sessionId: DEFAULT_SESSION_ID,
         }) === undefined,
+        proposalCardPresent: approvalCard !== undefined,
+        proposalCardKindMatches: approvalCard?.proposalKind === "meal_numeric",
+        proposalCardProposalIdMatches: approvalCard?.proposalId === approvalProposal.proposalId,
         dailySummaryPublishCount: publishCounts.dailySummary,
         goalsPublishCount: publishCounts.goals,
       });
@@ -464,13 +561,16 @@ const scenario: VerificationScenario = {
         tool: "propose_meal_numeric_correction",
         policyClass: "confirm-first",
         decision: "allowed",
-        ruleId: "meal_numeric_proposal_approval_consume",
+        ruleId: "typed_meal_numeric_approve",
         proposalId: approvalProposal.proposalId,
       });
       assertPolicyDbInvariant(approvalDbInvariant, {
         mealCountBefore: approvalMealsBefore.length,
         mealCountAfter: approvalMealsBefore.length,
         pendingConsumed: true,
+        proposalCardPresent: true,
+        proposalCardKindMatches: true,
+        proposalCardProposalIdMatches: true,
         dailySummaryPublishCount: 1,
         goalsPublishCount: 0,
       });
@@ -630,6 +730,21 @@ const scenario: VerificationScenario = {
           sourceOperator: "half",
         },
       });
+      const staleAssistant = await fixture.services.chatService.saveMessage(
+        fixture.deviceId,
+        "assistant",
+        "請確認這組餐點修改提案。",
+      );
+      await fixture.services.proposalCardService.saveAssistantProposalCard({
+        deviceId: fixture.deviceId,
+        assistantMessageId: staleAssistant.id,
+        proposalId: staleProposal.proposalId,
+        proposalKind: "meal_numeric",
+        proposalLane: "meal_mutation",
+        title: "請確認這組餐點修改提案。",
+        details: { rows: [{ label: "蛋白質", before: "26 g", after: "13 g" }] },
+        actions: { approveLabel: "套用", editLabel: "調整", rejectLabel: "取消" },
+      });
       const staleExternalUpdate = await fixture.services.foodLoggingService.updateMeal(fixture.deviceId, staleMeal.id, {
         expectedMealRevisionId: staleMeal.mealRevisionId,
         items: [{ foodName: "新版豆腐飯", calories: 560, protein: 27, carbs: 78, fat: 16 }],
@@ -641,6 +756,11 @@ const scenario: VerificationScenario = {
       const stalePolicyFact = findPolicyFact(staleTrace, "propose_meal_numeric_correction");
       const staleMealsAfter = await fixture.services.foodLoggingService.getMealsByDate(fixture.deviceId, new Date());
       const staleCurrent = staleMealsAfter.find((meal) => meal.id === staleMeal.id);
+      const staleCard = await fixture.services.proposalCardService.getLatestCardForProposal({
+        deviceId: fixture.deviceId,
+        proposalId: staleProposal.proposalId,
+        proposalKind: "meal_numeric",
+      });
       const staleDbInvariant = summarizePolicyDbInvariant({
         mealCountBefore: staleMealsBefore.length,
         mealCountAfter: staleMealsAfter.length,
@@ -649,6 +769,9 @@ const scenario: VerificationScenario = {
           sessionId: DEFAULT_SESSION_ID,
         }) === undefined,
         targetsChanged: false,
+        proposalCardPresent: staleCard !== undefined,
+        proposalCardKindMatches: staleCard?.proposalKind === "meal_numeric",
+        proposalCardProposalIdMatches: staleCard?.proposalId === staleProposal.proposalId,
         dailySummaryPublishCount: publishCounts.dailySummary,
         goalsPublishCount: publishCounts.goals,
       });
@@ -663,8 +786,8 @@ const scenario: VerificationScenario = {
       assertPolicyFact(stalePolicyFact, {
         tool: "propose_meal_numeric_correction",
         policyClass: "confirm-first",
-        decision: "allowed",
-        ruleId: "meal_numeric_proposal_approval_consume",
+        decision: "blocked",
+        ruleId: "typed_meal_numeric_approve",
         proposalId: staleProposal.proposalId,
       });
       assertPolicyDbInvariant(staleDbInvariant, {
@@ -672,6 +795,9 @@ const scenario: VerificationScenario = {
         mealCountAfter: staleMealsBefore.length,
         pendingConsumed: true,
         targetsChanged: false,
+        proposalCardPresent: true,
+        proposalCardKindMatches: true,
+        proposalCardProposalIdMatches: true,
         dailySummaryPublishCount: 0,
         goalsPublishCount: 0,
       });
@@ -708,6 +834,21 @@ const scenario: VerificationScenario = {
           sourceOperator: "half",
         },
       });
+      const doubleAssistant = await fixture.services.chatService.saveMessage(
+        fixture.deviceId,
+        "assistant",
+        "請確認這組餐點修改提案。",
+      );
+      await fixture.services.proposalCardService.saveAssistantProposalCard({
+        deviceId: fixture.deviceId,
+        assistantMessageId: doubleAssistant.id,
+        proposalId: doubleProposal.proposalId,
+        proposalKind: "meal_numeric",
+        proposalLane: "meal_mutation",
+        title: "請確認這組餐點修改提案。",
+        details: { rows: [{ label: "蛋白質", before: "40 g", after: "20 g" }] },
+        actions: { approveLabel: "套用", editLabel: "調整", rejectLabel: "取消" },
+      });
       const firstDouble = await postChat(fixture.address, fixture.cookieHeader, "套用餐點修改");
       assert.equal(firstDouble.body.didMutateMeal, true);
       resetPublishCounts();
@@ -717,6 +858,11 @@ const scenario: VerificationScenario = {
       const secondDouble = await postChat(fixture.address, fixture.cookieHeader, "套用餐點修改");
       const doubleMealsAfter = await fixture.services.foodLoggingService.getMealsByDate(fixture.deviceId, new Date());
       const doubleCurrent = doubleMealsAfter.find((meal) => meal.id === doubleMeal.id);
+      const doubleCard = await fixture.services.proposalCardService.getLatestCardForProposal({
+        deviceId: fixture.deviceId,
+        proposalId: doubleProposal.proposalId,
+        proposalKind: "meal_numeric",
+      });
       const doubleDbInvariant = summarizePolicyDbInvariant({
         mealCountBefore: doubleMealsBefore.length,
         mealCountAfter: doubleMealsAfter.length,
@@ -724,6 +870,9 @@ const scenario: VerificationScenario = {
           deviceId: fixture.deviceId,
           sessionId: DEFAULT_SESSION_ID,
         }) === undefined,
+        proposalCardPresent: doubleCard !== undefined,
+        proposalCardKindMatches: doubleCard?.proposalKind === "meal_numeric",
+        proposalCardProposalIdMatches: doubleCard?.proposalId === doubleProposal.proposalId,
         dailySummaryPublishCount: publishCounts.dailySummary,
         goalsPublishCount: publishCounts.goals,
       });
@@ -738,6 +887,9 @@ const scenario: VerificationScenario = {
         mealCountBefore: doubleMealsBefore.length,
         mealCountAfter: doubleMealsBefore.length,
         pendingConsumed: true,
+        proposalCardPresent: true,
+        proposalCardKindMatches: true,
+        proposalCardProposalIdMatches: true,
         dailySummaryPublishCount: 0,
         goalsPublishCount: 0,
       });
@@ -760,15 +912,14 @@ const scenario: VerificationScenario = {
       return {
         ok: true,
         steps,
-        artifacts,
+        artifacts: {},
+        metadata: buildPolicyMetadata("pass", artifacts, steps),
         consoleSummary: `PASS ${SCENARIO_NAME} ${steps.length}/${STEP_NAMES.length}`,
       };
     } catch (error) {
       const failedStep = STEP_NAMES.find((stepName) => !steps.some((step) => step.name === stepName)) ?? SCENARIO_NAME;
       steps.push(fail(failedStep, error instanceof Error ? error.message : String(error)));
       return failResult(steps, failedStep, artifacts);
-    } finally {
-      await fixture.close();
     }
   },
 };

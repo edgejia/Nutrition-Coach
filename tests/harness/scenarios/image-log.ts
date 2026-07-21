@@ -20,10 +20,10 @@ import path from "node:path";
 import { Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { rm, readdir, mkdir } from "node:fs/promises";
-import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import { validJpegBytes } from "../../fixtures/image-bytes.js";
+import { buildPositiveScenarioResult } from "../positive-metadata.js";
 import type { VerificationScenario, ScenarioContext, ScenarioResult, ScenarioStepResult } from "../scenario-types.js";
 
 // ---------------------------------------------------------------------------
@@ -198,19 +198,37 @@ function verifyLoggedMealReceiptShape(receipt: LoggedMealReceiptPayload | undefi
 const scenario: VerificationScenario = {
   name: "image-log",
 
-  async run(_ctx: ScenarioContext): Promise<ScenarioResult> {
+  async prepareApp() {
+    const { logLines, stream: logStream } = createLogCapture();
+    await mkdir(SCENARIO_UPLOADS_DIR, { recursive: true });
+    await mkdir(SCENARIO_ASSETS_DIR, { recursive: true });
+    const llm = new StreamingLLMProvider();
+    return {
+      appOptions: {
+        llmProvider: llm,
+        uploadsDir: SCENARIO_UPLOADS_DIR,
+        assetsDir: SCENARIO_ASSETS_DIR,
+        logger: { level: "info", stream: logStream },
+      },
+      state: { llm, logLines },
+    };
+  },
+
+  async run(ctx: ScenarioContext): Promise<ScenarioResult> {
     const steps: ScenarioStepResult[] = [];
     const artifacts: Record<string, unknown> = {};
     let failedStep: string | undefined;
     let uploadFilesBeforeCleanup: string[] = [];
-    const { logLines, stream: logStream } = createLogCapture();
+    const { llm, logLines } = ctx.prepared as {
+      llm: StreamingLLMProvider;
+      logLines: string[];
+    };
 
     // Boot our own app instance with the scenario-local uploads directory so
     // uploads never land in `server/uploads/`.
     await mkdir(SCENARIO_UPLOADS_DIR, { recursive: true });
     await mkdir(SCENARIO_ASSETS_DIR, { recursive: true });
 
-    const llm = new StreamingLLMProvider();
     // Round 1: tool call — log_food for 豬肉燒烤飯盒
     llm.queueRoundResponse({
       toolCalls: [
@@ -240,12 +258,7 @@ const scenario: VerificationScenario = {
       "豬肉燒烤飯盒，約 680 kcal。",
     ]);
 
-    const scenarioCtx = await createScenarioApp({
-      llmProvider: llm,
-      uploadsDir: SCENARIO_UPLOADS_DIR,
-      assetsDir: SCENARIO_ASSETS_DIR,
-      logger: { level: "info", stream: logStream },
-    });
+    const scenarioCtx = ctx;
 
     try {
       // ------------------------------------------------------------------
@@ -427,6 +440,10 @@ const scenario: VerificationScenario = {
         analysisIdx,
         loggingIdx,
         loggedMealReceiptVerified: true,
+        eventNames: sseEvents.map((event) => event.event),
+        eventCount: sseEvents.length,
+        chunkCount: sseEvents.filter((event) => event.event === "chunk").length,
+        doneCount: sseEvents.filter((event) => event.event === "done").length,
       };
 
       // ------------------------------------------------------------------
@@ -601,7 +618,6 @@ const scenario: VerificationScenario = {
       }
       steps.push(stepOk("verify_route_upload_cleanup", artifacts.route_upload_cleanup));
     } finally {
-      await scenarioCtx.close();
       uploadFilesBeforeCleanup = await readUploadFiles();
       await rm(SCENARIO_UPLOADS_DIR, { recursive: true, force: true });
       await rm(SCENARIO_ASSETS_DIR, { recursive: true, force: true });
@@ -648,12 +664,97 @@ function buildResult(
   steps: ScenarioStepResult[],
   artifacts: Record<string, unknown>,
 ): ScenarioResult {
-  const passed = steps.filter((s) => s.ok).length;
-  const total = steps.length;
-  const consoleSummary = ok
-    ? `PASS image-log ${passed}/${total}`
-    : `FAIL image-log ${failedStep ?? "unknown"}`;
-  return { ok, failedStep, steps, artifacts, consoleSummary };
+  if (!ok) {
+    return buildPositiveScenarioResult("image-log", false, steps, failedStep);
+  }
+
+  const stream = (artifacts.stream ?? {}) as {
+    statusLabels?: unknown[];
+    analysisIdx?: number;
+    loggingIdx?: number;
+    replyText?: string;
+    donePayload?: { didLogMeal?: boolean; loggedMeal?: { itemCount?: number } };
+    loggedMealReceiptVerified?: boolean;
+    eventNames?: string[];
+    eventCount?: number;
+    chunkCount?: number;
+    doneCount?: number;
+  };
+  const history = (artifacts.history ?? {}) as {
+    d12_3_verified?: boolean;
+    messages?: unknown[];
+    persistedMessages?: unknown[];
+  };
+  const meals = (artifacts.meals ?? {}) as {
+    d12_2_verified?: boolean;
+    meals?: unknown[];
+    persistedMeals?: unknown[];
+  };
+  const assetFetch = (artifacts.asset_fetch ?? {}) as { status?: number; contentType?: string | null };
+  const routeCleanup = (artifacts.route_upload_cleanup ?? {}) as {
+    filesAfterRouteCleanup?: unknown[];
+    cleanupLogSeen?: boolean;
+  };
+  const cleanup = (artifacts.cleanup_uploads ?? {}) as {
+    filesBeforeCleanup?: number;
+    residualFiles?: number;
+    directoryRemoved?: boolean;
+  };
+  const statusLabels = stream.statusLabels?.filter((label): label is string => typeof label === "string") ?? [];
+  const persistedRows = [
+    ...(history.persistedMessages ?? []),
+    ...(meals.persistedMeals ?? []),
+  ].filter((row): row is Record<string, unknown> => row !== null && typeof row === "object");
+  const durableRefsVerified = persistedRows.every((row) => {
+    const imagePath = row.imagePath;
+    return typeof imagePath !== "string" || /^asset:/.test(imagePath);
+  });
+  const safeEventNames = [...new Set((stream.eventNames ?? []).map((eventName) => {
+    return ["status", "chunk", "done", "error", "close"].includes(eventName)
+      ? eventName
+      : "scenario";
+  }))];
+  const safeCount = (value: number | undefined): number => (
+    typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0
+  );
+
+  return buildPositiveScenarioResult("image-log", true, steps, undefined, {
+    counts: {
+      eventCount: safeCount(stream.eventCount),
+      chunkCount: safeCount(stream.chunkCount),
+      doneCount: safeCount(stream.doneCount),
+      statusLabelCount: statusLabels.length,
+      analysisStatusIndex: safeCount(stream.analysisIdx),
+      loggingStatusIndex: safeCount(stream.loggingIdx),
+      mealCount: meals.meals?.length ?? 0,
+      loggedMealItemCount: safeCount(stream.donePayload?.loggedMeal?.itemCount),
+      filesBeforeCleanup: safeCount(cleanup.filesBeforeCleanup),
+      residualFiles: safeCount(cleanup.residualFiles),
+    },
+    assertions: {
+      analysisStatusSeen: statusLabels.some((label) => label.includes("分析圖片中")),
+      loggingStatusSeen: statusLabels.some((label) => label.includes("記錄餐點中")),
+      analysisBeforeLogging: safeCount(stream.analysisIdx) < safeCount(stream.loggingIdx),
+      streamDidLogMeal: stream.donePayload?.didLogMeal === true,
+      replyTextNonEmpty: (stream.replyText ?? "").trim().length > 0,
+      loggedMealReceiptVerified: stream.loggedMealReceiptVerified === true,
+      durableAssetRefsVerified: durableRefsVerified,
+      assetFetchSucceeded: assetFetch.status === 200 && assetFetch.contentType === "image/jpeg",
+      historyPersistenceVerified: history.d12_3_verified === true,
+      mealPersistenceVerified: meals.d12_2_verified === true,
+      routeUploadCleanupVerified: routeCleanup.cleanupLogSeen === true && (routeCleanup.filesAfterRouteCleanup?.length ?? 0) === 0,
+      cleanupResidualFilesZero: safeCount(cleanup.residualFiles) === 0,
+      cleanupDirectoryRemoved: cleanup.directoryRemoved === true,
+    },
+    trace: {
+      eventNames: safeEventNames,
+      counts: {
+        statusEventCount: statusLabels.length,
+        chunkEventCount: safeCount(stream.chunkCount),
+        doneEventCount: safeCount(stream.doneCount),
+      },
+    },
+  });
 }
 
 export default scenario;

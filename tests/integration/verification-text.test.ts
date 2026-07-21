@@ -44,19 +44,20 @@ test("text-log scenario step sequence includes all required route assertions", a
   );
 });
 
-test("text-log scenario artifacts include dailySummary with mealCount 1", async () => {
+test("text-log scenario metadata preserves the daily summary proof", async () => {
   const result = await runScenarioByName("text-log");
   assert.equal(result.ok, true, `Scenario failed at step: ${result.failedStep ?? "unknown"}`);
 
-  const dailySummary = result.artifacts.dailySummary as {
-    mealCount: number;
-    totalCalories: number;
-  } | undefined;
-
-  assert.ok(dailySummary, "Expected artifacts.dailySummary to be present");
+  assert.deepEqual(result.artifacts, {}, "migrated result must not expose arbitrary artifacts");
+  assert.equal(result.llmTrace, undefined, "migrated result must not expose llmTrace");
+  assert.ok(result.metadata, "Expected positive scenario metadata");
   assert.equal(
-    dailySummary.mealCount,
-    1,
-    `Expected dailySummary.mealCount === 1, got ${dailySummary.mealCount}`,
+    result.metadata.assertions?.dailySummaryMealCountIsOne,
+    true,
+    "Expected metadata to preserve dailySummary.mealCount === 1",
   );
+  assert.equal(result.metadata.counts?.dailySummaryMealCount, 1);
+  assert.equal(result.metadata.assertions?.historyReceiptVerified, true);
+  assert.equal(result.metadata.assertions?.mealCaloriesVerified, true);
+  assert.equal(result.metadata.trace?.counts.llmToolCount, 1);
 });

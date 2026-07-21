@@ -12,7 +12,6 @@ import path from "node:path";
 import { Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { mkdir, readdir, rm } from "node:fs/promises";
-import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { assertSSETerminalProof, collectEventSequence, parseSSEEvents, readStreamThroughClose } from "../sse.js";
 import { validJpegBytes, validPngBytes } from "../../fixtures/image-bytes.js";
@@ -21,6 +20,7 @@ import { LLMProviderError } from "../../../server/llm/errors.js";
 import type { ProviderErrorMetadata } from "../../../server/llm/types.js";
 import { createLlmTraceRecorder, type LlmTraceArtifact, type LlmTraceRecorder } from "../../../server/orchestrator/llm-trace.js";
 import { FAILED_RECOGNITION_NO_SAVE_REPLY } from "../../../server/orchestrator/tools.js";
+import { buildPositiveScenarioResult } from "../positive-metadata.js";
 import type { createSummaryService, DailySummary } from "../../../server/services/summary.js";
 import type { VerificationScenario, ScenarioContext, ScenarioResult, ScenarioStepResult } from "../scenario-types.js";
 
@@ -112,6 +112,11 @@ function createLogCapture() {
   return { logLines, stream };
 }
 
+function toCookieHeader(rawHeader: string | string[] | undefined): string {
+  const values = Array.isArray(rawHeader) ? rawHeader : rawHeader ? [rawHeader] : [];
+  return values.map((value) => value.split(";", 1)[0]).join("; ");
+}
+
 function hasRouteUploadCleanupLog(logLines: string[]): boolean {
   return logLines.some((line) => {
     try {
@@ -153,18 +158,32 @@ function buildResult(
   failedStep: string | undefined,
   steps: ScenarioStepResult[],
   artifacts: Record<string, unknown>,
-  llmTrace?: LlmTraceArtifact,
+  metadata?: Parameters<typeof buildPositiveScenarioResult>[4],
 ): ScenarioResult {
-  const passed = steps.filter((s) => s.ok).length;
-  const total = steps.length;
-  const consoleSummary = ok
-    ? `PASS image-log-failure ${passed}/${total}`
-    : `FAIL image-log-failure ${failedStep ?? "unknown"}`;
-  const result: ScenarioResult = { ok, failedStep, steps, artifacts, consoleSummary };
-  if (llmTrace !== undefined) {
-    result.llmTrace = llmTrace as unknown as Record<string, unknown>;
+  if (!ok) {
+    return buildPositiveScenarioResult("image-log-failure", false, steps, failedStep);
   }
-  return result;
+  return buildPositiveScenarioResult("image-log-failure", true, steps, undefined, metadata);
+}
+
+function buildSafeTraceMetadata(trace: LlmTraceArtifact): NonNullable<import("../scenario-types.js").ScenarioMetadata["trace"]> {
+  const eventNames = [...new Set(trace.timeline.map((event) => {
+    if (event.type === "llm_error") return "error";
+    if (event.type === "route_completion") return "done";
+    if (event.type === "orchestrator_fallback" || event.type === "route_fallback") return "error";
+    return "scenario";
+  }))];
+  const safeCount = (value: number): number => Number.isSafeInteger(value) && value >= 0 ? value : 0;
+  return {
+    eventNames,
+    counts: {
+      timelineEventCount: trace.timeline.length,
+      roundCount: safeCount(trace.summary.roundCount),
+      toolCount: safeCount(trace.summary.toolCount),
+      fallbackCount: safeCount(trace.summary.fallbackCount),
+      providerErrorCount: safeCount(trace.summary.providerErrorCount),
+    },
+  };
 }
 
 async function fetchHistory(address: string, cookieHeader: string): Promise<Array<{ role: string; content: string }>> {
@@ -344,6 +363,8 @@ function verifyFallbackTraceContract(
 }
 
 async function runSubScenario(
+  baseContext: ScenarioContext,
+  logLines: string[],
   label: string,
   setupLLM: (llm: StreamingLLMProvider) => void,
   assertions: (params: {
@@ -360,24 +381,29 @@ async function runSubScenario(
     imageBytes?: ArrayBuffer;
     imageType?: string;
     imageFilename?: string;
-    llmTraceRecorderFactory?: () => LlmTraceRecorder | undefined;
   } = {},
 ): Promise<{ steps: ScenarioStepResult[]; artifacts: Record<string, unknown>; ok: boolean; failedStep?: string }> {
   const steps: ScenarioStepResult[] = [];
   const artifacts: Record<string, unknown> = {};
 
-  const llm = new StreamingLLMProvider();
+  const llm = baseContext.llmProvider as StreamingLLMProvider;
+  llm.reset();
   setupLLM(llm);
-  const { logLines, stream: logStream } = createLogCapture();
-
-  const uploadsDir = `${UPLOADS_DIR}-${label}`;
+  const uploadsDir = UPLOADS_DIR;
   await mkdir(uploadsDir, { recursive: true });
-  const scenarioCtx = await createScenarioApp({
-    llmProvider: llm,
-    uploadsDir,
-    logger: { level: "info", stream: logStream },
-    ...(options.llmTraceRecorderFactory !== undefined ? { llmTraceRecorderFactory: options.llmTraceRecorderFactory } : {}),
+  const deviceRes = await baseContext.app.inject({
+    method: "POST",
+    url: "/api/device",
+    payload: { goal: "fat_loss" },
   });
+  if (deviceRes.statusCode !== 200 && deviceRes.statusCode !== 201) {
+    throw new Error(`image-log-failure sub-scenario device seed failed: ${deviceRes.statusCode}`);
+  }
+  const scenarioCtx: ScenarioContext = {
+    ...baseContext,
+    deviceId: (deviceRes.json() as { deviceId: string }).deviceId,
+    cookieHeader: toCookieHeader(deviceRes.headers["set-cookie"]),
+  };
 
   try {
     const form = new FormData();
@@ -462,7 +488,6 @@ async function runSubScenario(
     steps.push(stepOk(`${label}_assert`, result.evidence));
     return { steps, artifacts, ok: true };
   } finally {
-    await scenarioCtx.close();
     await rm(uploadsDir, { recursive: true, force: true });
   }
 }
@@ -470,17 +495,39 @@ async function runSubScenario(
 const scenario: VerificationScenario = {
   name: "image-log-failure",
 
-  async run(_ctx: ScenarioContext): Promise<ScenarioResult> {
+  async prepareApp() {
+    const { logLines, stream: logStream } = createLogCapture();
+    await mkdir(UPLOADS_DIR, { recursive: true });
+    const llm = new StreamingLLMProvider();
+    const recorder = createLlmTraceRecorder();
+    return {
+      appOptions: {
+        llmProvider: llm,
+        uploadsDir: UPLOADS_DIR,
+        llmTraceRecorderFactory: () => recorder,
+        logger: { level: "info", stream: logStream },
+      },
+      state: { logLines, recorder },
+    };
+  },
+
+  async run(ctx: ScenarioContext): Promise<ScenarioResult> {
     const allSteps: ScenarioStepResult[] = [];
     const allArtifacts: Record<string, unknown> = {};
+    const { logLines, recorder } = ctx.prepared as {
+      logLines: string[];
+      recorder: ReturnType<typeof createLlmTraceRecorder>;
+    };
 
     // ------------------------------------------------------------------
     // Sub-scenario A: chatRound round 1 throws (image analysis failure)
     // Expected: fallback in history, done.didLogMeal false, no meal.
     // ------------------------------------------------------------------
-    const subARecorder = createLlmTraceRecorder();
+    const subARecorder = recorder;
     const subAUserMealText = "(圖片)";
     const subA = await runSubScenario(
+      ctx,
+      logLines,
       "sub_a_analysis_fail",
       (llm) => {
         llm.queueRoundError(new LLMProviderError(PROVIDER_METADATA_FIXTURE));
@@ -543,7 +590,6 @@ const scenario: VerificationScenario = {
       },
       {
         message: subAUserMealText,
-        llmTraceRecorderFactory: () => subARecorder,
       },
     );
     allSteps.push(...subA.steps);
@@ -583,6 +629,8 @@ const scenario: VerificationScenario = {
     // Expected: fallback wording in history, no meal, done event emitted.
     // ------------------------------------------------------------------
     const subB = await runSubScenario(
+      ctx,
+      logLines,
       "sub_b_tool_fail",
       (llm) => {
         llm.queueRoundResponse({
@@ -662,6 +710,8 @@ const scenario: VerificationScenario = {
     // Expected: meal remains in DB and done.didLogMeal true.
     // ------------------------------------------------------------------
     const subC = await runSubScenario(
+      ctx,
+      logLines,
       "sub_c_reply_fail",
       (llm) => {
         llm.queueRoundResponse({
@@ -737,6 +787,8 @@ const scenario: VerificationScenario = {
       imageBytes: ArrayBuffer,
       imageFilename: string,
     ) => runSubScenario(
+      ctx,
+      logLines,
       label,
       (llm) => {
         llm.queueRoundResponse({
@@ -869,7 +921,77 @@ const scenario: VerificationScenario = {
 
     allArtifacts.stepContract = { stepNames: [...STEP_NAMES] };
 
-    return buildResult(true, undefined, allSteps, allArtifacts, subALlmTrace);
+    const subAEvidence = allArtifacts.sub_a_analysis_fail as {
+      liveChunkEvidence?: { nonEmptyChunkBeforeDone?: boolean; nonEmptyChunkCount?: number };
+      falseLogChunkClaim?: boolean;
+      assistantCount?: number;
+      fallbackMatchedFriendly?: boolean;
+      mealCount?: number;
+    };
+    const subBEvidence = allArtifacts.sub_b_tool_fail as {
+      liveChunkEvidence?: { nonEmptyChunkBeforeDone?: boolean; nonEmptyChunkCount?: number };
+      falseLogChunkClaim?: boolean;
+      assistantCount?: number;
+      fallbackMatchedUnified?: boolean;
+      mealCount?: number;
+    };
+    const subCEvidence = allArtifacts.sub_c_reply_fail as {
+      donePayload?: { didLogMeal?: boolean; dailySummary?: unknown };
+      projectedReplyMatched?: boolean;
+      projectedReplyTextLength?: number;
+      mealKept?: boolean;
+      mealCount?: number;
+    };
+    const subDEvidence = allArtifacts.sub_d_failed_recognition_small as {
+      donePayload?: { didLogMeal?: boolean; didMutateMeal?: boolean };
+      mealCount?: number;
+    };
+    const subEEvidence = allArtifacts.sub_e_failed_recognition_large as {
+      donePayload?: { didLogMeal?: boolean; didMutateMeal?: boolean };
+      mealCount?: number;
+    };
+    const cleanupVerified = [
+      "sub_a_analysis_fail_route_upload_cleanup",
+      "sub_b_tool_fail_route_upload_cleanup",
+      "sub_c_reply_fail_route_upload_cleanup",
+      "sub_d_failed_recognition_small_route_upload_cleanup",
+      "sub_e_failed_recognition_large_route_upload_cleanup",
+    ].every((key) => {
+      const evidence = allArtifacts[key] as { filesAfterRouteCleanup?: unknown[]; cleanupLogSeen?: boolean } | undefined;
+      return evidence?.cleanupLogSeen === true && (evidence.filesAfterRouteCleanup?.length ?? 0) === 0;
+    });
+
+    return buildResult(true, undefined, allSteps, allArtifacts, {
+      counts: {
+        subScenarioCount: 5,
+        subAChunkCount: subAEvidence.liveChunkEvidence?.nonEmptyChunkCount ?? 0,
+        subBChunkCount: subBEvidence.liveChunkEvidence?.nonEmptyChunkCount ?? 0,
+        subCMealCount: subCEvidence.mealCount ?? 0,
+        subDMealCount: subDEvidence.mealCount ?? 0,
+        subEMealCount: subEEvidence.mealCount ?? 0,
+        subCReplyTextLength: subCEvidence.projectedReplyTextLength ?? 0,
+      },
+      assertions: {
+        subAChunkBeforeDone: subAEvidence.liveChunkEvidence?.nonEmptyChunkBeforeDone === true,
+        subAFalseLogChunkClaim: subAEvidence.falseLogChunkClaim === false,
+        subAFallbackFriendly: subAEvidence.fallbackMatchedFriendly === true,
+        subANoMeal: subAEvidence.mealCount === 0,
+        subBChunkBeforeDone: subBEvidence.liveChunkEvidence?.nonEmptyChunkBeforeDone === true,
+        subBFalseLogChunkClaim: subBEvidence.falseLogChunkClaim === false,
+        subBFallbackUnified: subBEvidence.fallbackMatchedUnified === true,
+        subBNoMeal: subBEvidence.mealCount === 0,
+        subCDidLogMeal: subCEvidence.donePayload?.didLogMeal === true,
+        subCDailySummaryPreserved: subCEvidence.donePayload?.dailySummary !== undefined,
+        subCProjectedReplyMatched: subCEvidence.projectedReplyMatched === true,
+        subCMealKept: subCEvidence.mealKept === true,
+        subDDidNotMutateMeal: subDEvidence.donePayload?.didLogMeal === false && subDEvidence.donePayload?.didMutateMeal === false,
+        subEDidNotMutateMeal: subEEvidence.donePayload?.didLogMeal === false && subEEvidence.donePayload?.didMutateMeal === false,
+        allUploadCleanupVerified: cleanupVerified,
+        fallbackTraceContractVerified: true,
+        rawEvidenceExcluded: true,
+      },
+      trace: buildSafeTraceMetadata(subALlmTrace),
+    });
   },
 };
 

@@ -46,7 +46,7 @@ function writeOnboardingHistoryStep(step: StepState, mode: "push" | "replace") {
 }
 
 const ONBOARDING_NUMERIC_BOUNDS = {
-  age: { min: 10, max: 120 },
+  age: { min: 18, max: 120 },
   heightCm: { min: 50, max: 300 },
   weightKg: { min: 20, max: 500 },
   bodyFatPercent: { min: 2, max: 70 },

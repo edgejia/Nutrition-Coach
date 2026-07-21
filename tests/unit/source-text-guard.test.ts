@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   checkSourceFields,
+  extractNumericSourceEvidence,
   normalizeNumericSourceText,
   stripToolLikeRegions,
 } from "../../server/orchestrator/source-text-guard.js";
@@ -222,5 +223,93 @@ describe("stripToolLikeRegions authorization boundary", () => {
     assert.ok(!normalizeNumericSourceText('{"calories":"一千八"}').includes("1800"));
     assert.ok(!normalizeNumericSourceText("我想控制在 1800多").includes("1800"));
     assert.ok(!normalizeNumericSourceText("我想控制在一千八多").includes("1800"));
+  });
+});
+
+describe("field/unit/scope/affirmation evidence boundary", () => {
+  it("keeps adjacent macro values bound to their original fields", () => {
+    const evidence = extractNumericSourceEvidence("protein 100g，carbs 200g");
+    assert.deepEqual(
+      evidence.map(({ field, unit, value, scope, affirmative }) => ({
+        field,
+        unit,
+        value,
+        scope,
+        affirmative,
+      })),
+      [
+        { field: "protein", unit: "g", value: 100, scope: "current_turn", affirmative: true },
+        { field: "carbs", unit: "g", value: 200, scope: "current_turn", affirmative: true },
+      ],
+    );
+    assert.equal(
+      checkSourceFields(
+        { protein: 200, carbs: 100 },
+        ["protein", "carbs"],
+        { currentUserMessage: "protein 100g，carbs 200g" },
+      ).ok,
+      false,
+    );
+  });
+
+  it("rejects explicit incompatible units and negated target instructions", () => {
+    assert.equal(
+      checkSourceFields(
+        { protein: 100 },
+        ["protein"],
+        { currentUserMessage: "蛋白質 100 kcal" },
+      ).ok,
+      false,
+    );
+    assert.equal(
+      checkSourceFields(
+        { calories: 1800 },
+        ["calories"],
+        { currentUserMessage: "不要把每日目標改成 1800 kcal" },
+      ).ok,
+      false,
+    );
+  });
+
+  it("canonicalizes fullwidth and Arabic-Indic numerals without widening scope", () => {
+    const fullwidth = checkSourceFields(
+      { calories: 1800 },
+      ["calories"],
+      { currentUserMessage: "每日目標改成 １８００ kcal" },
+    );
+    const arabicIndic = checkSourceFields(
+      { calories: 1800 },
+      ["calories"],
+      { currentUserMessage: "每日目標改成 ١٨٠٠ kcal" },
+    );
+    assert.equal(fullwidth.ok, true);
+    assert.equal(arabicIndic.ok, true);
+  });
+
+  it("requires affirmative current confirmation before using immediately previous assistant evidence", () => {
+    const evidence = extractNumericSourceEvidence("我建議蛋白質改成 100g，要套用嗎？", "previous_assistant");
+    assert.equal(evidence[0]?.scope, "previous_assistant");
+    assert.equal(
+      checkSourceFields(
+        { protein: 100 },
+        ["protein"],
+        {
+          currentUserMessage: "好",
+          previousAssistantMessage: "我建議蛋白質改成 100g，要套用嗎？",
+        },
+      ).ok,
+      true,
+    );
+    assert.equal(
+      checkSourceFields(
+        { protein: 100 },
+        ["protein"],
+        {
+          currentUserMessage: "再想想",
+          previousAssistantMessage: "我建議蛋白質改成 100g，要套用嗎？",
+        },
+      ).ok,
+      false,
+    );
   });
 });

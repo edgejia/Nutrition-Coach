@@ -17,8 +17,8 @@ import { MEAL_DELETE_PROPOSAL_KIND } from "../../../server/services/meal-delete-
 import {
   assertPolicyEvidenceHasNoForbiddenFields,
 } from "../policy-assertions.js";
-import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
+import { buildPositiveScenarioResult } from "../positive-metadata.js";
 import type {
   VerificationScenario,
   ScenarioContext,
@@ -77,7 +77,7 @@ interface ChatBody {
 
 interface ActionBody {
   ok: boolean;
-  status: "approved" | "rejected" | "stale";
+  status: "approved" | "rejected" | "stale" | "idempotent";
   didMutateMeal: boolean;
   dailyTargets?: ChatBody["dailyTargets"];
   dailySummary?: ChatBody["dailySummary"];
@@ -154,13 +154,15 @@ function failResult(
   failedStepName: string,
   artifacts: Record<string, unknown>,
 ): ScenarioResult {
-  return {
-    ok: false,
-    failedStep: failedStepName,
-    steps,
-    artifacts,
-    consoleSummary: `FAIL ${SCENARIO_NAME} ${failedStepName}`,
-  };
+  return buildPositiveScenarioResult(SCENARIO_NAME, false, steps, failedStepName, {
+    counts: {
+      expectedStepCount: STEP_NAMES.length,
+      recordedEvidenceCount: Array.isArray(artifacts.evidence) ? artifacts.evidence.length : 0,
+    },
+    assertions: {
+      detailedChecksCompleted: Array.isArray(artifacts.evidence) && artifacts.evidence.length > 0,
+    },
+  });
 }
 
 function evidenceArtifacts() {
@@ -312,7 +314,7 @@ function actionEventExists(history: HistoryBody, input: {
   );
 }
 
-function createPublishCounter(fixture: Awaited<ReturnType<typeof createScenarioApp>>) {
+function createPublishCounter(fixture: ScenarioContext) {
   const counts = { dailySummary: 0, goals: 0 };
   const originalPublishDailySummary = fixture.services.publisher.publishDailySummary.bind(
     fixture.services.publisher,
@@ -344,19 +346,31 @@ function toMealCount(meals: unknown[]): number {
 const scenario: VerificationScenario = {
   name: SCENARIO_NAME,
 
-  async run(_ctx: ScenarioContext): Promise<ScenarioResult> {
-    const steps: ScenarioStepResult[] = [];
-    const artifacts = evidenceArtifacts();
+  prepareApp() {
     const provider = new StreamingLLMProvider();
     const traceRecorders: Array<ReturnType<typeof createLlmTraceRecorder>> = [];
-    const fixture = await createScenarioApp({
-      llmProvider: provider,
-      llmTraceRecorderFactory() {
-        const recorder = createLlmTraceRecorder();
-        traceRecorders.push(recorder);
-        return recorder;
+    return {
+      appOptions: {
+        llmProvider: provider,
+        admissionLimiterOptions: { budgets: { provider: { maxRequests: 100, maxConcurrent: 3 } } },
+        llmTraceRecorderFactory() {
+          const recorder = createLlmTraceRecorder();
+          traceRecorders.push(recorder);
+          return recorder;
+        },
       },
-    });
+      state: { provider, traceRecorders },
+    };
+  },
+
+  async run(ctx: ScenarioContext): Promise<ScenarioResult> {
+    const steps: ScenarioStepResult[] = [];
+    const artifacts = evidenceArtifacts();
+    const { provider, traceRecorders } = ctx.prepared as {
+      provider: StreamingLLMProvider;
+      traceRecorders: Array<ReturnType<typeof createLlmTraceRecorder>>;
+    };
+    const fixture = ctx;
     const publish = createPublishCounter(fixture);
     const readMeals = () => fixture.services.foodLoggingService.getMealsByDate(
       fixture.deviceId,
@@ -941,7 +955,7 @@ const scenario: VerificationScenario = {
       assert.equal(duplicateFirst.body.ok, true);
       assert.equal(duplicateSecond.status, 200);
       assert.equal(duplicateSecond.body.ok, false);
-      assert.equal(duplicateSecond.body.status, "stale");
+      assert.equal(duplicateSecond.body.status, "idempotent");
       assert.equal(duplicateSecond.body.didMutateMeal, false);
       assert.equal(duplicateSecond.body.proposalCard?.status, "approved");
       assert.equal(toMealCount(duplicateMealsAfter), toMealCount(duplicateMealsBefore));
@@ -955,6 +969,7 @@ const scenario: VerificationScenario = {
         duplicateAction: {
           ok: duplicateSecond.body.ok,
           status: duplicateSecond.body.status,
+          zeroMutationReplay: duplicateSecond.body.status === "idempotent",
           card: summarizeCard(duplicateSecond.body.proposalCard),
           hasNoActionEvent: duplicateSecond.body.proposalActionEvent === undefined,
         },
@@ -984,12 +999,10 @@ const scenario: VerificationScenario = {
       addEvidence(artifacts, metadataEvidence);
       steps.push(pass(metadataStep, metadataEvidence));
 
-      return {
-        ok: true,
-        steps,
-        artifacts,
-        consoleSummary: `PASS ${SCENARIO_NAME} ${steps.length}/${STEP_NAMES.length}`,
-      };
+      return buildPositiveScenarioResult(SCENARIO_NAME, true, steps, undefined, {
+        counts: { expectedStepCount: STEP_NAMES.length, recordedEvidenceCount: artifacts.evidence.length },
+        assertions: { allCasesPassed: true, detailedChecksCompleted: true },
+      });
     } catch (error) {
       const failedStepName = STEP_NAMES[steps.length] ?? "unknown";
       steps.push(fail(
@@ -997,8 +1010,6 @@ const scenario: VerificationScenario = {
         error instanceof Error ? error.message : String(error),
       ));
       return failResult(steps, failedStepName, artifacts);
-    } finally {
-      await fixture.close();
     }
   },
 };

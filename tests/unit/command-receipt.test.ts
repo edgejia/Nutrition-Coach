@@ -2,7 +2,8 @@ process.env.TZ = "Asia/Taipei";
 
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -16,7 +17,7 @@ import {
   stableCommandWorkspaceFingerprint,
   verifyCommandReceipt,
 } from "../../scripts/workflow/command-receipt.mjs";
-import { acquireWorkflowLease } from "../../scripts/workflow/workflow-lease.mjs";
+import { acquireWorkflowLease, withWorkflowWriterFence } from "../../scripts/workflow/workflow-lease.mjs";
 
 const SOURCE_SHA = "a84370bf0c207b2d3305156ce5baf13c0335f02e";
 const RUN_ID = "11111111-1111-4111-8111-111111111111";
@@ -64,12 +65,13 @@ async function makeSignedFixture() {
     executionRuntime: "codex",
     gsdVersion: "1.7.0",
     modelProfile: "sol-high",
-    ttlSeconds: 600,
+    ttlSeconds: 1800,
   });
   const workspaceSha256 = stableCommandWorkspaceFingerprint(projectRoot);
   return {
     container,
     projectRoot,
+    commonDir: path.join(projectRoot, ".git"),
     tokenFile,
     lease,
     sourceSha,
@@ -86,6 +88,22 @@ async function makeFakeYarn(directory: string) {
 printf '%s\\n' "$1" >> "$FAKE_YARN_LOG"
 if [ -n "$FAKE_YARN_MUTATE" ] && [ "$1" = "tsc" ]; then
   printf '%s\\n' 'changed during gates' > "$FAKE_YARN_MUTATE"
+fi
+if [ -n "$FAKE_YARN_GIT_ENV_LOG" ] && [ "$1" = "tsc" ]; then
+  env | grep '^GIT_' | sort > "$FAKE_YARN_GIT_ENV_LOG" || true
+fi
+if [ -n "$FAKE_YARN_WRITER_RESULT" ] && [ "$1" = "tsc" ]; then
+  if [ -f "$FAKE_YARN_WRITER_PATH" ]; then
+    printf '%s\\n' 'writer_active' > "$FAKE_YARN_WRITER_RESULT"
+  else
+    printf '%s\\n' 'writer_missing' > "$FAKE_YARN_WRITER_RESULT"
+  fi
+fi
+if [ -n "$FAKE_YARN_WAIT_FOR" ] && [ "$1" = "tsc" ]; then
+  : > "$FAKE_YARN_READY"
+  while [ ! -f "$FAKE_YARN_WAIT_FOR" ]; do
+    sleep 0.02
+  done
 fi
 if [ -n "$FAKE_YARN_SLEEP" ] && [ "$1" = "tsc" ]; then
   if [ -n "$FAKE_YARN_IGNORE_SIGTERM" ]; then
@@ -108,6 +126,15 @@ exit 0
   );
   await fs.chmod(fake, 0o700);
   return fake;
+}
+
+async function waitForFile(file: string, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await fs.access(file).then(() => true).catch(() => false)) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.fail(`timed out waiting for ${file}`);
 }
 
 afterEach(async () => {
@@ -174,6 +201,52 @@ describe("structured command receipts", () => {
       kind: "signal",
       value: "SIGNAL_OTHER",
     });
+  });
+
+  it("rejects ambient Git configuration before any release child starts", async () => {
+    const directory = await tempDir();
+    await makeFakeYarn(directory);
+    const envLog = path.join(directory, "child-git-env.log");
+    const result = spawnSync(process.execPath, ["scripts/release-check.mjs", "--base=HEAD"], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        TZ: "Asia/Taipei",
+        PATH: `${directory}${path.delimiter}/usr/bin`,
+        FAKE_YARN_FAIL: "never",
+        FAKE_YARN_LOG: path.join(directory, "child.log"),
+        FAKE_YARN_GIT_ENV_LOG: envLog,
+        GIT_TRACE: "1",
+        GIT_CONFIG_COUNT: "1",
+        GIT_CONFIG_KEY_0: "credential.helper",
+        GIT_CONFIG_VALUE_0: "malicious-helper",
+        GIT_PAGER: "less",
+      },
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 2, `${result.stdout}${result.stderr}`);
+    assert.match(`${result.stdout}${result.stderr}`, /ambient Git authority environment is forbidden/);
+    assert.equal(fsSync.existsSync(envLog), false);
+  });
+
+  it("reports spawn error class and stream presence without raw child details", async () => {
+    const directory = await tempDir();
+    const result = spawnSync(process.execPath, ["scripts/release-check.mjs", "--base=HEAD"], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        TZ: "Asia/Taipei",
+        PATH: `${directory}${path.delimiter}/usr/bin`,
+      },
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 1, `${result.stdout}${result.stderr}`);
+    assert.match(result.stderr, /"kind":"release_check_failure"/);
+    assert.match(result.stderr, /"gate":"typescript_gate"/);
+    assert.match(result.stderr, /"errorClass":"ENOENT"/);
+    assert.match(result.stderr, /"stdout":"empty"/);
+    assert.match(result.stderr, /"stderr":"empty"/);
+    assert.doesNotMatch(`${result.stdout}${result.stderr}`, /\/private\/|stack trace|session-secret|cookie=/i);
   });
 
   it("keeps unsigned classification in memory and rejects every unsigned persistence request", async () => {
@@ -301,7 +374,7 @@ describe("structured command receipts", () => {
         command: "build",
         gate: "frontend_build",
         sanitizedCode: "frontend_build_failed",
-        calls: ["tsc", "test", "matrix:gen:check", "behavior-matrix:gen:check", "build"],
+        calls: ["tsc", "test", "matrix:gen:check", "behavior-matrix:gen:check", "policy-taxonomy:check", "build"],
       },
     ] as const;
 
@@ -461,7 +534,7 @@ describe("structured command receipts", () => {
       encoding: "utf8",
     });
     assert.equal(result.status, 2, `${result.stdout}${result.stderr}`);
-    assert.match(result.stderr, /ambient Git routing environment is forbidden/);
+    assert.match(result.stderr, /ambient Git authority environment is forbidden/);
     await assert.rejects(fs.access(childLog));
   });
 
@@ -493,6 +566,7 @@ describe("structured command receipts", () => {
       "test",
       "matrix:gen:check",
       "behavior-matrix:gen:check",
+      "policy-taxonomy:check",
       "build",
     ]);
   });
@@ -590,11 +664,122 @@ describe("structured command receipts", () => {
     assert.match(await fs.readFile(receiptPath, "utf8"), /\n $/);
   });
 
+  it("holds one writer fence through final receipt publication before releasing it", async () => {
+    const fixture = await makeSignedFixture();
+    const receiptPath = path.join(fixture.container, "receipts", "fenced-final.json");
+    const writerPath = path.join(fixture.commonDir, "nutrition-workflow", "writer.lock");
+    let writerActiveAfterPublication = false;
+    const result = await withWorkflowWriterFence(
+      {
+        ...fixture.authority,
+        purpose: "maintenance_check",
+        maxDurationSeconds: 30,
+      },
+      async (holder) => {
+        const nested = holder.nestedEnvironment();
+        const authority = {
+          ...fixture.authority,
+          fenceId: holder.fenceId,
+          nestedCapability: nested.NUTRITION_WORKFLOW_FENCE_CAPABILITY,
+        };
+        const reservation = await reserveCommandReceiptPath(receiptPath, {
+          commandId: "release-check",
+          runId: RUN_ID,
+          sourceSha: fixture.sourceSha,
+          workspaceBeforeSha256: fixture.workspaceSha256,
+          ...authority,
+        });
+        const receipt = await publishPassedCommandReceipt({
+          commandId: "release-check",
+          runId: RUN_ID,
+          workspaceBeforeSha256: fixture.workspaceSha256,
+          workspaceAfterSha256: fixture.workspaceSha256,
+          sourceSha: fixture.sourceSha,
+          receiptPath,
+          reservation,
+          ...authority,
+          testHook: async (stage: string) => {
+            if (stage === "after_receipt_publication") {
+              writerActiveAfterPublication = await fs.stat(writerPath).then(() => true).catch(() => false);
+            }
+          },
+        });
+        return { receipt };
+      },
+    );
+    assert.equal(result.receipt.outcome, "passed");
+    assert.equal(writerActiveAfterPublication, true);
+    await assert.rejects(fs.access(writerPath));
+  });
+
+  it("blocks a competing writer for the complete signed release gate run", async () => {
+    const fixture = await makeSignedFixture();
+    await makeFakeYarn(fixture.container);
+    const receiptPath = path.join(fixture.container, "receipts", "competing-writer.json");
+    const readyPath = path.join(fixture.container, "gate-ready");
+    const releaseMarker = path.join(fixture.container, "release-gate-continue");
+    const child = spawn(
+      process.execPath,
+      [
+        path.resolve("scripts/release-check.mjs"),
+        "--base=HEAD",
+        `--receipt=${receiptPath}`,
+        `--run-id=${RUN_ID}`,
+        `--workflow-token=${fixture.tokenFile}`,
+        "--workflow-runtime=codex",
+      ],
+      {
+        cwd: fixture.projectRoot,
+        env: {
+          ...process.env,
+          TZ: "Asia/Taipei",
+          PATH: `${fixture.container}${path.delimiter}${process.env.PATH ?? ""}`,
+          FAKE_YARN_FAIL: "never",
+          FAKE_YARN_LOG: path.join(fixture.container, "competing-writer.log"),
+          FAKE_YARN_WAIT_FOR: releaseMarker,
+          FAKE_YARN_READY: readyPath,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    const childOutput: string[] = [];
+    child.stdout?.on("data", (chunk) => childOutput.push(String(chunk)));
+    child.stderr?.on("data", (chunk) => childOutput.push(String(chunk)));
+    const completion = new Promise<{ status: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", (status, signal) => resolve({ status, signal }));
+    });
+    try {
+      await waitForFile(readyPath);
+      await assert.rejects(
+        withWorkflowWriterFence(
+          {
+            ...fixture.authority,
+            purpose: "maintenance_check",
+            maxDurationSeconds: 30,
+          },
+          async () => ({ competed: true }),
+        ),
+        (error: unknown) => error instanceof Error && (error as { code?: string }).code === "workflow_writer_active",
+      );
+      await fs.writeFile(releaseMarker, "continue\n");
+      const result = await completion;
+      assert.equal(result.status, 0, childOutput.join(""));
+      assert.equal(JSON.parse(await fs.readFile(receiptPath, "utf8")).outcome, "passed");
+    } finally {
+      await fs.writeFile(releaseMarker, "continue\n").catch(() => undefined);
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+      await completion.catch(() => undefined);
+    }
+  });
+
   it("persists an end-to-end release-check receipt only through holder authority", async () => {
     const fixture = await makeSignedFixture();
     await makeFakeYarn(fixture.container);
     const receiptPath = path.join(fixture.container, "receipts", "release-check.json");
     const logPath = path.join(fixture.container, "release-check.log");
+    const writerPath = path.join(fixture.commonDir, "nutrition-workflow", "writer.lock");
+    const writerProbeResultPath = path.join(fixture.container, "writer-probe.log");
     const result = spawnSync(
       process.execPath,
       [
@@ -613,6 +798,8 @@ describe("structured command receipts", () => {
           PATH: `${fixture.container}${path.delimiter}${process.env.PATH ?? ""}`,
           FAKE_YARN_FAIL: "never",
           FAKE_YARN_LOG: logPath,
+          FAKE_YARN_WRITER_PATH: writerPath,
+          FAKE_YARN_WRITER_RESULT: writerProbeResultPath,
         },
         encoding: "utf8",
       },
@@ -622,6 +809,8 @@ describe("structured command receipts", () => {
     assert.equal(persisted.schemaVersion, 2);
     assert.equal(persisted.workflowLeaseId, fixture.lease.leaseId);
     assert.equal(persisted.outcome, "passed");
+    assert.equal(await fs.readFile(writerProbeResultPath, "utf8"), "writer_active\n");
+    await assert.rejects(fs.access(writerPath));
     await verifyCommandReceipt({
       projectRoot: fixture.projectRoot,
       receiptPath,

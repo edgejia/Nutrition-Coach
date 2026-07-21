@@ -1,4 +1,5 @@
 import { PassThrough } from "node:stream";
+import type { EventEmitter } from "node:events";
 import { writeFile, mkdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import type { FastifyInstance, FastifyRequest, FastifyBaseLogger } from "fastify";
@@ -67,12 +68,30 @@ import {
 import type { createGoalProposalService } from "../services/goal-proposals.js";
 import type { createMealNumericProposalService } from "../services/meal-numeric-proposals.js";
 import type { createMealDeleteProposalService } from "../services/meal-delete-proposals.js";
-import { DEFAULT_SESSION_ID } from "../services/turn-state.js";
+import {
+  createRuntimeTurnLifecycle,
+  DEFAULT_SESSION_ID,
+  type RuntimeTurnLifecycle,
+} from "../services/turn-state.js";
+import {
+  isAdmissionRejectedError,
+  type AdmissionLimiter,
+  type AdmissionPermit,
+  type AdmissionSubject,
+} from "../services/admission-limiter.js";
 import {
   getProtectedOwner,
   PROTECTED_ROUTE_META,
   registerProtectedRoute,
 } from "./protected-route.js";
+
+export interface ChatLifecycleTestHooks {
+  onSseTransportReady?: (transport: {
+    replyRaw: EventEmitter;
+    stream: EventEmitter;
+    turnId: string;
+  }) => void;
+}
 
 interface Deps {
   orchestrator: ReturnType<typeof createOrchestrator>;
@@ -85,6 +104,7 @@ interface Deps {
   mealNumericProposalService: ReturnType<typeof createMealNumericProposalService>;
   mealDeleteProposalService: ReturnType<typeof createMealDeleteProposalService>;
   publisher: RealtimePublisher;
+  admissionLimiter: AdmissionLimiter;
   /**
    * Override the upload storage directory. When undefined the route falls back
    * to `config.uploadsStagingDir` (production behaviour unchanged). Pass a
@@ -92,6 +112,7 @@ interface Deps {
    */
   uploadsDir?: string;
   llmTraceRecorderFactory?: () => LlmTraceRecorder | undefined;
+  lifecycleTestHooks?: ChatLifecycleTestHooks;
 }
 
 const UNIFIED_FALLBACK = "抱歉，這次無法完成請求，請稍後再試或補充描述。";
@@ -113,15 +134,15 @@ type ReceiptIdentity = {
 };
 type ReceiptPersistence = "not_applicable" | "persisted" | "failed_closed";
 interface ActiveChatTurn {
-  controller: AbortController;
-  stopRequested: boolean;
-  completed: boolean;
+  lifecycle: RuntimeTurnLifecycle;
 }
 
 interface StreamingStopControl {
   turnId: string;
   signal: AbortSignal;
   isStopped(): boolean;
+  isDisconnected(): boolean;
+  markCompleted(): void;
 }
 
 interface StreamingReplyResult {
@@ -135,6 +156,7 @@ interface StreamingReplyResult {
   finalReplySource: LlmTraceFinalReplySource;
   finalReplyShape: LlmTraceFinalReplyShape;
   receiptPersistence: ReceiptPersistence;
+  disconnected?: boolean;
 }
 
 type RouteProposalCard = PendingProposalCardInput | ProposalCardClientMetadata;
@@ -547,6 +569,8 @@ function parseProposalContext(rawValue: unknown):
 async function parseMultipartRequest(
   request: FastifyRequest,
   uploadsDir: string,
+  admissionLimiter?: AdmissionLimiter,
+  admissionSubject?: AdmissionSubject,
 ): Promise<
   | {
       message: string;
@@ -610,7 +634,7 @@ async function parseMultipartRequest(
       if (buffer.length > 5 * 1024 * 1024) {
         return reject("Image too large. Max 5MB.", 400);
       }
-      if (!await validateImageBytes(buffer, part.mimetype)) {
+      if (!await validateImageBytes(buffer, part.mimetype, { admissionLimiter, admissionSubject })) {
         return reject("Invalid image type. Allowed: jpeg, png, webp", 400);
       }
       const filename = `${crypto.randomUUID()}.${part.mimetype.split("/")[1]}`;
@@ -928,6 +952,11 @@ async function handleStreamingReply(
   let noMutationLoggingClaimDetected = false;
   let receiptPersistence: ReceiptPersistence = "not_applicable";
 
+  function writeChunk(token: string): void {
+    if (stopControl?.isDisconnected()) return;
+    stream.write(`event: chunk\ndata: ${JSON.stringify({ token })}\n\n`);
+  }
+
   async function persistFinalReply(
     replyText: string,
     opts?: { status?: "complete" | "stopped" | "error" },
@@ -959,7 +988,7 @@ async function handleStreamingReply(
     }
     const sanitizedChunk = sanitizer.push(guardedToken);
     if (sanitizedChunk) {
-      stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedChunk })}\n\n`);
+      writeChunk(sanitizedChunk);
     }
   }
 
@@ -983,12 +1012,28 @@ async function handleStreamingReply(
       }
     }
   } catch (error) {
-    if (!stopControl?.isStopped() && !stopControl?.signal.aborted) {
+    if (!stopControl?.isStopped() && !stopControl?.isDisconnected()) {
       throw error;
     }
   }
 
-  if (stopControl?.isStopped() || stopControl?.signal.aborted) {
+  if (stopControl?.isDisconnected()) {
+    return {
+      fullReply: "",
+      didLogMeal,
+      dailySummary,
+      summaryHistoryFacts,
+      planningFacts,
+      stopped: false,
+      tokensStreamed,
+      finalReplySource: "model",
+      finalReplyShape: "empty_or_missing",
+      receiptPersistence,
+      disconnected: true,
+    };
+  }
+
+  if (stopControl?.isStopped()) {
     const stoppedReply = sanitizeReply(
       guardNoMutationSuccessClaim(fullReply, mutationProjection, {
         summaryHistoryFacts,
@@ -1015,7 +1060,7 @@ async function handleStreamingReply(
       ? partialMutationReply
       : "抱歉，無法辨識這次的請求，可以再試一次或補充文字描述嗎？";
     const persistedReply = await persistFinalReply(retryMsg);
-    stream.write(`event: chunk\ndata: ${JSON.stringify({ token: persistedReply })}\n\n`);
+    writeChunk(persistedReply);
     return {
       fullReply: persistedReply,
       didLogMeal,
@@ -1054,10 +1099,10 @@ async function handleStreamingReply(
     const sanitizedReply = sanitizeReply(guardedFullReply);
     const finalChunk = sanitizer.flush();
     if (finalChunk) {
-      stream.write(`event: chunk\ndata: ${JSON.stringify({ token: finalChunk })}\n\n`);
+      writeChunk(finalChunk);
     }
     if (sanitizedReply) {
-      stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedReply })}\n\n`);
+      writeChunk(sanitizedReply);
     }
     const persistedReply = await persistFinalReply(sanitizedReply);
     return {
@@ -1078,11 +1123,11 @@ async function handleStreamingReply(
   if (shouldHoldNoMutationSummaryText) {
     const sanitizedReplyChunk = sanitizer.push(guardedFullReply);
     if (sanitizedReplyChunk) {
-      stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedReplyChunk })}\n\n`);
+      writeChunk(sanitizedReplyChunk);
     }
     const finalHeldChunk = sanitizer.flush();
     if (finalHeldChunk) {
-      stream.write(`event: chunk\ndata: ${JSON.stringify({ token: finalHeldChunk })}\n\n`);
+      writeChunk(finalHeldChunk);
     }
     const persistedReply = await persistFinalReply(guardedFullReply);
     return {
@@ -1103,12 +1148,12 @@ async function handleStreamingReply(
   if (guardedFinalChunk) {
     const sanitizedChunk = sanitizer.push(guardedFinalChunk);
     if (sanitizedChunk) {
-      stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedChunk })}\n\n`);
+      writeChunk(sanitizedChunk);
     }
   }
   const finalChunk = sanitizer.flush();
   if (finalChunk) {
-    stream.write(`event: chunk\ndata: ${JSON.stringify({ token: finalChunk })}\n\n`);
+    writeChunk(finalChunk);
   }
   const persistedReply = await persistFinalReply(fullReply);
   return {
@@ -1142,6 +1187,7 @@ async function handleOrchestratorSSE(
   hooks?: OrchestratorHooks,
   recorder?: LlmTraceRecorder,
   stopControl?: StreamingStopControl,
+  providerPermit?: AdmissionPermit,
 ): Promise<void> {
   if (!stopControl) {
     throw new Error("SSE stop control is required");
@@ -1165,6 +1211,10 @@ async function handleOrchestratorSSE(
   let streamReceiptIdentity: ReceiptIdentity | undefined;
   let streamMutationOutcomeFact: ChatMutationOutcomeFact | undefined;
   let streamReceiptPersistence: ReceiptPersistence = "not_applicable";
+  const writeSseEvent = (event: string, data: unknown): void => {
+    if (stopControl.isDisconnected()) return;
+    stream.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
   const recordSseCompletion = (params: {
     didLogMeal: boolean;
     didMutateMeal: boolean;
@@ -1238,9 +1288,13 @@ async function handleOrchestratorSSE(
   };
 
   try {
-    writeStatus(stream, "思考中...", stopControl.turnId);
+    const writeGuardedStatus = (label: string) => {
+      if (!stopControl.isDisconnected()) writeStatus(stream, label, stopControl.turnId);
+    };
+    if (stopControl.isDisconnected()) return;
+    writeGuardedStatus("思考中...");
     if (image) {
-      writeStatus(stream, "分析圖片中...", stopControl.turnId);
+      writeGuardedStatus("分析圖片中...");
     }
 
     const durableAsset = await createDurableAssetIfNeeded(
@@ -1250,6 +1304,7 @@ async function handleOrchestratorSSE(
     );
     durableAssetId = durableAsset?.assetId;
     durableAssetRef = durableAsset?.assetRef;
+    if (stopControl.isDisconnected()) return;
 
     const result = await deps.orchestrator.handleMessage(
       deviceId,
@@ -1258,7 +1313,7 @@ async function handleOrchestratorSSE(
       durableAssetRef,
       {
         onStatus: (label: string) => {
-          writeStatus(stream, label, stopControl.turnId);
+          writeGuardedStatus(label);
         },
         onUserMessageSaved: () => {
           userMessagePersisted = true;
@@ -1270,6 +1325,8 @@ async function handleOrchestratorSSE(
         proposalContext,
       }
     );
+
+    if (stopControl.isDisconnected()) return;
 
     if ("streamGenerator" in result) {
       const mutationProjection = projectRouteMutationState(result);
@@ -1322,6 +1379,7 @@ async function handleOrchestratorSSE(
       streamDidLogMeal = streamResult.didLogMeal;
       streamDailySummary = streamResult.dailySummary;
       streamReceiptPersistence = streamResult.receiptPersistence;
+      if (streamResult.disconnected) return;
       const canProjectStreamReceipt = streamReceiptPersistence === "persisted";
       recorder?.recordFinalReply({
         source: streamResult.finalReplySource,
@@ -1342,7 +1400,7 @@ async function handleOrchestratorSSE(
           ...(streamAffectedDate ? { affectedDate: streamAffectedDate } : {}),
           ...(streamDeletedMealId ? { deletedMealId: streamDeletedMealId } : {}),
         };
-        stream.write(`event: stopped\ndata: ${JSON.stringify(stoppedData)}\n\n`);
+        writeSseEvent("stopped", stoppedData);
         recordSseCompletion({
           didLogMeal: streamDidLogMeal,
           didMutateMeal: streamDidMutateMeal,
@@ -1366,7 +1424,7 @@ async function handleOrchestratorSSE(
         ...(streamDeletedMealId ? { deletedMealId: streamDeletedMealId } : {}),
         ...(streamProposalActionEvent ? { proposalActionEvent: streamProposalActionEvent } : {}),
       };
-      stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
+      writeSseEvent("done", doneData);
       if (streamResult.finalReplySource === "fallback") {
         recordSseFallback({
           fallbackSource: "route_hallucination",
@@ -1396,6 +1454,7 @@ async function handleOrchestratorSSE(
         proposalCard,
         proposalActionEvent,
       } = result;
+      if (stopControl.isDisconnected()) return;
       const didLogMeal = mutationProjection.didLogMeal;
       recorder?.recordFinalReply({
         source: result.finalReplySource ?? "model",
@@ -1455,7 +1514,7 @@ async function handleOrchestratorSSE(
         streamReceiptPersistence = finalized.receiptPersistence;
       }
       const canProjectStreamReceipt = streamReceiptPersistence === "persisted";
-      stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedFallback })}\n\n`);
+      writeSseEvent("chunk", { token: sanitizedFallback });
       const doneData = {
         turnId: stopControl.turnId,
         didLogMeal,
@@ -1472,7 +1531,7 @@ async function handleOrchestratorSSE(
         ...(streamProposalCard ? { proposalCard: streamProposalCard } : {}),
         ...(streamProposalActionEvent ? { proposalActionEvent: streamProposalActionEvent } : {}),
       };
-      stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
+      writeSseEvent("done", doneData);
       if (result.fallbackOutcomeContext) {
         const providerMetadata = result.providerFallbackContext?.reason === "llm_error"
           && result.fallbackOutcomeContext.reason === "llm_error"
@@ -1495,6 +1554,7 @@ async function handleOrchestratorSSE(
       }
     }
   } catch (error) {
+    if (stopControl.isDisconnected()) return;
     const fallback = streamDidLogMeal
       ? (streamLoggedMeal ?? PARTIAL_SUCCESS_FALLBACK)
       : streamDidMutateMeal
@@ -1532,7 +1592,7 @@ async function handleOrchestratorSSE(
       const sanitizedFallback = finalized.sanitized;
       terminalReplyText = sanitizedFallback;
       streamReceiptPersistence = finalized.receiptPersistence;
-      stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedFallback })}\n\n`);
+      writeSseEvent("chunk", { token: sanitizedFallback });
     } catch (persistError) {
       catchSite = "sse_persist";
       sanitizedCatchError = providerFallback ? {} : sanitizeRouteCatchError(persistError);
@@ -1546,7 +1606,7 @@ async function handleOrchestratorSSE(
           : UNIFIED_FALLBACK;
       terminalReplyText = closedFallback;
       // If history persistence also fails, still close the stream with done.
-      stream.write(`event: chunk\ndata: ${JSON.stringify({ token: closedFallback })}\n\n`);
+      writeSseEvent("chunk", { token: closedFallback });
     }
     const canProjectStreamReceipt = streamReceiptPersistence === "persisted";
     const doneData = {
@@ -1562,7 +1622,7 @@ async function handleOrchestratorSSE(
       ...(streamDeletedMealId ? { deletedMealId: streamDeletedMealId } : {}),
       ...(streamProposalCard ? { proposalCard: streamProposalCard } : {}),
     };
-    stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
+    writeSseEvent("done", doneData);
     recordSseFallback({
       ...(providerFallback ?? {
         fallbackSource: "route_catch" as const,
@@ -1583,7 +1643,9 @@ async function handleOrchestratorSSE(
       deps.log,
     );
     await cleanupUploadSafe(image?.path, deps.log);
-    stream.end();
+    providerPermit?.release();
+    stopControl.markCompleted();
+    if (!stream.destroyed && !stream.writableEnded) stream.end();
   }
 }
 
@@ -1599,6 +1661,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     mealNumericProposalService,
     mealDeleteProposalService,
     publisher,
+    admissionLimiter,
     uploadsDir: injectedUploadsDir,
     llmTraceRecorderFactory,
   } = deps;
@@ -1621,10 +1684,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
       return reply.code(404).send({ error: "Active turn not found" });
     }
 
-    activeTurn.stopRequested = true;
-    if (!activeTurn.controller.signal.aborted) {
-      activeTurn.controller.abort();
-    }
+    activeTurn.lifecycle.requestStop();
 
     return { stopped: true, turnId: trimmedTurnId };
     },
@@ -1636,9 +1696,26 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     protectedMeta: PROTECTED_ROUTE_META.chatMessage,
     multipartBodySelectorHandling: "route_parser",
     handler: async (request, reply) => {
-    const { deviceId } = getProtectedOwner(request);
+    const owner = getProtectedOwner(request);
+    const { deviceId } = owner;
     const resolvedUploadsDir = injectedUploadsDir ?? config.uploadsStagingDir;
-    const parseResult = await parseMultipartRequest(request, resolvedUploadsDir);
+    let parseResult: Awaited<ReturnType<typeof parseMultipartRequest>>;
+    try {
+      parseResult = await parseMultipartRequest(
+        request,
+        resolvedUploadsDir,
+        admissionLimiter,
+        { deviceId: owner.device.id, sessionVersion: owner.device.sessionVersion },
+      );
+    } catch (error) {
+      if (isAdmissionRejectedError(error)) {
+        if (error.statusCode === 429) reply.header("Retry-After", String(error.retryAfterSeconds));
+        return reply.code(error.statusCode).send({
+          error: error.statusCode === 429 ? "Admission limit exceeded" : "Invalid guest session",
+        });
+      }
+      throw error;
+    }
 
     if ("error" in parseResult) {
       request.log.warn({ event: "chat_multipart_rejected", reason: parseResult.error }, "Chat multipart request rejected");
@@ -1653,6 +1730,21 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     // Branch on SSE opt-in (T-03c-01: keep explicit JSON fallback for non-SSE callers)
     const acceptHeader = request.headers["accept"] ?? "";
     const wantsSSE = acceptHeader.includes("text/event-stream");
+
+    const providerAdmission = admissionLimiter.tryAcquire("provider", {
+      deviceId: owner.device.id,
+      sessionVersion: owner.device.sessionVersion,
+    });
+    if (!providerAdmission.ok) {
+      await cleanupUploadSafe(image?.path, request.log);
+      if (providerAdmission.statusCode === 429) {
+        reply.header("Retry-After", String(providerAdmission.retryAfterSeconds));
+      }
+      return reply.code(providerAdmission.statusCode).send({
+        error: providerAdmission.statusCode === 429 ? "Admission limit exceeded" : "Invalid guest session",
+      });
+    }
+    const providerPermit = providerAdmission.permit;
 
     if (!wantsSSE) {
       let durableAssetId: string | undefined;
@@ -2043,6 +2135,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         );
         // D-08: Delete upload file after processing completes (success or failure).
         await cleanupUploadSafe(image?.path, turnLog);
+        providerPermit.release();
       }
     }
 
@@ -2051,23 +2144,35 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     const stream = new PassThrough();
     const turnKey = activeChatTurnKey(deviceId, turnId);
     const activeTurn: ActiveChatTurn = {
-      controller: new AbortController(),
-      stopRequested: false,
-      completed: false,
+      lifecycle: createRuntimeTurnLifecycle(turnId),
     };
     activeChatTurns.set(turnKey, activeTurn);
 
-    request.raw.on("close", () => {
-      if (!activeTurn.completed && !activeTurn.stopRequested && !activeTurn.controller.signal.aborted) {
-        activeTurn.controller.abort();
-      }
+    const cleanupTurn = () => activeTurn.lifecycle.cleanupOnce(() => {
+      activeChatTurns.delete(turnKey);
+      providerPermit.release();
     });
+    const disconnect = () => {
+      activeTurn.lifecycle.disconnect();
+      cleanupTurn();
+    };
+    request.raw.on("close", disconnect);
+    reply.raw.on("close", disconnect);
+    reply.raw.on("error", disconnect);
+    stream.on("close", disconnect);
+    stream.on("error", disconnect);
 
     reply
       .code(200)
       .type("text/event-stream")
       .header("cache-control", "no-cache")
       .send(stream);
+
+    deps.lifecycleTestHooks?.onSseTransportReady?.({
+      replyRaw: reply.raw,
+      stream,
+      turnId,
+    });
 
     stream.write(`event: start\ndata: ${JSON.stringify({ turnId })}\n\n`);
 
@@ -2090,12 +2195,14 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         traceRecorder,
         {
           turnId,
-          signal: activeTurn.controller.signal,
-          isStopped: () => activeTurn.stopRequested,
+          signal: activeTurn.lifecycle.controller.signal,
+          isStopped: () => activeTurn.lifecycle.isStopped(),
+          isDisconnected: () => activeTurn.lifecycle.isDisconnected(),
+          markCompleted: () => { activeTurn.lifecycle.markCompleted(); },
         },
+        providerPermit,
       ).finally(() => {
-        activeTurn.completed = true;
-        activeChatTurns.delete(turnKey);
+        cleanupTurn();
       });
     });
 

@@ -1,7 +1,7 @@
-import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import { validJpegBytes } from "../../fixtures/image-bytes.js";
+import { buildPositiveScenarioResult } from "../positive-metadata.js";
 import type {
   ScenarioContext,
   ScenarioResult,
@@ -86,22 +86,13 @@ function failResult(
   failedStepName: StepName,
   artifacts: Record<string, unknown>,
 ): ScenarioResult {
-  return {
-    ok: false,
-    failedStep: failedStepName,
-    steps,
-    artifacts,
-    consoleSummary: `FAIL grouped-meal-canonical ${failedStepName}`,
-  };
+  return buildPositiveScenarioResult("grouped-meal-canonical", false, steps, failedStepName);
 }
 
 function passResult(steps: ScenarioStepResult[], artifacts: Record<string, unknown>): ScenarioResult {
-  return {
-    ok: true,
-    steps,
-    artifacts,
-    consoleSummary: `PASS grouped-meal-canonical ${steps.filter((step) => step.ok).length}/${STEP_NAMES.length}`,
-  };
+  return buildPositiveScenarioResult("grouped-meal-canonical", true, steps, undefined, {
+    counts: { expectedStepCount: STEP_NAMES.length },
+  });
 }
 
 function makeJpegBytes(): ArrayBuffer {
@@ -215,13 +206,17 @@ function containsInternalToolName(text: string): boolean {
 const groupedMealCanonicalScenario: VerificationScenario = {
   name: "grouped-meal-canonical",
 
-  async run(_ctx: ScenarioContext): Promise<ScenarioResult> {
+  prepareApp() {
+    const llmProvider = new StreamingLLMProvider();
+    return { appOptions: { llmProvider }, state: { llmProvider } };
+  },
+
+  async run(ctx: ScenarioContext): Promise<ScenarioResult> {
     const steps: ScenarioStepResult[] = [];
     const artifacts: Record<string, unknown> = {};
-    const llmProvider = new StreamingLLMProvider();
-    const fixture = await createScenarioApp({ llmProvider });
+    const llmProvider = (ctx.prepared as { llmProvider: StreamingLLMProvider }).llmProvider;
+    const fixture = ctx;
 
-    try {
       const ping = await fetch(`${fixture.address}/api/meals`, {
         headers: { cookie: fixture.cookieHeader },
       });
@@ -524,7 +519,7 @@ const groupedMealCanonicalScenario: VerificationScenario = {
         },
       };
       artifacts.securityNotes = {
-        auth: "Scenario uses createScenarioApp() cookieHeader for protected route requests and no raw deviceId header.",
+        auth: "Scenario uses runner-provided cookieHeader for protected route requests and no raw deviceId header.",
         directEditBlock: "Grouped direct PATCH returned 409 MEAL_REQUIRES_GROUPED_UPDATE before single-shape mutation.",
         internalToolLeakage: "Successful user-visible replies were checked for log_food, update_meal, find_meals, protein_sources, usedConservativeAssumption, quantityUncertaintyReason, and missing_quantity.",
       };
@@ -545,7 +540,6 @@ const groupedMealCanonicalScenario: VerificationScenario = {
       steps.push(pass("verify_artifacts", { artifactKeys: Object.keys(artifacts) }));
 
       return passResult(steps, artifacts);
-    } finally { await fixture.close(); }
   },
 };
 

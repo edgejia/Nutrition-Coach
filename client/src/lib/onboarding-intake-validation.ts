@@ -69,8 +69,8 @@ function validateBodyData(data: ValidationInput): IntakeValidationIssue[] {
 
   if (!isFiniteNumber(data.age)) {
     issues.push(createIssue("age", "INVALID_AGE", 3, "請輸入有效的年齡"));
-  } else if (data.age < 10 || data.age > 120) {
-    issues.push(createIssue("age", "AGE_OUT_OF_RANGE", 3, "年齡需介於 10-120"));
+  } else if (data.age < 18 || data.age > 120) {
+    issues.push(createIssue("age", "AGE_OUT_OF_RANGE", 3, "年齡需介於 18-120"));
   }
 
   if (!isFiniteNumber(data.heightCm)) {

@@ -1,6 +1,6 @@
 import type { AppDatabase } from "../db/client.js";
 import type { DailyTargets } from "./device.js";
-import { createTurnStateService } from "./turn-state.js";
+import { createTurnStateService, type SyncTransactionClient } from "./turn-state.js";
 
 export const GOAL_PROPOSAL_KIND = "goal_proposal";
 export const GOAL_PROPOSAL_TTL_MS = 30 * 60 * 1000;
@@ -67,6 +67,20 @@ export function createGoalProposalService(db: AppDatabase) {
       return payload as GoalProposalPayload | undefined;
     },
 
+    getLatestSync({
+      deviceId,
+      sessionId,
+    }: {
+      deviceId: string;
+      sessionId: string;
+    }, client?: SyncTransactionClient): GoalProposalPayload | undefined {
+      return turnStateService.getStateSync<GoalProposalPayload>({
+        deviceId,
+        sessionId,
+        kind: GOAL_PROPOSAL_KIND,
+      }, client);
+    },
+
     async consumeLatest({
       deviceId,
       sessionId,
@@ -85,6 +99,23 @@ export function createGoalProposalService(db: AppDatabase) {
       return payload as GoalProposalPayload | undefined;
     },
 
+    consumeLatestSync({
+      deviceId,
+      sessionId,
+      proposalId,
+    }: {
+      deviceId: string;
+      sessionId: string;
+      proposalId: string;
+    }, client?: SyncTransactionClient): GoalProposalPayload | undefined {
+      return turnStateService.consumeStateSync<GoalProposalPayload>({
+        deviceId,
+        sessionId,
+        kind: GOAL_PROPOSAL_KIND,
+        proposalId,
+      }, client);
+    },
+
     async clear({
       deviceId,
       sessionId,
@@ -93,6 +124,13 @@ export function createGoalProposalService(db: AppDatabase) {
       sessionId: string;
     }): Promise<void> {
       await turnStateService.clearState({ deviceId, sessionId, kind: GOAL_PROPOSAL_KIND });
+    },
+
+    clearSync({ deviceId, sessionId }: {
+      deviceId: string;
+      sessionId: string;
+    }, client?: SyncTransactionClient): void {
+      turnStateService.clearStateSync({ deviceId, sessionId, kind: GOAL_PROPOSAL_KIND }, client);
     },
   };
 }

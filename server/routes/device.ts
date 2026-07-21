@@ -1,7 +1,18 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { createDeviceService, DailyTargets, Goal, IntakeFields } from "../services/device.js";
+import {
+  DeviceGoalsValidationError,
+  type createDeviceService,
+  type DailyTargets,
+  type Goal,
+  type IntakeFields,
+} from "../services/device.js";
 import type { createGuestSessionService } from "../services/guest-session.js";
 import type { createTargetGenerationService } from "../services/target-generation.js";
+import {
+  isAdmissionRejectedError,
+  type AdmissionLimiter,
+  type AdmissionSubject,
+} from "../services/admission-limiter.js";
 import { config, isDeployedLikeRuntime } from "../config.js";
 import {
   checkNutritionSafetyTargets,
@@ -22,6 +33,7 @@ interface Deps {
   deviceService: ReturnType<typeof createDeviceService>;
   guestSessionService: ReturnType<typeof createGuestSessionService>;
   targetGenerationService: ReturnType<typeof createTargetGenerationService>;
+  admissionLimiter: AdmissionLimiter;
 }
 
 const VALID_GOALS = ["fat_loss", "muscle_gain", "maintain"] as const;
@@ -174,6 +186,40 @@ function buildDeviceSessionResponse(device: Awaited<ReturnType<ReturnType<typeof
   };
 }
 
+async function resolveAdmissionSubject(
+  request: FastifyRequest,
+  { deviceService, guestSessionService }: Pick<Deps, "deviceService" | "guestSessionService">,
+): Promise<AdmissionSubject | undefined> {
+  const { activeToken, resumeToken } = guestSessionService.readTokens(request.headers.cookie);
+  const activeSession = guestSessionService.verifyActiveSession(activeToken);
+  if (activeSession.ok) {
+    const device = await deviceService.getDevice(activeSession.deviceId);
+    if (device && activeSession.version === device.sessionVersion) {
+      return { deviceId: device.id, sessionVersion: device.sessionVersion };
+    }
+  }
+
+  const resumedSession = guestSessionService.verifyResumeSession(resumeToken);
+  if (resumedSession.ok) {
+    const device = await deviceService.getDevice(resumedSession.deviceId);
+    if (device && resumedSession.version === device.sessionVersion) {
+      return { deviceId: device.id, sessionVersion: device.sessionVersion };
+    }
+  }
+
+  return undefined;
+}
+
+function sendAdmissionRejection(reply: FastifyReply, error: unknown) {
+  if (!isAdmissionRejectedError(error)) return null;
+  if (error.statusCode === 429) {
+    reply.header("Retry-After", String(error.retryAfterSeconds));
+  }
+  return reply.code(error.statusCode).send({
+    error: error.statusCode === 429 ? "Admission limit exceeded" : "Invalid guest session",
+  });
+}
+
 async function findCurrentSessionDeviceForLogout(
   request: FastifyRequest,
   { deviceService, guestSessionService }: Pick<Deps, "deviceService" | "guestSessionService">,
@@ -246,8 +292,8 @@ function buildIntake(
     errors.push(createValidationIssue("age", "MISSING_AGE", 3, "請輸入年齡"));
   } else if (!ageResult.valid) {
     errors.push(createValidationIssue("age", "INVALID_AGE", 3, "請輸入有效的年齡"));
-  } else if (!validateRange(ageResult.value, 10, 120)) {
-    errors.push(createValidationIssue("age", "AGE_OUT_OF_RANGE", 3, "年齡需介於 10-120"));
+  } else if (!validateRange(ageResult.value, 18, 120)) {
+    errors.push(createValidationIssue("age", "AGE_OUT_OF_RANGE", 3, "年齡需介於 18-120"));
   } else {
     age = ageResult.value;
   }
@@ -406,7 +452,7 @@ function buildIntake(
 
 export function registerDeviceRoutes(
   app: FastifyInstance,
-  { deviceService, guestSessionService, targetGenerationService }: Deps,
+  { deviceService, guestSessionService, targetGenerationService, admissionLimiter }: Deps,
 ) {
   app.post("/api/device", async (request, reply) => {
     const body = request.body;
@@ -422,7 +468,20 @@ export function registerDeviceRoutes(
         return reply.code(400).send({ error: "VALIDATION_ERROR", errors });
       }
 
-      const result = await deviceService.createDevice(body.goal);
+      const subject = await resolveAdmissionSubject(request, { deviceService, guestSessionService });
+      const admission = admissionLimiter.tryAcquire("bootstrap", subject);
+      if (!admission.ok) {
+        if (admission.statusCode === 429) reply.header("Retry-After", String(admission.retryAfterSeconds));
+        return reply.code(admission.statusCode).send({
+          error: admission.statusCode === 429 ? "Admission limit exceeded" : "Invalid guest session",
+        });
+      }
+      let result: Awaited<ReturnType<typeof deviceService.createDevice>>;
+      try {
+        result = await deviceService.createDevice(body.goal);
+      } finally {
+        admission.permit.release();
+      }
       logOnboardingSubmitSucceeded(request.log, { usedTargetFallback: false });
       setGuestSessionCookies(reply, guestSessionService, result.deviceId, 0);
       return { ...result, coachExplanation: null, usedFallback: false };
@@ -434,16 +493,41 @@ export function registerDeviceRoutes(
       return reply.code(400).send({ error: "VALIDATION_ERROR", errors: intakeResult.errors });
     }
 
-    const { dailyTargets, coachExplanation, usedFallback } = await targetGenerationService.generateTargets(
-      intakeResult.goal,
-      intakeResult.intake,
-    );
-    const result = await deviceService.createDevice(
-      intakeResult.goal,
-      intakeResult.intake,
-      dailyTargets,
-      coachExplanation,
-    );
+    const subject = await resolveAdmissionSubject(request, { deviceService, guestSessionService });
+    const bootstrapAdmission = admissionLimiter.tryAcquire("bootstrap", subject);
+    if (!bootstrapAdmission.ok) {
+      if (bootstrapAdmission.statusCode === 429) reply.header("Retry-After", String(bootstrapAdmission.retryAfterSeconds));
+      return reply.code(bootstrapAdmission.statusCode).send({
+        error: bootstrapAdmission.statusCode === 429 ? "Admission limit exceeded" : "Invalid guest session",
+      });
+    }
+
+    let dailyTargets: DailyTargets;
+    let coachExplanation: string;
+    let usedFallback: boolean;
+    let result: Awaited<ReturnType<typeof deviceService.createDevice>>;
+    try {
+      try {
+        ({ dailyTargets, coachExplanation, usedFallback } = await targetGenerationService.generateTargets(
+          intakeResult.goal,
+          intakeResult.intake,
+          { admissionSubject: subject },
+        ));
+      } catch (error) {
+        const rejection = sendAdmissionRejection(reply, error);
+        if (rejection) return rejection;
+        throw error;
+      }
+
+      result = await deviceService.createDevice(
+        intakeResult.goal,
+        intakeResult.intake,
+        dailyTargets,
+        coachExplanation,
+      );
+    } finally {
+      bootstrapAdmission.permit.release();
+    }
     logOnboardingSubmitSucceeded(request.log, { usedTargetFallback: usedFallback });
     setGuestSessionCookies(reply, guestSessionService, result.deviceId, 0);
     return { ...result, coachExplanation, usedFallback };
@@ -469,6 +553,17 @@ export function registerDeviceRoutes(
         clearGuestSessionCookies(reply, guestSessionService);
         return reply.code(401).send({ error: "Invalid guest session" });
       }
+      const admission = admissionLimiter.tryAcquire("bootstrap", {
+        deviceId: deviceRow.id,
+        sessionVersion: deviceRow.sessionVersion,
+      });
+      if (!admission.ok) {
+        if (admission.statusCode === 429) reply.header("Retry-After", String(admission.retryAfterSeconds));
+        return reply.code(admission.statusCode).send({
+          error: admission.statusCode === 429 ? "Admission limit exceeded" : "Invalid guest session",
+        });
+      }
+      admission.permit.release();
       return { ...device, establishedBy: "active" as const };
     }
 
@@ -484,6 +579,17 @@ export function registerDeviceRoutes(
         clearGuestSessionCookies(reply, guestSessionService);
         return reply.code(401).send({ error: "Invalid guest session" });
       }
+      const admission = admissionLimiter.tryAcquire("bootstrap", {
+        deviceId: deviceRow.id,
+        sessionVersion: deviceRow.sessionVersion,
+      });
+      if (!admission.ok) {
+        if (admission.statusCode === 429) reply.header("Retry-After", String(admission.retryAfterSeconds));
+        return reply.code(admission.statusCode).send({
+          error: admission.statusCode === 429 ? "Admission limit exceeded" : "Invalid guest session",
+        });
+      }
+      admission.permit.release();
       reply.header("set-cookie", guestSessionService.issue(resumedSession.deviceId, deviceRow.sessionVersion).cookies);
       return { ...device, establishedBy: "resume" as const };
     }
@@ -521,6 +627,17 @@ export function registerDeviceRoutes(
       return reply.code(401).send({ error: "Invalid device ID" });
     }
 
+    const admission = admissionLimiter.tryAcquire("bootstrap", {
+      deviceId: deviceRow.id,
+      sessionVersion: deviceRow.sessionVersion,
+    });
+    if (!admission.ok) {
+      if (admission.statusCode === 429) reply.header("Retry-After", String(admission.retryAfterSeconds));
+      return reply.code(admission.statusCode).send({
+        error: admission.statusCode === 429 ? "Admission limit exceeded" : "Invalid guest session",
+      });
+    }
+    admission.permit.release();
     setGuestSessionCookies(reply, guestSessionService, device.deviceId, deviceRow.sessionVersion);
     return { ...device, establishedBy: "legacy_migration" as const };
   });
@@ -591,7 +708,24 @@ export function registerDeviceRoutes(
         reason: "macro_calorie_inconsistent",
       });
     }
-    const dailyTargets = await deviceService.updateGoals(deviceId, goals);
+    let dailyTargets: DailyTargets;
+    try {
+      dailyTargets = await deviceService.updateGoals(deviceId, goals);
+    } catch (error) {
+      if (error instanceof DeviceGoalsValidationError) {
+        if (error.code === "UNSAFE_CALORIE_FLOOR") {
+          return reply.code(400).send({
+            error: "Unsafe calorie target",
+            reason: UNSAFE_CALORIE_FLOOR_REASON,
+          });
+        }
+        return reply.code(400).send({
+          error: "Macro targets exceed calorie target",
+          reason: "macro_calorie_inconsistent",
+        });
+      }
+      throw error;
+    }
     logDeviceGoalsUpdatedRest(request.log, { updatedFields: Object.keys(goals) });
     return { dailyTargets };
   };

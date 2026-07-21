@@ -12,7 +12,7 @@ import {
   type BehaviorCaseOutcome,
   type NumberSource,
 } from "../behavior-assertions.js";
-import { createScenarioApp } from "../app-fixture.js";
+import type { ScenarioAppFactory } from "../app-fixture.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { createLlmTraceRecorder } from "../../../server/orchestrator/llm-trace.js";
@@ -163,7 +163,7 @@ function buildOutcome(
   };
 }
 
-export async function runCase01ImageOnly(): Promise<BehaviorCaseOutcome> {
+export async function runCase01ImageOnly(createApp: ScenarioAppFactory): Promise<BehaviorCaseOutcome> {
   await rm(TEMP_ROOT, { recursive: true, force: true });
   await mkdir(path.join(TEMP_ROOT, "uploads"), { recursive: true });
   await mkdir(path.join(TEMP_ROOT, "assets"), { recursive: true });
@@ -198,7 +198,7 @@ export async function runCase01ImageOnly(): Promise<BehaviorCaseOutcome> {
     ],
   });
 
-  const fixture = await createScenarioApp({
+  const fixture = await createApp({
     llmProvider: llm,
     llmTraceRecorderFactory: () => recorder,
     uploadsDir: path.join(TEMP_ROOT, "uploads"),

@@ -1,15 +1,31 @@
 # 更新日誌
 
+## v3.5 - Unreleased
+
+### 變更
+
+- 完成 Repository Integrity Remediation 的 126–128 三個 phase、15 個 plan，將使用者輸入、營養安全、狀態生命週期、metadata-only harness 證據與 source release boundary 收斂為可重跑的 deterministic contract。
+- 將 v3.5 的 readiness 明確限制在 committed source SHA 與 source/release checks；NC-COR-07、NC-COR-08、NC-CLI-01 保留為具體的 future follow-up，不把 NC-TST-02 或 NC-REL-03 誤列為已完成。
+- 保留 PR-ready → maintainer merge → post-merge local archive → separately approved runtime refresh 的發布順序；本次收尾不包含 `main` merge、tag、production runtime、Cloudflare Tunnel 或 public smoke。
+
+### 驗證
+
+- Phase 126：6/6 requirements verified；Phase 127：15/15 success criteria passed；Phase 128：16/16 executed-scope criteria passed，25-entry disposition map 為 20 CLOSED / 3 DEFERRED / 2 OUT-OF-SCOPE。
+- `yarn workflow:state-check`、active planning artifact provenance/seal checks，以及 source wrap 後重新執行的 `yarn release:check` 共同綁定最終 committed source SHA；測試僅使用 mocked 或 harness providers，不宣稱 live-provider、Docker、production 或主觀視覺品質 readiness。
+
 ## v3.4 - Unreleased
 
 ### 變更
 
+- 正式終止 v3.4.1 原五階段 runtime/demo 計畫，保留一頁 postmortem 與 source release、runtime safety and refresh、public validation 三個 deployment gates；Phase 114–118 不恢復或繼續，五分鐘 timed demo 不再是第四個 gate。
+- Repository Recalibration Stage 2 修復 signed `release:check` 的完整 gate-run writer fence、release child 的 `GIT_*` allowlist，以及 privacy-bounded gate failure diagnostics；每項均有舊行為會失敗的 deterministic regression proof。
+- Repository Recalibration Stage 3 移除已完成 hardening episode 專用的 pilot seed、workflow telemetry、Phase 115 R03 reducer、runtime parity matrix 與 readiness/resume contract；保留 release-check、lease/writer fence、receipt、state-check、planning closeout、tree fingerprint、artifact provenance/seal、plan-proof 與 production recovery。
 - Home 營養卡片現在由明確的 entry/update/replay intent、Zustand 狀態與單一時間軸驅動；冷啟動、手動重新整理、返回 Home、餐點編修與 SSE 更新會依來源選擇 replay 或 delta，並維持可測試的同步動畫與 scroll-to-top 邊界。
-- 新增公開英文 AI-safety case study `docs/ai-safety.md`，以 AS-01 到 AS-18 claim/evidence contract 對應 CASE-09 到 CASE-17 的 deterministic instruction/authority 與 nutrition-safety 邊界；這是既有證據的公開敘事，不是 runtime safety-system 變更。
+- 新增公開英文 AI-safety case study `docs/ai-safety-case.md`，以 AS-01 到 AS-18 claim/evidence contract 對應 CASE-09 到 CASE-17 的 deterministic instruction/authority 與 nutrition-safety 邊界；這是既有證據的公開敘事，不是 runtime safety-system 變更。
 - ADR 0010 將 1200 kcal/day 記錄為 conservative、non-clinical product safety floor，並明確排除 universal medical advice 或 personalized clinical recommendation 的解讀。
 - 公開文件以相同四欄結構誠實揭露 #107、#108、#109 的 conversational-quality gaps，保留 deterministic guard 與 future eval 問題的界線，不在本 phase 提出修復或 eval framework。
-- 新增公開 `docs/tour.md` 十站／30 分鐘 reviewer path，並同步 README 與 README-en 的三段式 portfolio narrative；這是既有 architecture 與 AI-safety 證據的導覽層，不是 runtime 或 safety-policy 變更。
-- Phase 113 新增 `docs/demo.md` 的 DEMO-02 named-tunnel runbook handoff 與 DEMO-04 五分鐘固定 script；這只記錄 source 文件，未表示已合併 `main`、刷新 runtime、變更 tunnel、通過 public smoke、關閉 #54 或通過 live semantic demo。
+- 新增公開 `docs/reviewer-tour.md` 十站／30 分鐘 reviewer path，並同步 README 與 README-en 的三段式 portfolio narrative；這是既有 architecture 與 AI-safety 證據的導覽層，不是 runtime 或 safety-policy 變更。
+- Phase 113 新增 `docs/demo-runbook.md` 的 DEMO-02 named-tunnel runbook handoff 與 DEMO-04 五分鐘固定 script；這只記錄 source 文件，未表示已合併 `main`、刷新 runtime、變更 tunnel、通過 public smoke、關閉 #54 或通過 live semantic demo。
 - Source-attested build wrapper 現在只會發佈所選 committed snapshot 產生的 substantive client shell；無效輸出、取消、timeout 或 source drift 都會保留既有 publication，frozen adversarial matrix 也以精確註冊／執行計數和 missing／stale manifest timeout 變體形成可執行證據。
 - `release:check` 現在以 allowlisted structured receipt 保存第一個 failing gate 與實際 process termination，並以前後 workspace fingerprint 阻止 gate 執行期間的 evidence drift；raw child output、private path 與舊式 output-text locator 不會成為分類來源。
 - 新增 non-GSD workflow-hardening 工具與 contract，涵蓋 storage recovery、state／verification freshness、signed closeout journal、planning-proof lint、runtime lease／artifact provenance、parity 與 privacy-bounded telemetry；這些控制不會自行解除 Temporary GSD Maintenance Pause，也不授權 Phase 115、production、merge 或 deploy。

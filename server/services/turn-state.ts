@@ -15,6 +15,8 @@ export const DEFAULT_SESSION_ID = "__default__";
 export const RECENT_MEAL_LOG_KIND = "recent_meal_log";
 export const RECENT_MEAL_LOG_TTL_MS = 5 * 60 * 1000;
 
+export type SyncTransactionClient = AppDatabase["$client"];
+
 export interface TurnStateKey {
   deviceId: string;
   sessionId: string;
@@ -35,11 +37,128 @@ export interface ConsumeTurnStateParams extends TurnStateKey {
   expectedMealRevisionId?: string;
 }
 
+export type RuntimeTurnState = "active" | "stopped" | "disconnected" | "completed";
+
+export interface RuntimeTurnLifecycle {
+  readonly turnId: string;
+  readonly controller: AbortController;
+  readonly state: RuntimeTurnState;
+  requestStop(): boolean;
+  disconnect(): boolean;
+  markCompleted(): boolean;
+  cleanupOnce(cleanup: () => void): boolean;
+  isStopped(): boolean;
+  isDisconnected(): boolean;
+}
+
+export function createRuntimeTurnLifecycle(turnId: string): RuntimeTurnLifecycle {
+  const controller = new AbortController();
+  let currentState: RuntimeTurnState = "active";
+  let cleanupCompleted = false;
+
+  return {
+    turnId,
+    controller,
+    get state() {
+      return currentState;
+    },
+    requestStop() {
+      if (currentState !== "active") return false;
+      currentState = "stopped";
+      controller.abort();
+      return true;
+    },
+    disconnect() {
+      if (currentState !== "active") return false;
+      currentState = "disconnected";
+      controller.abort();
+      return true;
+    },
+    markCompleted() {
+      if (currentState === "disconnected" || currentState === "completed") return false;
+      currentState = "completed";
+      return true;
+    },
+    cleanupOnce(cleanup) {
+      if (cleanupCompleted) return false;
+      cleanupCompleted = true;
+      cleanup();
+      return true;
+    },
+    isStopped() {
+      return currentState === "stopped";
+    },
+    isDisconnected() {
+      return currentState === "disconnected";
+    },
+  };
+}
+
 export function createTurnStateService(db: AppDatabase) {
-  async function clearState({ deviceId, sessionId, kind }: TurnStateKey): Promise<void> {
-    db.$client
+  function clearStateSync(
+    { deviceId, sessionId, kind }: TurnStateKey,
+    client: SyncTransactionClient = db.$client,
+  ): void {
+    client
       .prepare("DELETE FROM turn_states WHERE device_id = ? AND session_id = ? AND kind = ?")
       .run(deviceId, sessionId, kind);
+  }
+
+  function getStateSync<T>({ deviceId, sessionId, kind }: TurnStateKey, client: SyncTransactionClient = db.$client): T | undefined {
+    const row = client
+      .prepare(
+        `
+          SELECT payload, expires_at AS expiresAt
+          FROM turn_states
+          WHERE device_id = ? AND session_id = ? AND kind = ?
+          LIMIT 1
+        `,
+      )
+      .get(deviceId, sessionId, kind) as Pick<TurnStateRow, "payload" | "expiresAt"> | undefined;
+
+    if (!row) return undefined;
+    if (new Date(row.expiresAt).getTime() <= Date.now()) {
+      clearStateSync({ deviceId, sessionId, kind }, client);
+      return undefined;
+    }
+    return JSON.parse(row.payload) as T;
+  }
+
+  function consumeStateSync<T>({
+    deviceId,
+    sessionId,
+    kind,
+    proposalId,
+    expectedMealRevisionId,
+  }: ConsumeTurnStateParams, client: SyncTransactionClient = db.$client): T | undefined {
+    const row = client
+      .prepare(
+        `
+          DELETE FROM turn_states
+          WHERE device_id = ?
+            AND session_id = ?
+            AND kind = ?
+            AND expires_at > ?
+            AND json_extract(payload, '$.proposalId') = ?
+            AND (? IS NULL OR json_extract(payload, '$.expectedMealRevisionId') = ?)
+          RETURNING payload
+        `,
+      )
+      .get(
+        deviceId,
+        sessionId,
+        kind,
+        new Date().toISOString(),
+        proposalId,
+        expectedMealRevisionId ?? null,
+        expectedMealRevisionId ?? null,
+      ) as Pick<TurnStateRow, "payload"> | undefined;
+
+    return row ? JSON.parse(row.payload) as T : undefined;
+  }
+
+  async function clearState({ deviceId, sessionId, kind }: TurnStateKey): Promise<void> {
+    clearStateSync({ deviceId, sessionId, kind });
   }
 
   return {
@@ -88,38 +207,13 @@ export function createTurnStateService(db: AppDatabase) {
     },
 
     async getState<T>({ deviceId, sessionId, kind }: TurnStateKey): Promise<T | undefined> {
-      const row = db.$client
-        .prepare(
-          `
-            SELECT
-              id,
-              device_id AS deviceId,
-              session_id AS sessionId,
-              kind,
-              payload,
-              expires_at AS expiresAt,
-              created_at AS createdAt,
-              updated_at AS updatedAt
-            FROM turn_states
-            WHERE device_id = ? AND session_id = ? AND kind = ?
-            LIMIT 1
-          `,
-        )
-        .get(deviceId, sessionId, kind) as TurnStateRow | undefined;
-
-      if (!row) {
-        return undefined;
-      }
-
-      if (new Date(row.expiresAt).getTime() <= Date.now()) {
-        await clearState({ deviceId, sessionId, kind });
-        return undefined;
-      }
-
-      return JSON.parse(row.payload) as T;
+      return getStateSync({ deviceId, sessionId, kind });
     },
 
+    getStateSync,
+
     clearState,
+    clearStateSync,
 
     async consumeState<T>({
       deviceId,
@@ -128,35 +222,16 @@ export function createTurnStateService(db: AppDatabase) {
       proposalId,
       expectedMealRevisionId,
     }: ConsumeTurnStateParams): Promise<T | undefined> {
-      const row = db.$client
-        .prepare(
-          `
-            DELETE FROM turn_states
-            WHERE device_id = ?
-              AND session_id = ?
-              AND kind = ?
-              AND expires_at > ?
-              AND json_extract(payload, '$.proposalId') = ?
-              AND (? IS NULL OR json_extract(payload, '$.expectedMealRevisionId') = ?)
-            RETURNING payload
-          `,
-        )
-        .get(
-          deviceId,
-          sessionId,
-          kind,
-          new Date().toISOString(),
-          proposalId,
-          expectedMealRevisionId ?? null,
-          expectedMealRevisionId ?? null,
-        ) as Pick<TurnStateRow, "payload"> | undefined;
-
-      if (!row) {
-        return undefined;
-      }
-
-      return JSON.parse(row.payload) as T;
+      return consumeStateSync({
+        deviceId,
+        sessionId,
+        kind,
+        proposalId,
+        expectedMealRevisionId,
+      });
     },
+
+    consumeStateSync,
   };
 }
 

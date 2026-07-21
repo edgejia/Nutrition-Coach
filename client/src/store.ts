@@ -89,6 +89,7 @@ export type HomeAnimationPendingIntent = {
 interface HomeAnimationState {
   baseline: HomeNutritionSnapshot | null;
   unseenTodayMutation: boolean;
+  lastIssuedToken: number;
   pendingIntent: HomeAnimationPendingIntent | null;
   homeVisibleMutationBaseline: HomeNutritionSnapshot | null;
 }
@@ -97,13 +98,14 @@ function createInitialHomeAnimation(): HomeAnimationState {
   return {
     baseline: null,
     unseenTodayMutation: false,
+    lastIssuedToken: 0,
     pendingIntent: null,
     homeVisibleMutationBaseline: null,
   };
 }
 
-function nextHomeAnimationToken(pendingIntent: HomeAnimationPendingIntent | null): number {
-  return (pendingIntent?.token ?? 0) + 1;
+function nextHomeAnimationToken(homeAnimation: HomeAnimationState): number {
+  return Math.max(homeAnimation.lastIssuedToken, homeAnimation.pendingIntent?.token ?? 0) + 1;
 }
 
 function buildCurrentHomeNutritionSnapshot(input: {
@@ -129,13 +131,14 @@ function commitHomeVisibleNutritionSnapshot(
     : {
         kind: "replay" as const,
         from: null,
-        token: nextHomeAnimationToken(homeAnimation.pendingIntent),
+        token: nextHomeAnimationToken(homeAnimation),
         origin: "cold_start" as const,
       };
 
   return {
     baseline,
     unseenTodayMutation: false,
+    lastIssuedToken: Math.max(homeAnimation.lastIssuedToken, pendingIntent?.token ?? 0),
     pendingIntent,
     homeVisibleMutationBaseline: options.preserveHomeVisibleMutationBaseline
       ? homeAnimation.homeVisibleMutationBaseline
@@ -451,7 +454,7 @@ export const useStore = create<AppState>((set, get) => ({
         current,
         unseenTodayMutation: state.homeAnimation.unseenTodayMutation,
       });
-      const token = nextHomeAnimationToken(state.homeAnimation.pendingIntent);
+      const token = nextHomeAnimationToken(state.homeAnimation);
       const pendingIntent = toHomeAnimationPendingIntent(intent, token, "manual_refresh");
 
       return {
@@ -460,6 +463,10 @@ export const useStore = create<AppState>((set, get) => ({
         homeAnimation: {
           baseline: current,
           unseenTodayMutation: false,
+          lastIssuedToken: Math.max(
+            state.homeAnimation.lastIssuedToken,
+            pendingIntent?.token ?? 0,
+          ),
           pendingIntent,
           homeVisibleMutationBaseline: null,
         },
@@ -493,7 +500,7 @@ export const useStore = create<AppState>((set, get) => ({
         current,
         unseenTodayMutation: state.homeAnimation.unseenTodayMutation,
       });
-      const token = nextHomeAnimationToken(state.homeAnimation.pendingIntent);
+      const token = nextHomeAnimationToken(state.homeAnimation);
       const pendingIntent =
         toHomeAnimationPendingIntent(intent, token, "meal_mutation")
         ?? state.homeAnimation.pendingIntent;
@@ -504,6 +511,10 @@ export const useStore = create<AppState>((set, get) => ({
         homeAnimation: {
           baseline: current,
           unseenTodayMutation: false,
+          lastIssuedToken: Math.max(
+            state.homeAnimation.lastIssuedToken,
+            pendingIntent?.token ?? 0,
+          ),
           pendingIntent,
           homeVisibleMutationBaseline: null,
         },
@@ -548,13 +559,17 @@ export const useStore = create<AppState>((set, get) => ({
         current,
         unseenTodayMutation: state.homeAnimation.unseenTodayMutation,
       });
-      const token = nextHomeAnimationToken(state.homeAnimation.pendingIntent);
+      const token = nextHomeAnimationToken(state.homeAnimation);
       const pendingIntent = toHomeAnimationPendingIntent(intent, token, trigger);
 
       return {
         homeAnimation: {
           baseline: nextBaseline,
           unseenTodayMutation: false,
+          lastIssuedToken: Math.max(
+            state.homeAnimation.lastIssuedToken,
+            pendingIntent?.token ?? 0,
+          ),
           pendingIntent,
           homeVisibleMutationBaseline: null,
         },

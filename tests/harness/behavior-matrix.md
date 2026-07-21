@@ -64,7 +64,7 @@ Run `yarn behavior-matrix:gen` to update this file and `yarn behavior-matrix:gen
 | CASE-03 | grounded_numbers | assertGroundedNumbers |
 | CASE-03 | no_fabricated_meals | assertNoInventedMeals |
 | CASE-03 | receipt_consistency | assertGroundedNumbers<br>assertNoInventedMeals |
-| CASE-03 | trace_final_reply_source | evaluateExpectedFailures |
+| CASE-03 | trace_final_reply_source | assertSuccessfulMutationRendererSource |
 | CASE-04 | traditional_chinese | assertTraditionalChinese |
 | CASE-04 | internal_api_leakage | assertNoInternalLeakage |
 | CASE-04 | grounded_numbers | assertGroundedNumbers |

@@ -15,8 +15,10 @@ import {
   buildSseConnectionStateEvent,
   parseHomeCtaClientEvent,
   sanitizeRouteCatchError,
+  classifyProviderErrorCategory,
   type RedactedObservabilityEventName,
 } from "../../server/observability/events.js";
+import { createStructuredHooks } from "../../server/orchestrator/hooks.js";
 import type { ProviderErrorMetadata } from "../../server/llm/types.js";
 import { PROTECTED_ROUTE_META } from "../../server/routes/protected-route.js";
 
@@ -134,6 +136,70 @@ function assertLockedPayload(payload: { event: RedactedObservabilityEventName } 
 }
 
 describe("redacted observability event builders", () => {
+  it("keeps provider error categories fixed and routine hook diagnostics metadata-only", () => {
+    assert.equal(classifyProviderErrorCategory({
+      provider: "openai",
+      operation: "chat",
+      model: "gpt-test",
+      aborted: false,
+      status: 500,
+      errorCode: "raw-provider-body-sentinel-4c2a",
+    }), "server_error");
+
+    const captured: Array<Record<string, unknown>> = [];
+    const log = {
+      info(payload: Record<string, unknown>) { captured.push(payload); },
+      warn(payload: Record<string, unknown>) { captured.push(payload); },
+    };
+    const hooks = createStructuredHooks(log as never);
+
+    hooks.onToolReceived?.("log_food", "privacy-sentinel-prompt-8b1d");
+    hooks.onToolResult?.({
+      tool: "log_food",
+      success: false,
+      executed: false,
+      failureReason: "raw-error-sentinel-31d9",
+      reason: "raw-tool-payload-sentinel-77e1",
+      fields: ["calories", "privacy-sentinel-field-2a91"],
+      summary: "熱量 918273kcal, P817263g, C716253g, F615243g",
+      proposalId: "privacy-sentinel-session-4e7b",
+    });
+    hooks.onLLMError?.({
+      round: 2,
+      lastTool: "log_food",
+      providerMetadata: {
+        provider: "openai",
+        operation: "chat",
+        model: "gpt-test",
+        aborted: false,
+        status: 502,
+        providerRequestId: "privacy-sentinel-header-62f4",
+        errorName: "raw-provider-body-sentinel-4c2a",
+        errorType: "raw-provider-type-sentinel-11aa",
+        errorCode: "raw-provider-code-sentinel-90cd",
+      },
+    });
+
+    for (const sentinel of [
+      "privacy-sentinel-prompt-8b1d",
+      "raw-error-sentinel-31d9",
+      "raw-tool-payload-sentinel-77e1",
+      "918273",
+      "817263",
+      "716253",
+      "615243",
+      "privacy-sentinel-field-2a91",
+      "privacy-sentinel-session-4e7b",
+      "privacy-sentinel-header-62f4",
+      "raw-provider-body-sentinel-4c2a",
+      "raw-provider-type-sentinel-11aa",
+      "raw-provider-code-sentinel-90cd",
+    ]) {
+      const count = JSON.stringify(captured).split(sentinel).length - 1;
+      assert.equal(count, 0, `channel=structured_hook key=metadata count=${count}`);
+    }
+  });
+
   it("emits exactly the locked event names", () => {
     const payloads = [
       buildOnboardingSubmitStartedEvent({ source: "server" }),

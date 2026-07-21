@@ -1,7 +1,8 @@
 import { createLlmTraceRecorder } from "../../../server/orchestrator/llm-trace.js";
 import { validPngBytes } from "../../fixtures/image-bytes.js";
-import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
+import { buildPositiveScenarioResult } from "../positive-metadata.js";
+import type { LlmTraceArtifact } from "../../../server/orchestrator/llm-trace.js";
 import type { ScenarioContext, ScenarioResult, ScenarioStepResult, VerificationScenario } from "../scenario-types.js";
 
 const STEP_NAMES = [
@@ -71,37 +72,73 @@ function failResult(
   steps: ScenarioStepResult[],
   failedStepName: string,
   artifacts: Record<string, unknown>,
-  llmTrace?: Record<string, unknown>,
+  llmTrace?: LlmTraceArtifact,
 ): ScenarioResult {
-  const result: ScenarioResult = {
-    ok: false,
-    failedStep: failedStepName,
-    steps,
-    artifacts,
-    consoleSummary: `FAIL ${scenarioName} ${failedStepName}`,
-  };
-  if (llmTrace !== undefined) {
-    result.llmTrace = llmTrace;
-  }
-  return result;
+  return buildPositiveScenarioResult(scenarioName, false, steps, failedStepName, {
+    counts: {
+      expectedStepCount: STEP_NAMES.length,
+      recordedEvidenceCount: Array.isArray(artifacts.evidence) ? artifacts.evidence.length : 0,
+    },
+    assertions: {
+      detailedChecksCompleted: Array.isArray(artifacts.evidence) && artifacts.evidence.length > 0,
+    },
+    trace: projectTrace(llmTrace),
+  });
 }
 
 function passResult(
   scenarioName: string,
   steps: ScenarioStepResult[],
   artifacts: Record<string, unknown>,
-  llmTrace?: Record<string, unknown>,
+  llmTrace?: LlmTraceArtifact,
 ): ScenarioResult {
-  const result: ScenarioResult = {
-    ok: true,
-    steps,
-    artifacts,
-    consoleSummary: `PASS ${scenarioName} ${steps.filter((step) => step.ok).length}/${STEP_NAMES.length}`,
-  };
-  if (llmTrace !== undefined) {
-    result.llmTrace = llmTrace;
+  return buildPositiveScenarioResult(scenarioName, true, steps, undefined, {
+    counts: {
+      expectedStepCount: STEP_NAMES.length,
+      recordedEvidenceCount: Array.isArray(artifacts.evidence) ? artifacts.evidence.length : 0,
+    },
+    assertions: {
+      allCasesPassed: true,
+      detailedChecksCompleted: true,
+    },
+    trace: projectTrace(llmTrace),
+  });
+}
+
+function projectTrace(trace: LlmTraceArtifact | undefined): {
+  eventNames: string[];
+  counts: Record<string, number>;
+} {
+  if (!trace) {
+    return {
+      eventNames: [],
+      counts: {
+        llmRoundStart: 0,
+        llmRoundEnd: 0,
+        toolReceived: 0,
+        toolResult: 0,
+        llmError: 0,
+        orchestratorFallback: 0,
+        routeCompletion: 0,
+        routeFallback: 0,
+      },
+    };
   }
-  return result;
+  const count = (type: LlmTraceArtifact["timeline"][number]["type"]): number =>
+    trace.timeline.filter((event) => event.type === type).length;
+  return {
+    eventNames: [],
+    counts: {
+      llmRoundStart: count("llm_round_start"),
+      llmRoundEnd: count("llm_round_end"),
+      toolReceived: count("tool_received"),
+      toolResult: count("tool_result"),
+      llmError: count("llm_error"),
+      orchestratorFallback: count("orchestrator_fallback"),
+      routeCompletion: count("route_completion"),
+      routeFallback: count("route_fallback"),
+    },
+  };
 }
 
 function sanitizeMeals(meals: Array<MealSnapshot>): MealSnapshot[] {
@@ -204,7 +241,16 @@ function assertNoMealWrite(response: ChatResponsePayload, label: string) {
 const scenario: VerificationScenario = {
   name: "meal-intent-routing",
 
-  async run(_ctx: ScenarioContext): Promise<ScenarioResult> {
+  prepareApp() {
+    const provider = new StreamingLLMProvider();
+    const recorder = createLlmTraceRecorder();
+    return {
+      appOptions: { llmProvider: provider, llmTraceRecorderFactory: () => recorder },
+      state: { provider, recorder },
+    };
+  },
+
+  async run(ctx: ScenarioContext): Promise<ScenarioResult> {
     const scenarioName = "meal-intent-routing";
     const steps: ScenarioStepResult[] = [];
     const artifacts: Record<string, unknown> = {
@@ -215,20 +261,18 @@ const scenario: VerificationScenario = {
         liveModelCalls: false,
       },
     };
-    const provider = new StreamingLLMProvider();
-    const recorder = createLlmTraceRecorder();
-    const trace = (status: "pass" | "fail") =>
-      recorder.build({ scenario: scenarioName, status }) as unknown as Record<string, unknown>;
+    const { provider, recorder } = ctx.prepared as {
+      provider: StreamingLLMProvider;
+      recorder: ReturnType<typeof createLlmTraceRecorder>;
+    };
+    const trace = (status: "pass" | "fail") => recorder.build({ scenario: scenarioName, status });
     const failScenario = (stepName: string, error: unknown): ScenarioResult => {
       const message = error instanceof Error ? error.message : String(error);
       steps.push(fail(stepName, message));
       return failResult(scenarioName, steps, stepName, artifacts, trace("fail"));
     };
 
-    const fixture = await createScenarioApp({
-      llmProvider: provider,
-      llmTraceRecorderFactory: () => recorder,
-    });
+    const fixture = ctx;
 
     try {
       try {
@@ -237,7 +281,7 @@ const scenario: VerificationScenario = {
           throw new Error(`expected empty bootstrap meals, got ${meals.length}`);
         }
         artifacts.bootstrap = {
-          auth: "cookieHeader from createScenarioApp; no raw deviceId selector",
+          auth: "runner-provided cookieHeader; no raw deviceId selector",
           mealsSnapshot: meals,
         };
         steps.push(pass("bootstrap", { meals: meals.length }));
@@ -545,7 +589,6 @@ const scenario: VerificationScenario = {
 
       return passResult(scenarioName, steps, artifacts, trace("pass"));
     } finally {
-      await fixture.close();
     }
   },
 };

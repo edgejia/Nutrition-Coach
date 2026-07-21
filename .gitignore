@@ -34,11 +34,9 @@ tests/harness/tmp/
 
 # Local research, personal notes, and project-level agent habits
 docs/research
-docs/README.md
 docs/codex.md
 docs/codex-pr-ci.md
 docs/codex-release.md
-docs/HANDOFF
 docs/issues
 
 # Secrets, databases, OS files, and browser/tool cache

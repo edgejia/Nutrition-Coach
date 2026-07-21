@@ -81,7 +81,7 @@ describe("insight trace artifacts", () => {
     assert.doesNotMatch(raw, /internal schema should not persist/);
   });
 
-  test("summarizeToolCallArgs omits raw prompt device and schema data", () => {
+  test("summarizeToolCallArgs omits raw prompt, device, and schema data", () => {
     const summary = summarizeToolCallArgs({
       from: "2026-04-20",
       to: "2026-04-26",
@@ -106,33 +106,34 @@ describe("insight trace artifacts", () => {
     });
 
     after(() => {
-      if (originalEnv === undefined) {
-        delete process.env.HARNESS_ARTIFACTS_DIR;
-      } else {
-        process.env.HARNESS_ARTIFACTS_DIR = originalEnv;
-      }
+      if (originalEnv === undefined) delete process.env.HARNESS_ARTIFACTS_DIR;
+      else process.env.HARNESS_ARTIFACTS_DIR = originalEnv;
       fs.rmSync(tmpDir, { recursive: true, force: true });
     });
 
-    test("writeScenarioArtifacts persists insight traces without sensitive fields", async () => {
+    test("rejects legacy insight trace evidence instead of persisting arbitrary trace fields", async () => {
       const result: ScenarioResult = {
         ok: false,
         failedStep: "trace_redaction",
         steps: [{ name: "trace_redaction", ok: false, actual: failingTrace() }],
-        artifacts: { trace: failingTrace() },
+        artifacts: { trace: failingTrace(), sentinel: "must-not-be-persisted" },
         consoleSummary: "FAIL insight-trace-redaction trace_redaction",
       };
-      await writeScenarioArtifacts("insight-trace-redaction", result);
+
+      await assert.rejects(
+        writeScenarioArtifacts("insight-trace-redaction", result),
+        (error: unknown) => {
+          assert.equal((error as { category?: string }).category, "artifact_allowlist_violation");
+          return true;
+        },
+      );
 
       const latest = path.join(tmpDir, "insight-trace-redaction", "latest");
-      const raw = fs.readFileSync(path.join(latest, "snapshots.json"), "utf-8");
-      assert.doesNotMatch(raw, /secret-device-30/);
-      assert.doesNotMatch(raw, /sk-test-secret/);
-      assert.doesNotMatch(raw, /raw prompt text should not persist/);
-      assert.doesNotMatch(raw, /Error: stack should not persist/);
-      assert.match(raw, /deterministicMetrics/);
-      assert.doesNotMatch(raw, /finalAnswer/);
-      assert.match(raw, /assertions/);
+      const raw = fs.readdirSync(latest)
+        .map((fileName) => fs.readFileSync(path.join(latest, fileName), "utf8"))
+        .join("\n");
+      assert.doesNotMatch(raw, /must-not-be-persisted|secret-device-30|sk-test-secret/);
+      assert.match(raw, /artifact_allowlist_violation/);
     });
   });
 });

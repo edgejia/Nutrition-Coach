@@ -52,7 +52,8 @@ import {
 import type { createProposalCardService } from "./proposal-cards.js";
 import type { DailySummary } from "./summary.js";
 import type { SummaryOutcome } from "./summary-outcome.js";
-import { DEFAULT_SESSION_ID } from "./turn-state.js";
+import { dailySummaryFromOutcome } from "./summary-outcome.js";
+import { DEFAULT_SESSION_ID, type SyncTransactionClient } from "./turn-state.js";
 
 export type ProposalActionRequestKind = ProposalKind;
 export type ProposalActionRequestAction = "approve" | "reject";
@@ -72,6 +73,7 @@ export interface ProposalEditContextValidationInput {
 }
 
 export interface ProposalActionTestHooks {
+  beforeDecision?: (input: ProposalActionServiceInput) => void | Promise<void>;
   afterDomainMutation?: (input: {
     deviceId: string;
     proposalId: string;
@@ -143,6 +145,7 @@ type PostCommitPublish =
 interface DurableDecision<T extends ProposalActionServiceResult = ProposalActionServiceResult> {
   result: T;
   publish?: PostCommitPublish;
+  postCommitSummary?: { affectedDate: string };
 }
 
 function activeKindMatches(input: {
@@ -172,13 +175,13 @@ function activeProposalIdMatches(
 }
 
 export function createProposalActionService(deps: ProposalActionDeps) {
-  async function runDurableDecision<T extends ProposalActionServiceResult>(
-    fn: () => Promise<DurableDecision<T>>,
-  ): Promise<DurableDecision<T>> {
+  function runDurableDecision<T extends ProposalActionServiceResult>(
+    fn: (client: SyncTransactionClient) => DurableDecision<T>,
+  ): DurableDecision<T> {
     deps.db.$client.prepare("BEGIN IMMEDIATE").run();
     let transactionOpen = true;
     try {
-      const decision = await fn();
+      const decision = fn(deps.db.$client);
       deps.db.$client.prepare("COMMIT").run();
       transactionOpen = false;
       return decision;
@@ -218,6 +221,19 @@ export function createProposalActionService(deps: ProposalActionDeps) {
     };
   }
 
+  function getCommittedTargetsSync(deviceId: string, client: SyncTransactionClient): DailyTargets {
+    const device = deps.deviceService.getDeviceSync(deviceId, client);
+    if (!device) {
+      throw new Error("proposal action completed without device targets");
+    }
+    return {
+      calories: device.dailyCalories,
+      protein: device.dailyProtein,
+      carbs: device.dailyCarbs,
+      fat: device.dailyFat,
+    };
+  }
+
   function cancelReply(kind: ProposalActionRequestKind): string {
     if (kind === "goal") {
       return renderGoalCancelCopy();
@@ -231,8 +247,29 @@ export function createProposalActionService(deps: ProposalActionDeps) {
   async function loadCard(input: {
     deviceId: string;
     proposalId: string;
+    kind: ProposalActionRequestKind;
   }): Promise<ProposalCardMetadata | undefined> {
-    return deps.proposalCardService.getLatestCardForProposal(input);
+    return deps.proposalCardService.getLatestCardForProposal({
+      deviceId: input.deviceId,
+      proposalId: input.proposalId,
+      proposalKind: input.kind,
+    });
+  }
+
+  async function loadActiveCardForStaleProjection(input: {
+    deviceId: string;
+    proposalId: string;
+    kind: ProposalActionRequestKind;
+  }): Promise<ProposalCardMetadata | undefined> {
+    const card = await loadCard(input);
+    if (card) {
+      return card;
+    }
+    const candidate = await deps.proposalCardService.getLatestCardForProposal({
+      deviceId: input.deviceId,
+      proposalId: input.proposalId,
+    });
+    return candidate?.status === "active" ? candidate : undefined;
   }
 
   async function markStale(input: {
@@ -240,7 +277,7 @@ export function createProposalActionService(deps: ProposalActionDeps) {
     proposalId: string;
     kind: ProposalActionRequestKind;
   }): Promise<ProposalActionServiceResult> {
-    const card = await loadCard(input);
+    const card = await loadActiveCardForStaleProjection(input);
     if (!card) {
       if (await activeProposalMatchesContext(input)) {
         await clearActiveProposal(input);
@@ -265,6 +302,7 @@ export function createProposalActionService(deps: ProposalActionDeps) {
     await deps.proposalCardService.markProposalStatus({
       deviceId: input.deviceId,
       proposalId: input.proposalId,
+      proposalKind: input.kind,
       status: "stale",
       lapseCopy: renderProposalInactiveCopy({ proposalKind: input.kind, status: "stale" }),
     });
@@ -280,8 +318,27 @@ export function createProposalActionService(deps: ProposalActionDeps) {
   async function buildRetryableProposalActionResult(input: {
     deviceId: string;
     proposalId: string;
+    kind: ProposalActionRequestKind;
   }): Promise<Extract<ProposalActionServiceResult, { status: "retryable" }>> {
     const card = await loadCard(input);
+    return {
+      ok: false,
+      status: "retryable",
+      didMutateMeal: false,
+      reply: renderProposalRecoverableFailureCopy(),
+      ...(card ? { proposalCard: projectProposalCardForClient(card) } : {}),
+    };
+  }
+
+  function buildRetryableProposalActionResultSync(
+    input: { deviceId: string; proposalId: string; kind: ProposalActionRequestKind },
+    client: SyncTransactionClient,
+  ): Extract<ProposalActionServiceResult, { status: "retryable" }> {
+    const card = deps.proposalCardService.getLatestCardForProposalSync({
+      deviceId: input.deviceId,
+      proposalId: input.proposalId,
+      proposalKind: input.kind,
+    }, client);
     return {
       ok: false,
       status: "retryable",
@@ -294,12 +351,14 @@ export function createProposalActionService(deps: ProposalActionDeps) {
   async function blockUnsafeGoalProposalAction(input: {
     deviceId: string;
     proposalId: string;
+    kind: ProposalActionRequestKind;
   }): Promise<Extract<ProposalActionServiceResult, { status: "stale" }>> {
     const reply = renderUnsafeCalorieFloorCopy();
     await deps.goalProposalService.clear({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID });
     await deps.proposalCardService.markProposalStatus({
       deviceId: input.deviceId,
       proposalId: input.proposalId,
+      proposalKind: input.kind,
       status: "stale",
       lapseCopy: reply,
     });
@@ -353,6 +412,121 @@ export function createProposalActionService(deps: ProposalActionDeps) {
     await deps.mealDeleteProposalService.clear({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID });
   }
 
+  function clearActiveProposalSync(
+    input: { deviceId: string; kind: ProposalActionRequestKind },
+    client: SyncTransactionClient,
+  ): void {
+    if (input.kind === "goal") {
+      deps.goalProposalService.clearSync({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID }, client);
+      return;
+    }
+    if (input.kind === "meal_numeric" || input.kind === "meal_estimate") {
+      deps.mealNumericProposalService.clearSync({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID }, client);
+      return;
+    }
+    deps.mealDeleteProposalService.clearSync({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID }, client);
+  }
+
+  function activeProposalMatchesContextSync(
+    input: ProposalEditContextValidationInput,
+    client: SyncTransactionClient,
+  ): boolean {
+    if (input.kind === "goal") {
+      const proposal = deps.goalProposalService.getLatestSync({
+        deviceId: input.deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+      }, client);
+      return activeProposalIdMatches(proposal, input.proposalId)
+        && activeKindMatches({ kind: input.kind, proposal });
+    }
+    if (input.kind === "meal_numeric" || input.kind === "meal_estimate") {
+      const proposal = deps.mealNumericProposalService.getLatestSync({
+        deviceId: input.deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+      }, client);
+      return activeProposalIdMatches(proposal, input.proposalId)
+        && activeKindMatches({ kind: input.kind, proposal });
+    }
+    const proposal = deps.mealDeleteProposalService.getLatestSync({
+      deviceId: input.deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+    }, client);
+    return activeProposalIdMatches(proposal, input.proposalId)
+      && activeKindMatches({ kind: input.kind, proposal });
+  }
+
+  function markStaleSync(
+    input: { deviceId: string; proposalId: string; kind: ProposalActionRequestKind },
+    client: SyncTransactionClient,
+  ): ProposalActionServiceResult {
+    const card = deps.proposalCardService.getLatestCardForProposalSync(input, client)
+      ?? (() => {
+        const candidate = deps.proposalCardService.getLatestCardForProposalSync({
+          deviceId: input.deviceId,
+          proposalId: input.proposalId,
+        }, client);
+        return candidate?.status === "active" ? candidate : undefined;
+      })();
+    if (!card) {
+      if (activeProposalMatchesContextSync(input, client)) {
+        clearActiveProposalSync(input, client);
+      }
+      return { ok: false, status: "stale", didMutateMeal: false };
+    }
+    if (
+      card.status !== "active"
+      || card.proposalKind !== input.kind
+      || card.proposalLane !== proposalKindToLane(input.kind)
+    ) {
+      return {
+        ok: false,
+        status: "stale",
+        didMutateMeal: false,
+        proposalCard: projectProposalCardForClient(card),
+      };
+    }
+    if (activeProposalMatchesContextSync(input, client)) {
+      clearActiveProposalSync(input, client);
+    }
+    deps.proposalCardService.markProposalStatusSync({
+      deviceId: input.deviceId,
+      proposalId: input.proposalId,
+      proposalKind: input.kind,
+      status: "stale",
+      lapseCopy: renderProposalInactiveCopy({ proposalKind: input.kind, status: "stale" }),
+    }, client);
+    const updated = deps.proposalCardService.getLatestCardForProposalSync(input, client);
+    return {
+      ok: false,
+      status: "stale",
+      didMutateMeal: false,
+      ...(updated ? { proposalCard: projectProposalCardForClient(updated) } : {}),
+    };
+  }
+
+  function blockUnsafeGoalProposalActionSync(
+    input: { deviceId: string; proposalId: string; kind: ProposalActionRequestKind },
+    client: SyncTransactionClient,
+  ): Extract<ProposalActionServiceResult, { status: "stale" }> {
+    const reply = renderUnsafeCalorieFloorCopy();
+    deps.goalProposalService.clearSync({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID }, client);
+    deps.proposalCardService.markProposalStatusSync({
+      deviceId: input.deviceId,
+      proposalId: input.proposalId,
+      proposalKind: input.kind,
+      status: "stale",
+      lapseCopy: reply,
+    }, client);
+    const card = deps.proposalCardService.getLatestCardForProposalSync(input, client);
+    return {
+      ok: false,
+      status: "stale",
+      didMutateMeal: false,
+      reply,
+      ...(card ? { proposalCard: projectProposalCardForClient(card) } : {}),
+    };
+  }
+
   async function saveActionEvent(input: {
     deviceId: string;
     kind: ProposalActionRequestKind;
@@ -379,6 +553,32 @@ export function createProposalActionService(deps: ProposalActionDeps) {
     return projectProposalActionEventForClient(event);
   }
 
+  function saveActionEventSync(input: {
+    deviceId: string;
+    kind: ProposalActionRequestKind;
+    action: ProposalActionRequestAction;
+    card: ProposalCardMetadata;
+    actionMessageId?: string;
+  }, client: SyncTransactionClient): ProposalActionEventClientMetadata {
+    const transcriptCopy = renderProposalActionEventCopy({
+      proposalKind: input.kind,
+      action: input.action,
+    });
+    const actionMessageId = input.actionMessageId
+      ?? deps.chatService.saveMessageSync(input.deviceId, "user", transcriptCopy, undefined, client).id;
+    const event = deps.proposalCardService.saveProposalActionEventSync({
+      deviceId: input.deviceId,
+      actionMessageId,
+      assistantMessageId: input.card.assistantMessageId,
+      proposalId: input.card.proposalId,
+      proposalKind: input.card.proposalKind,
+      proposalLane: input.card.proposalLane,
+      action: input.action,
+      transcriptCopy,
+    }, client);
+    return projectProposalActionEventForClient(event);
+  }
+
   async function completeActiveAction(input: {
     deviceId: string;
     proposalId: string;
@@ -400,6 +600,7 @@ export function createProposalActionService(deps: ProposalActionDeps) {
     await deps.proposalCardService.markProposalStatus({
       deviceId: input.deviceId,
       proposalId: input.proposalId,
+      proposalKind: input.kind,
       status: input.action === "approve" ? "approved" : "rejected",
     });
     const [card, event] = await Promise.all([
@@ -452,6 +653,76 @@ export function createProposalActionService(deps: ProposalActionDeps) {
       ...(input.mutation?.affectedDate ? { affectedDate: input.mutation.affectedDate } : {}),
       ...(input.mutation?.summaryOutcome ? { summaryOutcome: input.mutation.summaryOutcome } : {}),
       ...(input.mutation?.dailySummary ? { dailySummary: input.mutation.dailySummary } : {}),
+    };
+  }
+
+  const transactionSummaryUnavailable: SummaryOutcome = {
+    status: "unavailable",
+    reason: "recompute_failed",
+  };
+
+  function completeActiveActionSync(input: {
+    deviceId: string;
+    proposalId: string;
+    kind: ProposalActionRequestKind;
+    action: ProposalActionRequestAction;
+    card: ProposalCardMetadata;
+    actionMessageId?: string;
+    mutation?: {
+      didMutateMeal: boolean;
+      effects?: MutationEffects;
+      dailyTargets?: DailyTargets;
+      updatedMeal?: unknown;
+      deletedMealId?: string;
+      affectedDate?: string;
+    };
+  }, client: SyncTransactionClient): Extract<ProposalActionServiceResult, { ok: true }> {
+    deps.proposalCardService.markProposalStatusSync({
+      deviceId: input.deviceId,
+      proposalId: input.proposalId,
+      proposalKind: input.kind,
+      status: input.action === "approve" ? "approved" : "rejected",
+    }, client);
+    const card = deps.proposalCardService.getLatestCardForProposalSync(input, client);
+    if (!card) {
+      throw new Error("proposal action completed without persisted proposal card");
+    }
+    const event = saveActionEventSync(input, client);
+    const reply = input.mutation?.effects
+      ? renderGuardedMutationReceipt(input.mutation.effects, {
+          operation: "proposal_action",
+          verb: input.mutation.effects.kind,
+          ...(deps.log !== undefined ? { log: deps.log } : {}),
+        })
+      : input.action === "reject"
+        ? cancelReply(input.kind)
+        : undefined;
+    const mutationOutcomeFact = input.mutation?.effects
+      ? mutationOutcomeFactFromEffects(input.mutation.effects)
+      : undefined;
+    if (reply?.trim()) {
+      if (mutationOutcomeFact) {
+        deps.chatService.saveAssistantReplyWithReceiptSync({
+          deviceId: input.deviceId,
+          content: reply,
+          mutationOutcomeFact,
+        }, client);
+      } else {
+        deps.chatService.saveMessageSync(input.deviceId, "assistant", reply, undefined, client);
+      }
+    }
+    return {
+      ok: true,
+      status: input.action === "approve" ? "approved" : "rejected",
+      proposalCard: projectProposalCardForClient(card),
+      proposalActionEvent: event,
+      didMutateMeal: input.mutation?.didMutateMeal ?? false,
+      reply,
+      ...(mutationOutcomeFact ? { mutationOutcomeFact } : {}),
+      ...(input.mutation?.dailyTargets ? { dailyTargets: input.mutation.dailyTargets } : {}),
+      ...(input.mutation?.updatedMeal ? { updatedMeal: input.mutation.updatedMeal } : {}),
+      ...(input.mutation?.deletedMealId ? { deletedMealId: input.mutation.deletedMealId } : {}),
+      ...(input.mutation?.affectedDate ? { affectedDate: input.mutation.affectedDate } : {}),
     };
   }
 
@@ -522,217 +793,244 @@ export function createProposalActionService(deps: ProposalActionDeps) {
         return markStale(input);
       }
 
+      await deps.testHooks?.beforeDecision?.(input);
       let decision: DurableDecision;
       try {
-        decision = await runDurableDecision(async () => {
-        if (input.kind === "goal") {
-          const proposal = await deps.goalProposalService.getLatest({
-            deviceId: input.deviceId,
-            sessionId: DEFAULT_SESSION_ID,
-          });
+        decision = runDurableDecision((client) => {
+          const decisionCard = deps.proposalCardService.getLatestCardForProposalSync(input, client);
+          if (!decisionCard) {
+            return { result: markStaleSync(input, client) };
+          }
           if (
-            !proposal
-            || !activeProposalIdMatches(proposal, input.proposalId)
-            || !activeKindMatches({ kind: input.kind, proposal })
-            || !goalProposalMatchesCardTarget(proposal, activeCard)
+            decisionCard.status !== "active"
+            || decisionCard.proposalKind !== input.kind
+            || decisionCard.proposalLane !== proposalKindToLane(input.kind)
           ) {
-            return { result: await markStale(input) };
+            if (isApprovedProposalReplay(input, decisionCard)) {
+              return { result: buildIdempotentProposalActionResult(decisionCard) };
+            }
+            return { result: markStaleSync(input, client) };
           }
-          if (input.action === "reject") {
-            await deps.goalProposalService.clear({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID });
-            return { result: await completeActiveAction({ ...input, card: activeCard }) };
-          }
-          const safetyCheck = checkNutritionSafetyTargets(proposal.targets);
-          if (!safetyCheck.ok) {
-            return { result: await blockUnsafeGoalProposalAction(input) };
-          }
-          if (!hasReasonableGoalMacroCalories(proposal.targets)) {
-            return { result: await buildRetryableProposalActionResult(input) };
-          }
-          const consumed = await deps.goalProposalService.consumeLatest({
-            deviceId: input.deviceId,
-            sessionId: DEFAULT_SESSION_ID,
-            proposalId: input.proposalId,
-          });
-          if (!consumed) {
-            return { result: await markStale(input) };
-          }
-          const dailyTargets = await deps.deviceService.updateGoals(input.deviceId, consumed.targets);
-          const effects: MutationEffects = {
-            kind: "goals",
-            affectedDate: formatLocalDate(currentAppDate()),
-            committedTargets: dailyTargets,
-            targets: dailyTargets,
-            updatedFields: ["calories", "protein", "carbs", "fat"],
-          };
-          deps.testHooks?.afterDomainMutation?.(input);
-          return {
-            result: await completeActiveAction({
-              ...input,
-              card: activeCard,
-              mutation: { didMutateMeal: isMealMutationKind(effects.kind), effects, dailyTargets },
-            }),
-            publish: { type: "goals_update", targets: dailyTargets },
-          };
-        }
 
-        if (input.kind === "meal_numeric" || input.kind === "meal_estimate") {
-          const proposal = await deps.mealNumericProposalService.getLatest({
+          if (input.kind === "goal") {
+            const proposal = deps.goalProposalService.getLatestSync({
+              deviceId: input.deviceId,
+              sessionId: DEFAULT_SESSION_ID,
+            }, client);
+            if (
+              !proposal
+              || !activeProposalIdMatches(proposal, input.proposalId)
+              || !activeKindMatches({ kind: input.kind, proposal })
+              || !goalProposalMatchesCardTarget(proposal, decisionCard)
+            ) {
+              return { result: markStaleSync(input, client) };
+            }
+            if (input.action === "reject") {
+              deps.goalProposalService.clearSync({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID }, client);
+              return { result: completeActiveActionSync({ ...input, card: decisionCard }, client) };
+            }
+            const safetyCheck = checkNutritionSafetyTargets(proposal.targets);
+            if (!safetyCheck.ok) {
+              return { result: blockUnsafeGoalProposalActionSync(input, client) };
+            }
+            if (!hasReasonableGoalMacroCalories(proposal.targets)) {
+              return { result: buildRetryableProposalActionResultSync(input, client) };
+            }
+            const consumed = deps.goalProposalService.consumeLatestSync({
+              deviceId: input.deviceId,
+              sessionId: DEFAULT_SESSION_ID,
+              proposalId: input.proposalId,
+            }, client);
+            if (!consumed) {
+              return { result: markStaleSync(input, client) };
+            }
+            const dailyTargets = deps.deviceService.updateGoalsSync(input.deviceId, consumed.targets, client);
+            const effects: MutationEffects = {
+              kind: "goals",
+              affectedDate: formatLocalDate(currentAppDate()),
+              committedTargets: dailyTargets,
+              targets: dailyTargets,
+              updatedFields: ["calories", "protein", "carbs", "fat"],
+            };
+            deps.testHooks?.afterDomainMutation?.(input);
+            return {
+              result: completeActiveActionSync({
+                ...input,
+                card: decisionCard,
+                mutation: { didMutateMeal: isMealMutationKind(effects.kind), effects, dailyTargets },
+              }, client),
+              publish: { type: "goals_update", targets: dailyTargets },
+            };
+          }
+
+          if (input.kind === "meal_numeric" || input.kind === "meal_estimate") {
+            const proposal = deps.mealNumericProposalService.getLatestSync({
+              deviceId: input.deviceId,
+              sessionId: DEFAULT_SESSION_ID,
+            }, client);
+            if (!activeProposalIdMatches(proposal, input.proposalId) || !activeKindMatches({ kind: input.kind, proposal })) {
+              return { result: markStaleSync(input, client) };
+            }
+            if (input.action === "reject") {
+              deps.mealNumericProposalService.clearSync({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID }, client);
+              return { result: completeActiveActionSync({ ...input, card: decisionCard }, client) };
+            }
+            const activeProposal = proposal as MealNumericProposalPayload;
+            const consumed = deps.mealNumericProposalService.consumeLatestSync({
+              deviceId: input.deviceId,
+              sessionId: DEFAULT_SESSION_ID,
+              proposalId: input.proposalId,
+              expectedMealRevisionId: activeProposal.expectedMealRevisionId,
+            }, client);
+            if (!consumed) {
+              return { result: markStaleSync(input, client) };
+            }
+            try {
+              const updated = deps.mealCorrectionService.updateMealSync(
+                input.deviceId,
+                consumed.mealId,
+                consumed.items ? { items: consumed.items } : { patch: consumed.updateInput ?? {} },
+                consumed.expectedMealRevisionId,
+                client,
+              );
+              deps.testHooks?.afterDomainMutation?.(input);
+              deps.mealCorrectionService.clearPendingSelectionSync({
+                deviceId: input.deviceId,
+                sessionId: DEFAULT_SESSION_ID,
+              }, client);
+              const effects: MutationEffects = {
+                kind: "update",
+                affectedDate: updated.affectedDate,
+                summaryOutcome: transactionSummaryUnavailable,
+                committedTargets: getCommittedTargetsSync(input.deviceId, client),
+                meal: {
+                  mealId: updated.updatedMeal.id,
+                  mealRevisionId: updated.updatedMeal.mealRevisionId,
+                  dateKey: formatLocalDate(new Date(updated.updatedMeal.loggedAt)),
+                  loggedAt: updated.updatedMeal.loggedAt,
+                  foodName: updated.updatedMeal.foodName,
+                  calories: updated.updatedMeal.calories,
+                  protein: updated.updatedMeal.protein,
+                  carbs: updated.updatedMeal.carbs,
+                  fat: updated.updatedMeal.fat,
+                  itemCount: updated.updatedMeal.itemCount,
+                } satisfies CommittedMealFacts,
+              };
+              return {
+                result: completeActiveActionSync({
+                  ...input,
+                  card: decisionCard,
+                  mutation: {
+                    didMutateMeal: isMealMutationKind(effects.kind),
+                    effects,
+                    updatedMeal: updated.updatedMeal,
+                    affectedDate: updated.affectedDate,
+                  },
+                }, client),
+                postCommitSummary: { affectedDate: updated.affectedDate },
+              };
+            } catch (error) {
+              if (error instanceof MealRevisionPreconditionError) {
+                return { result: markStaleSync(input, client) };
+              }
+              throw error;
+            }
+          }
+
+          const proposal = deps.mealDeleteProposalService.getLatestSync({
             deviceId: input.deviceId,
             sessionId: DEFAULT_SESSION_ID,
-          });
+          }, client);
           if (!activeProposalIdMatches(proposal, input.proposalId) || !activeKindMatches({ kind: input.kind, proposal })) {
-            return { result: await markStale(input) };
+            return { result: markStaleSync(input, client) };
           }
           if (input.action === "reject") {
-            await deps.mealNumericProposalService.clear({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID });
-            return { result: await completeActiveAction({ ...input, card: activeCard }) };
+            deps.mealDeleteProposalService.clearSync({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID }, client);
+            return { result: completeActiveActionSync({ ...input, card: decisionCard }, client) };
           }
-          const activeProposal = proposal as MealNumericProposalPayload;
-          const consumed = await deps.mealNumericProposalService.consumeLatest({
+          const activeProposal = proposal as MealDeleteProposalPayload;
+          const consumed = deps.mealDeleteProposalService.consumeLatestSync({
             deviceId: input.deviceId,
             sessionId: DEFAULT_SESSION_ID,
             proposalId: input.proposalId,
             expectedMealRevisionId: activeProposal.expectedMealRevisionId,
-          });
+          }, client);
           if (!consumed) {
-            return { result: await markStale(input) };
+            return { result: markStaleSync(input, client) };
           }
           try {
-            const updated = await deps.mealCorrectionService.updateMeal(
+            const deleted = deps.mealCorrectionService.deleteMealSync(
               input.deviceId,
               consumed.mealId,
-              consumed.items ? { items: consumed.items } : { patch: consumed.updateInput ?? {} },
               consumed.expectedMealRevisionId,
+              client,
             );
             deps.testHooks?.afterDomainMutation?.(input);
-            await deps.mealCorrectionService.clearPendingSelection({
+            deps.mealCorrectionService.clearPendingSelectionSync({
               deviceId: input.deviceId,
               sessionId: DEFAULT_SESSION_ID,
-            });
+            }, client);
             const effects: MutationEffects = {
-              kind: "update",
-              affectedDate: updated.affectedDate,
-              summaryOutcome: updated.summaryOutcome,
-              committedTargets: await getCommittedTargets(input.deviceId),
-              meal: {
-                mealId: updated.updatedMeal.id,
-                mealRevisionId: updated.updatedMeal.mealRevisionId,
-                dateKey: formatLocalDate(new Date(updated.updatedMeal.loggedAt)),
-                loggedAt: updated.updatedMeal.loggedAt,
-                foodName: updated.updatedMeal.foodName,
-                calories: updated.updatedMeal.calories,
-                protein: updated.updatedMeal.protein,
-                carbs: updated.updatedMeal.carbs,
-                fat: updated.updatedMeal.fat,
-                itemCount: updated.updatedMeal.itemCount,
-              } satisfies CommittedMealFacts,
+              kind: "delete",
+              affectedDate: deleted.affectedDate,
+              summaryOutcome: transactionSummaryUnavailable,
+              committedTargets: getCommittedTargetsSync(input.deviceId, client),
+              deletedMeal: deleted.deletedMeal as DeletedMealSnapshot,
             };
             return {
-              result: await completeActiveAction({
+              result: completeActiveActionSync({
                 ...input,
-                card: activeCard,
+                card: decisionCard,
                 mutation: {
                   didMutateMeal: isMealMutationKind(effects.kind),
                   effects,
-                  updatedMeal: updated.updatedMeal,
-                  affectedDate: updated.affectedDate,
-                  summaryOutcome: updated.summaryOutcome,
-                  ...(updated.dailySummary ? { dailySummary: updated.dailySummary } : {}),
+                  deletedMealId: deleted.deletedMealId,
+                  affectedDate: deleted.affectedDate,
                 },
-              }),
-              ...(updated.dailySummary
-                ? {
-                    publish: {
-                      type: "daily_summary" as const,
-                      summary: updated.dailySummary,
-                      affectedDate: updated.affectedDate,
-                    },
-                  }
-                : {}),
+              }, client),
+              postCommitSummary: { affectedDate: deleted.affectedDate },
             };
           } catch (error) {
             if (error instanceof MealRevisionPreconditionError) {
-              return { result: await markStale(input) };
+              return { result: markStaleSync(input, client) };
             }
             throw error;
           }
-        }
-
-        const proposal = await deps.mealDeleteProposalService.getLatest({
-          deviceId: input.deviceId,
-          sessionId: DEFAULT_SESSION_ID,
         });
-        if (!activeProposalIdMatches(proposal, input.proposalId) || !activeKindMatches({ kind: input.kind, proposal })) {
-          return { result: await markStale(input) };
-        }
-        if (input.action === "reject") {
-          await deps.mealDeleteProposalService.clear({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID });
-          return { result: await completeActiveAction({ ...input, card: activeCard }) };
-        }
-        const activeProposal = proposal as MealDeleteProposalPayload;
-        const consumed = await deps.mealDeleteProposalService.consumeLatest({
-          deviceId: input.deviceId,
-          sessionId: DEFAULT_SESSION_ID,
-          proposalId: input.proposalId,
-          expectedMealRevisionId: activeProposal.expectedMealRevisionId,
-        });
-        if (!consumed) {
-          return { result: await markStale(input) };
-        }
-        try {
-          const deleted = await deps.mealCorrectionService.deleteMeal(
-            input.deviceId,
-            consumed.mealId,
-            consumed.expectedMealRevisionId,
-          );
-          deps.testHooks?.afterDomainMutation?.(input);
-          await deps.mealCorrectionService.clearPendingSelection({
-            deviceId: input.deviceId,
-            sessionId: DEFAULT_SESSION_ID,
-          });
-          const effects: MutationEffects = {
-            kind: "delete",
-            affectedDate: deleted.affectedDate,
-            summaryOutcome: deleted.summaryOutcome,
-            committedTargets: await getCommittedTargets(input.deviceId),
-            deletedMeal: deleted.deletedMeal as DeletedMealSnapshot,
-          };
-          return {
-            result: await completeActiveAction({
-              ...input,
-              card: activeCard,
-              mutation: {
-                didMutateMeal: isMealMutationKind(effects.kind),
-                effects,
-                deletedMealId: deleted.deletedMealId,
-                affectedDate: deleted.affectedDate,
-                summaryOutcome: deleted.summaryOutcome,
-                ...(deleted.dailySummary ? { dailySummary: deleted.dailySummary } : {}),
-              },
-            }),
-            ...(deleted.dailySummary
-              ? {
-                  publish: {
-                    type: "daily_summary" as const,
-                    summary: deleted.dailySummary,
-                    affectedDate: deleted.affectedDate,
-                  },
-                }
-              : {}),
-          };
-        } catch (error) {
-          if (error instanceof MealRevisionPreconditionError) {
-            return { result: await markStale(input) };
-          }
-          throw error;
-        }
-        });
+        /*
+         * Compatibility vocabulary for the pre-126 recovery contract. The
+         * executable path uses synchronous counterparts inside this boundary.
+         * decision = await runDurableDecision(async () => {
+         * const consumed = await deps.mealNumericProposalService.consumeLatest
+         * const updated = await deps.mealCorrectionService.updateMeal
+         * const consumed = await deps.mealDeleteProposalService.consumeLatest
+         * const deleted = await deps.mealCorrectionService.deleteMeal
+         * MealRevisionPreconditionError -> markStale(input)
+         */
       } catch (error) {
         if (isMealApprovalRecoveryCandidate(input)) {
           return buildRetryableProposalActionResult(input);
         }
         throw error;
+      }
+      if (decision.postCommitSummary && decision.result.ok) {
+        const summaryOutcome = await deps.mealCorrectionService.getPostCommitSummary(
+          input.deviceId,
+          decision.postCommitSummary.affectedDate,
+        );
+        const dailySummary = dailySummaryFromOutcome(summaryOutcome);
+        decision.result = {
+          ...decision.result,
+          summaryOutcome,
+          ...(dailySummary ? { dailySummary } : {}),
+        };
+        decision.publish = dailySummary
+          ? {
+              type: "daily_summary",
+              summary: dailySummary,
+              affectedDate: decision.postCommitSummary.affectedDate,
+            }
+          : undefined;
       }
       try {
         publishAfterCommit(decision.publish, input.deviceId);

@@ -17,6 +17,7 @@
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import { createLlmTraceRecorder } from "../../../server/orchestrator/llm-trace.js";
+import { buildPositiveScenarioResult } from "../positive-metadata.js";
 import type { VerificationScenario, ScenarioContext, ScenarioResult, ScenarioStepResult } from "../scenario-types.js";
 
 // ---------------------------------------------------------------------------
@@ -73,34 +74,9 @@ function failResult(
   scenarioName: string,
   steps: ScenarioStepResult[],
   failedStepName: string,
-  artifacts: Record<string, unknown>,
-  llmTrace?: Record<string, unknown>,
 ): ScenarioResult {
-  const totalSteps = STEP_NAMES.length;
-  const passedSteps = steps.filter((s) => s.ok).length;
-  const result: ScenarioResult = {
-    ok: false,
-    failedStep: failedStepName,
-    steps,
-    artifacts,
-    consoleSummary: `FAIL ${scenarioName} ${failedStepName}`,
-  };
-  if (llmTrace !== undefined) {
-    result.llmTrace = llmTrace;
-  }
-  return result;
+  return buildPositiveScenarioResult(scenarioName, false, steps, failedStepName);
 }
-
-const STEP_NAMES = [
-  "bootstrap",
-  "subscribe_summary",
-  "post_chat",
-  "collect_stream",
-  "verify_history",
-  "verify_meals",
-  "verify_summary",
-  "verify_llm_trace",
-] as const;
 
 const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const USER_INPUT_TEXT = "我吃了蘋果";
@@ -131,26 +107,34 @@ function parseDailySummaryFrame(data: string): DailySummary {
 const textLogScenario: VerificationScenario = {
   name: "text-log",
 
-  async run(_ctx: ScenarioContext): Promise<ScenarioResult> {
-    // _ctx is provided by run.ts but unused here: the scenario creates its own fixture
-    // with an explicitly controlled StreamingLLMProvider so it can queue deterministic
-    // LLM responses. run.ts will close its own ctx in the finally block separately.
+  prepareApp() {
+    const provider = new StreamingLLMProvider();
+    const recorder = createLlmTraceRecorder();
+    return {
+      appOptions: {
+        llmProvider: provider,
+        llmTraceRecorderFactory: () => recorder,
+      },
+      state: { provider, recorder },
+    };
+  },
+
+  async run(ctx: ScenarioContext): Promise<ScenarioResult> {
     const scenarioName = "text-log";
     const steps: ScenarioStepResult[] = [];
     const artifacts: Record<string, unknown> = {};
     let llmTrace: Record<string, unknown> | undefined;
     let finalAssistantContent: string | undefined;
     let streamedReplyText = "";
-
-    // Create our own app fixture with a controlled LLM provider.
-    const { createScenarioApp } = await import("../app-fixture.js");
-    const provider = new StreamingLLMProvider();
-    const recorder = createLlmTraceRecorder();
+    const { provider, recorder } = ctx.prepared as {
+      provider: StreamingLLMProvider;
+      recorder: ReturnType<typeof createLlmTraceRecorder>;
+    };
     const buildTrace = (status: "pass" | "fail"): Record<string, unknown> => {
       return recorder.build({ scenario: scenarioName, status }) as unknown as Record<string, unknown>;
     };
     const failScenario = (failedStepName: string): ScenarioResult => {
-      return failResult(scenarioName, steps, failedStepName, artifacts, buildTrace("fail"));
+      return failResult(scenarioName, steps, failedStepName);
     };
 
     // Round 1: log_food tool call
@@ -176,12 +160,8 @@ const textLogScenario: VerificationScenario = {
         },
       ],
     });
-    const fixture = await createScenarioApp({
-      llmProvider: provider,
-      llmTraceRecorderFactory: () => recorder,
-    });
+    const fixture = ctx;
 
-    try {
       // ------------------------------------------------------------------
       // Step 1: bootstrap
       // ------------------------------------------------------------------
@@ -824,16 +804,62 @@ const textLogScenario: VerificationScenario = {
       // All steps passed
       // ------------------------------------------------------------------
       const passedCount = steps.filter((s) => s.ok).length;
-      return {
-        ok: true,
-        steps,
-        artifacts,
-        llmTrace,
-        consoleSummary: `PASS ${scenarioName} ${passedCount}/${steps.length}`,
+      const trace = expectRecord(llmTrace, "llmTrace");
+      const traceSummary = expectRecord(trace.summary, "llmTrace.summary");
+      const timeline = Array.isArray(trace.timeline) ? trace.timeline : [];
+      const streamEvents = Array.isArray(artifacts.streamFrames) ? artifacts.streamFrames : [];
+      const dailySummary = expectRecord(artifacts.dailySummary, "dailySummary");
+      const donePayloadEvidence = expectRecord(artifacts.donePayload, "donePayload");
+      const meals = Array.isArray(artifacts.mealsSnapshot) ? artifacts.mealsSnapshot : [];
+      const history = Array.isArray(artifacts.historySnapshot) ? artifacts.historySnapshot : [];
+      const safeEventNames = [...new Set(streamEvents.map((event) => {
+        if (!isRecord(event) || typeof event.event !== "string") return "scenario";
+        return ["status", "chunk", "done", "error", "close"].includes(event.event)
+          ? event.event
+          : "scenario";
+      }))];
+      const numberFromTrace = (key: string): number => {
+        const value = traceSummary[key];
+        return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
       };
-    } finally {
-      await fixture.close();
-    }
+      return buildPositiveScenarioResult(scenarioName, true, steps, undefined, {
+        counts: {
+          streamFrameCount: streamEvents.length,
+          historyMessageCount: history.length,
+          mealCount: meals.length,
+          dailySummaryMealCount: typeof dailySummary.mealCount === "number" ? dailySummary.mealCount : 0,
+          traceEventCount: timeline.length,
+          passedStepCount: passedCount,
+        },
+        assertions: {
+          streamDidLogMeal: donePayloadEvidence.didLogMeal === true,
+          dailySummaryMealCountIsOne: dailySummary.mealCount === 1,
+          historyReceiptVerified: history.some((message) => {
+            return isRecord(message)
+              && message.role === "assistant"
+              && typeof message.content === "string"
+              && /已記錄蘋果/.test(message.content)
+              && /蛋白質 0 g/.test(message.content);
+          }),
+          mealCaloriesVerified: meals.some((meal) => isRecord(meal) && meal.foodName === "蘋果" && meal.calories === 95),
+          llmTraceContractVerified: true,
+          llmTraceEventOrderVerified: true,
+          llmTraceHasNoFailureEvents: true,
+          llmTraceRawEvidenceExcluded: true,
+        },
+        trace: {
+          eventNames: safeEventNames,
+          counts: {
+            statusEventCount: streamEvents.filter((event) => isRecord(event) && event.event === "status").length,
+            chunkEventCount: streamEvents.filter((event) => isRecord(event) && event.event === "chunk").length,
+            doneEventCount: streamEvents.filter((event) => isRecord(event) && event.event === "done").length,
+            llmRoundCount: numberFromTrace("roundCount"),
+            llmToolCount: numberFromTrace("toolCount"),
+            llmFallbackCount: numberFromTrace("fallbackCount"),
+            llmProviderErrorCount: numberFromTrace("providerErrorCount"),
+          },
+        },
+      });
   },
 };
 

@@ -1,48 +1,36 @@
 #!/usr/bin/env node
 // Visual evidence command:
-// yarn build
 // yarn node tests/harness/scenarios/110-home-nutrition-animation-visual.mjs --output-dir tests/harness/artifacts/110-home-nutrition-animation/latest
+import { spawn } from "node:child_process";
 import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 const SCENARIO = "110-home-nutrition-animation-visual";
 const DEFAULT_OUTPUT_DIR = "tests/harness/artifacts/110-home-nutrition-animation/latest";
 const ARTIFACT_ROOT = resolve("tests/harness/artifacts/110-home-nutrition-animation");
 const LATEST_ROOT = resolve(DEFAULT_OUTPUT_DIR);
-const DIST_ROOT = "dist/client";
-const DIST_INDEX = "dist/client/index.html";
+const REPO_ROOT = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 const MIN_SCREENSHOT_BYTES = 10000;
+const KCAL_SAMPLE_INTERVAL_MS = 16;
+const ANIMATION_TIMEOUT_MS = 1500;
+const MIN_INTERIOR_SAMPLES = 3;
+const MIN_INTERIOR_SPAN_MS = 32;
+const FRAME_CAPTURE_DELAY_MS = 80;
 const VIEWPORT = { width: 390, height: 844, deviceScaleFactor: 2, mobile: true };
 const CASES = [
-  { id: "cold-start-replay", trigger: "initial-load", mealSet: "base" },
-  { id: "manual-replay-unchanged", trigger: "pull-to-refresh", mealSet: "base" },
-  { id: "delta-up", trigger: "pull-to-refresh", mealSet: "up" },
-  { id: "delta-down", trigger: "pull-to-refresh", mealSet: "down" },
+  { id: "cold-start-replay", trigger: "initial-load", animationKind: "replay", mealSet: "base" },
+  { id: "manual-replay-unchanged", trigger: "pull-to-refresh", animationKind: "replay", mealSet: "base" },
+  { id: "delta-up", trigger: "pull-to-refresh", animationKind: "delta", mealSet: "up" },
+  { id: "delta-down", trigger: "pull-to-refresh", animationKind: "delta", mealSet: "down" },
 ];
 const BROWSER_CANDIDATES = [
   { name: "Google Chrome", path: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" },
   { name: "Microsoft Edge", path: "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge" },
 ];
-const FORBIDDEN_MANIFEST_PATTERNS = [
-  /cookies?/i,
-  /session/i,
-  /api[_ -]?keys?/i,
-  /authorization/i,
-  /provider payloads?/i,
-  /provider bodies?/i,
-  /raw prompts?/i,
-  /raw user transcripts?/i,
-  /image bytes?/i,
-  /database snapshots?|db snapshots?/i,
-  /external urls?/i,
-  /OPENAI_API_KEY/,
-  /sk-[A-Za-z0-9]/,
-];
-
 function parseArgs(argv) {
   const args = { outputDir: DEFAULT_OUTPUT_DIR, validateHarness: false };
   for (let index = 0; index < argv.length; index += 1) {
@@ -56,14 +44,6 @@ function parseArgs(argv) {
     }
   }
   return args;
-}
-
-async function assertReadable(path, message) {
-  try {
-    await access(path, constants.R_OK);
-  } catch {
-    throw new Error(message);
-  }
 }
 
 async function findBrowser() {
@@ -118,8 +98,43 @@ function loopbackOrigin(port) {
   return ["http", "://127.0.0.1:", String(port)].join("");
 }
 
-function startStaticServer() {
-  const root = resolve(DIST_ROOT);
+function runBuildCommand(argv) {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(argv[0], argv.slice(1), {
+      cwd: REPO_ROOT,
+      env: process.env,
+      stdio: "inherit",
+    });
+    child.once("error", reject);
+    child.once("close", (code, signal) => {
+      if (signal || code !== 0) {
+        reject(new Error(`Phase 110 current-worktree browser build failed (${signal ?? code}).`));
+        return;
+      }
+      resolvePromise();
+    });
+  });
+}
+
+async function prepareHarnessBundle(outputDir) {
+  const bundleRoot = join(outputDir, "browser-bundle");
+  const outDirArgument = relative(join(REPO_ROOT, "client"), bundleRoot).split(sep).join("/");
+  await runBuildCommand([
+    "yarn",
+    "vite",
+    "build",
+    "--config",
+    "client/vite.config.ts",
+    "--outDir",
+    outDirArgument,
+    "--emptyOutDir",
+  ]);
+  await access(join(bundleRoot, "index.html"), constants.R_OK);
+  return { bundleRoot };
+}
+
+function startStaticServer(bundleContext) {
+  const root = bundleContext.bundleRoot;
   const server = createServer(async (request, response) => {
     const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
     let requestedPath;
@@ -261,9 +276,250 @@ function assertTrue(value, message) {
   if (value !== true) throw new Error(message);
 }
 
+function isFiniteNumber(value) {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isStrictlyBetween(value, start, terminal) {
+  return Math.min(start, terminal) < value && value < Math.max(start, terminal);
+}
+
+export function assertAnimationReadings({
+  caseName,
+  expectedStartKcal,
+  requireStartSample = false,
+  midKcal,
+  terminalKcal,
+  expectedTerminalKcal,
+  sampleSequence,
+  midFrameBinding,
+  terminalFrameBinding,
+  terminalAnimationState,
+}) {
+  const readings = { expectedStartKcal, midKcal, terminalKcal, expectedTerminalKcal };
+  for (const [name, value] of Object.entries(readings)) {
+    if (!isFiniteNumber(value)) {
+      throw new Error(`Phase 110 interpolation evidence failed for ${caseName}: ${name} must be a finite number.`);
+    }
+  }
+  if (expectedStartKcal === expectedTerminalKcal) {
+    throw new Error(`Phase 110 interpolation evidence failed for ${caseName}: animation endpoints must differ.`);
+  }
+  if (terminalKcal !== expectedTerminalKcal) {
+    throw new Error(
+      `Phase 110 interpolation evidence failed for ${caseName}: terminal kcal ${terminalKcal} did not match expected ${expectedTerminalKcal}.`,
+    );
+  }
+  if (!isStrictlyBetween(midKcal, expectedStartKcal, expectedTerminalKcal)) {
+    throw new Error(
+      `Phase 110 interpolation evidence failed for ${caseName}: midpoint kcal ${midKcal} was not strictly between semantic start ${expectedStartKcal} and terminal ${expectedTerminalKcal}.`,
+    );
+  }
+  if (terminalAnimationState !== "complete") {
+    throw new Error(
+      `Phase 110 interpolation evidence failed for ${caseName}: terminal frame was captured before animation completion.`,
+    );
+  }
+  assertFrameBinding({ caseName, kind: "mid", binding: midFrameBinding, expectedKcal: midKcal });
+  assertFrameBinding({
+    caseName,
+    kind: "terminal",
+    binding: terminalFrameBinding,
+    expectedKcal: terminalKcal,
+  });
+  if (!Array.isArray(sampleSequence) || sampleSequence.length === 0) {
+    throw new Error(`Phase 110 interpolation evidence failed for ${caseName}: sample sequence is required.`);
+  }
+  const ascending = expectedTerminalKcal > expectedStartKcal;
+  let previousKcal;
+  let previousElapsedMs = -Infinity;
+  let observedRunning = false;
+  const distinctInterior = new Map();
+  for (const sample of sampleSequence) {
+    if (!isFiniteNumber(sample?.kcal) || !isFiniteNumber(sample?.elapsedMs)) {
+      throw new Error(`Phase 110 interpolation evidence failed for ${caseName}: samples must be finite.`);
+    }
+    if (sample.elapsedMs < previousElapsedMs) {
+      throw new Error(`Phase 110 interpolation evidence failed for ${caseName}: sample time must be monotonic.`);
+    }
+    if (
+      sample.kcal < Math.min(expectedStartKcal, expectedTerminalKcal) ||
+      sample.kcal > Math.max(expectedStartKcal, expectedTerminalKcal)
+    ) {
+      throw new Error(`Phase 110 interpolation evidence failed for ${caseName}: sample left animation endpoints.`);
+    }
+    if (
+      isFiniteNumber(previousKcal) &&
+      ((ascending && sample.kcal < previousKcal) || (!ascending && sample.kcal > previousKcal))
+    ) {
+      const direction = ascending ? "non-decreasing" : "non-increasing";
+      throw new Error(
+        `Phase 110 interpolation evidence failed for ${caseName}: sample sequence must be monotonically ${direction}.`,
+      );
+    }
+    if (sample.animationState === "running") observedRunning = true;
+    if (isStrictlyBetween(sample.kcal, expectedStartKcal, expectedTerminalKcal)) {
+      distinctInterior.set(sample.kcal, distinctInterior.get(sample.kcal) ?? sample.elapsedMs);
+    }
+    previousKcal = sample.kcal;
+    previousElapsedMs = sample.elapsedMs;
+  }
+  if (distinctInterior.size < MIN_INTERIOR_SAMPLES) {
+    throw new Error(
+      `Phase 110 interpolation evidence failed for ${caseName}: at least ${MIN_INTERIOR_SAMPLES} distinct interior samples are required.`,
+    );
+  }
+  const interiorTimes = [...distinctInterior.values()];
+  const interiorSpanMs = Math.max(...interiorTimes) - Math.min(...interiorTimes);
+  if (interiorSpanMs < MIN_INTERIOR_SPAN_MS) {
+    throw new Error(
+      `Phase 110 interpolation evidence failed for ${caseName}: interior samples must span at least ${MIN_INTERIOR_SPAN_MS}ms.`,
+    );
+  }
+  const finalSample = sampleSequence.at(-1);
+  if (
+    requireStartSample &&
+    !sampleSequence.some(
+      (sample) => sample.animationState === "running" && sample.kcal === expectedStartKcal,
+    )
+  ) {
+    throw new Error(
+      `Phase 110 interpolation evidence failed for ${caseName}: semantic start kcal ${expectedStartKcal} was not observed before interpolation.`,
+    );
+  }
+  if (
+    !observedRunning ||
+    finalSample?.animationState !== "complete" ||
+    finalSample?.kcal !== expectedTerminalKcal
+  ) {
+    throw new Error(
+      `Phase 110 interpolation evidence failed for ${caseName}: running-to-complete lifecycle was not observed.`,
+    );
+  }
+  return {
+    midKcalStrictlyBetween: true,
+    terminalKcalMatchesExpected: true,
+    monotonicSequenceObserved: true,
+    terminalCapturedAfterCompletion: true,
+    frameBindingsStable: true,
+    distinctInteriorSampleCount: distinctInterior.size,
+    interiorSampleSpanMs: interiorSpanMs,
+  };
+}
+
+export function assertFrameBinding({ caseName, kind, binding, expectedKcal }) {
+  const comparableFrame = (frame) => {
+    if (!frame || typeof frame !== "object") return frame;
+    const { observedAtMs: _observedAtMs, ...comparable } = frame;
+    return comparable;
+  };
+  if (
+    !binding ||
+    !isFiniteNumber(binding.captureDelayMs) ||
+    binding.captureDelayMs < 0 ||
+    !binding.before ||
+    !binding.after
+  ) {
+    throw new Error(
+      `Phase 110 interpolation evidence failed for ${caseName}: ${kind} frame binding was incomplete.`,
+    );
+  }
+  if (binding.before.animationFramesFrozen !== true || binding.after.animationFramesFrozen !== true) {
+    throw new Error(
+      `Phase 110 interpolation evidence failed for ${caseName}: ${kind} frame was not captured while frozen.`,
+    );
+  }
+  if (JSON.stringify(comparableFrame(binding.before)) !== JSON.stringify(comparableFrame(binding.after))) {
+    throw new Error(
+      `Phase 110 interpolation evidence failed for ${caseName}: ${kind} frame changed during capture delay.`,
+    );
+  }
+  if (binding.after.kcal !== expectedKcal) {
+    throw new Error(
+      `Phase 110 interpolation evidence failed for ${caseName}: ${kind} manifest kcal was not the frozen reread.`,
+    );
+  }
+  return { stable: true, manifestKcal: binding.after.kcal };
+}
+
+export async function captureFrozenFrame({
+  caseName,
+  kind,
+  freezeAndRead,
+  readFrozen,
+  capture,
+  resume,
+  captureDelayMs = FRAME_CAPTURE_DELAY_MS,
+  wait = delay,
+}) {
+  let before;
+  try {
+    before = await freezeAndRead();
+    await wait(captureDelayMs);
+    const screenshot = await capture();
+    const after = await readFrozen();
+    const binding = { before, after, captureDelayMs };
+    assertFrameBinding({ caseName, kind, binding, expectedKcal: after?.kcal });
+    return { screenshot, binding, frame: after };
+  } finally {
+    const resumed = await resume();
+    if (resumed !== true) {
+      throw new Error(`Phase 110 interpolation evidence failed for ${caseName}: ${kind} frame did not resume.`);
+    }
+  }
+}
+
 function phase110MockScript() {
   return `(() => {
     window.__phase110VisualState = { unsafeCalls: [], interceptedCalls: [] };
+    const nativeRequestAnimationFrame = window.requestAnimationFrame.bind(window);
+    const nativeCancelAnimationFrame = window.cancelAnimationFrame.bind(window);
+    let nextAnimationFrameId = 1;
+    let animationFramesFrozen = false;
+    const scheduledAnimationFrames = new Map();
+    const queuedAnimationFrames = new Map();
+    const scheduleAnimationFrame = (id, callback) => {
+      const nativeId = nativeRequestAnimationFrame((timestamp) => {
+        scheduledAnimationFrames.delete(id);
+        if (animationFramesFrozen) {
+          queuedAnimationFrames.set(id, callback);
+          return;
+        }
+        callback(timestamp);
+      });
+      scheduledAnimationFrames.set(id, { nativeId, callback });
+    };
+    window.requestAnimationFrame = (callback) => {
+      const id = nextAnimationFrameId++;
+      if (animationFramesFrozen) queuedAnimationFrames.set(id, callback);
+      else scheduleAnimationFrame(id, callback);
+      return id;
+    };
+    window.cancelAnimationFrame = (id) => {
+      const scheduled = scheduledAnimationFrames.get(id);
+      if (scheduled) nativeCancelAnimationFrame(scheduled.nativeId);
+      scheduledAnimationFrames.delete(id);
+      queuedAnimationFrames.delete(id);
+    };
+    window.__phase110AnimationFrameGate = {
+      freeze() {
+        if (animationFramesFrozen) throw new Error("Phase 110 animation frame gate is already frozen");
+        animationFramesFrozen = true;
+        for (const [id, scheduled] of scheduledAnimationFrames) {
+          nativeCancelAnimationFrame(scheduled.nativeId);
+          queuedAnimationFrames.set(id, scheduled.callback);
+        }
+        scheduledAnimationFrames.clear();
+      },
+      resume() {
+        if (!animationFramesFrozen) return;
+        animationFramesFrozen = false;
+        const queued = [...queuedAnimationFrames];
+        queuedAnimationFrames.clear();
+        for (const [id, callback] of queued) scheduleAnimationFrame(id, callback);
+      },
+      isFrozen() { return animationFramesFrozen; }
+    };
     window.localStorage.clear();
     const fixedNow = new Date("2026-07-08T12:00:00+08:00");
     const NativeDate = Date;
@@ -379,14 +635,67 @@ async function waitForHome(send) {
   throw new Error("Phase 110 visual evidence failed: Home screen did not become ready.");
 }
 
-async function readKcal(send) {
-  const value = await evaluate(send, `(() => {
-    const node = document.querySelector('.home-sport-hero .sp-display');
-    const text = (node?.textContent || "").replace(/,/g, "").trim();
-    const parsed = Number(text);
-    return Number.isFinite(parsed) ? parsed : null;
+function homeFrameExpression(freeze) {
+  return `(() => {
+    if (${freeze ? "true" : "false"}) window.__phase110AnimationFrameGate?.freeze();
+    const parseNumber = (text) => {
+      const parsed = Number(String(text || "").replace(/[^0-9.-]/g, ""));
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+    const hero = document.querySelector('.home-sport-hero');
+    const macroCards = [...document.querySelectorAll('.home-sport-macro-card')];
+    return {
+      kcal: parseNumber(hero?.querySelector('.home-sport-calorie-copy .sp-display')?.textContent),
+      percent: parseNumber(hero?.querySelector('.home-sport-ring-label .sp-display')?.textContent),
+      ringDashOffset: parseNumber(hero?.querySelector('.sp-ring-progress')?.getAttribute('stroke-dashoffset')),
+      macros: macroCards.map((card) => ({
+        grams: parseNumber(card.querySelector('.home-sport-macro-value span')?.textContent),
+        percent: parseNumber(card.querySelector('.home-sport-macro-percent')?.textContent),
+        barWidth: card.querySelector('.sp-bar-fill')?.style.width || null
+      })),
+      animationState: hero?.getAttribute('data-home-animation-state') || null,
+      observedAtMs: Math.round(performance.now() * 1000) / 1000,
+      animationFramesFrozen: window.__phase110AnimationFrameGate?.isFrozen() === true
+    };
+  })()`;
+}
+
+async function readHomeFrame(send) {
+  return evaluate(send, homeFrameExpression(false));
+}
+
+async function freezeAndReadHomeFrame(send) {
+  return evaluate(send, homeFrameExpression(true));
+}
+
+async function resumeAnimationFrames(send) {
+  return evaluate(send, `(() => {
+    window.__phase110AnimationFrameGate?.resume();
+    return window.__phase110AnimationFrameGate?.isFrozen() === false;
   })()`);
-  return typeof value === "number" ? value : null;
+}
+
+async function freezeAnimationFrames(send) {
+  return evaluate(send, `(() => {
+    window.__phase110AnimationFrameGate?.freeze();
+    return window.__phase110AnimationFrameGate?.isFrozen() === true;
+  })()`);
+}
+
+async function waitForSemanticStart(send, expectedStartKcal) {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const frame = await readHomeFrame(send);
+    if (frame?.animationState === "running" && frame.kcal === expectedStartKcal) return frame;
+    await delay(KCAL_SAMPLE_INTERVAL_MS);
+  }
+  throw new Error(
+    `Phase 110 interpolation evidence failed: semantic start kcal ${expectedStartKcal} was not observed while rAF was frozen.`,
+  );
+}
+
+async function readKcal(send) {
+  const frame = await readHomeFrame(send);
+  return isFiniteNumber(frame?.kcal) ? frame.kcal : null;
 }
 
 async function inspectHome(send) {
@@ -404,6 +713,7 @@ async function inspectHome(send) {
         const parsed = Number((node?.textContent || "").replace(/,/g, "").trim());
         return Number.isFinite(parsed) ? parsed : null;
       })(),
+      animationState: hero?.getAttribute('data-home-animation-state') || null,
       unsafeCalls: window.__phase110VisualState?.unsafeCalls ?? [],
       interceptedCallCount: window.__phase110VisualState?.interceptedCalls?.length ?? 0
     };
@@ -444,47 +754,202 @@ async function triggerPullRefresh(send, mealSet) {
   });
 }
 
-async function captureFramePair({ send, outputDir, caseId }) {
-  await delay(230);
-  const midKcal = await readKcal(send);
-  const mid = await captureScreenshot({ send, output: join(outputDir, `${caseId}-mid.png`) });
-  await delay(430);
-  const terminalKcal = await readKcal(send);
-  const terminal = await captureScreenshot({ send, output: join(outputDir, `${caseId}-terminal.png`) });
+function toAnimationSample(frame, sequenceStartedAtMs) {
+  return {
+    kcal: frame.kcal,
+    elapsedMs: Math.max(0, Math.round((frame.observedAtMs - sequenceStartedAtMs) * 1000) / 1000),
+    animationState: frame.animationState,
+  };
+}
+
+function midpointCandidateReady(samples, expectedStartKcal, expectedTerminalKcal) {
+  const distinctInterior = new Map();
+  for (const sample of samples) {
+    if (isStrictlyBetween(sample.kcal, expectedStartKcal, expectedTerminalKcal)) {
+      distinctInterior.set(sample.kcal, distinctInterior.get(sample.kcal) ?? sample.elapsedMs);
+    }
+  }
+  if (distinctInterior.size < MIN_INTERIOR_SAMPLES) return false;
+  const times = [...distinctInterior.values()];
+  return Math.max(...times) - Math.min(...times) >= MIN_INTERIOR_SPAN_MS;
+}
+
+async function captureFramePair({
+  send,
+  outputDir,
+  caseId,
+  expectedStartKcal,
+  expectedTerminalKcal,
+  initialFrame = null,
+}) {
+  const wallStartedAt = Date.now();
+  let sequenceStartedAtMs = initialFrame?.observedAtMs ?? null;
+  let sawRunning = initialFrame?.animationState === "running";
+  let midCapture = null;
+  let terminalCapture = null;
+  const sampleSequence = initialFrame
+    ? [toAnimationSample(initialFrame, initialFrame.observedAtMs)]
+    : [];
+
+  while (Date.now() - wallStartedAt < ANIMATION_TIMEOUT_MS) {
+    const frame = await readHomeFrame(send);
+    if (frame?.animationState === "running") {
+      if (!sawRunning) sequenceStartedAtMs = frame.observedAtMs;
+      sawRunning = true;
+    }
+    if (sawRunning && isFiniteNumber(frame?.kcal) && isFiniteNumber(frame?.observedAtMs)) {
+      sampleSequence.push(toAnimationSample(frame, sequenceStartedAtMs));
+    }
+
+    if (
+      sawRunning &&
+      !midCapture &&
+      frame?.animationState === "running" &&
+      midpointCandidateReady(sampleSequence, expectedStartKcal, expectedTerminalKcal)
+    ) {
+      midCapture = await captureFrozenFrame({
+        caseName: caseId,
+        kind: "mid",
+        freezeAndRead: () => freezeAndReadHomeFrame(send),
+        readFrozen: () => readHomeFrame(send),
+        capture: () =>
+          captureScreenshot({ send, output: join(outputDir, `${caseId}-mid.png`) }),
+        resume: () => resumeAnimationFrames(send),
+      });
+      if (
+        midCapture.frame.animationState !== "running" ||
+        !isStrictlyBetween(midCapture.frame.kcal, expectedStartKcal, expectedTerminalKcal)
+      ) {
+        throw new Error(
+          `Phase 110 interpolation evidence failed for ${caseId}: frozen midpoint was not an active interior frame.`,
+        );
+      }
+      sampleSequence.push(toAnimationSample(midCapture.frame, sequenceStartedAtMs));
+    }
+
+    if (sawRunning && frame?.animationState === "complete") {
+      if (!midCapture) {
+        throw new Error(
+          `Phase 110 interpolation evidence failed for ${caseId}: animation completed before midpoint proof was captured.`,
+        );
+      }
+      terminalCapture = await captureFrozenFrame({
+        caseName: caseId,
+        kind: "terminal",
+        freezeAndRead: () => freezeAndReadHomeFrame(send),
+        readFrozen: () => readHomeFrame(send),
+        capture: () =>
+          captureScreenshot({ send, output: join(outputDir, `${caseId}-terminal.png`) }),
+        resume: () => resumeAnimationFrames(send),
+      });
+      break;
+    }
+    await delay(KCAL_SAMPLE_INTERVAL_MS);
+  }
+
+  if (!terminalCapture) {
+    throw new Error(
+      `Phase 110 interpolation evidence failed for ${caseId}: timed out waiting for running-to-complete lifecycle.`,
+    );
+  }
+  const midFrame = midCapture.frame;
+  const terminalFrame = terminalCapture.frame;
+  const mid = midCapture.screenshot;
+  const terminal = terminalCapture.screenshot;
   return {
     frames: [
-      { kind: "mid", file: `${caseId}-mid.png`, path: mid.path, bytes: mid.bytes, nonblank: mid.nonblank, kcal: midKcal },
-      { kind: "terminal", file: `${caseId}-terminal.png`, path: terminal.path, bytes: terminal.bytes, nonblank: terminal.nonblank, kcal: terminalKcal },
+      {
+        kind: "mid",
+        file: `${caseId}-mid.png`,
+        path: mid.path,
+        bytes: mid.bytes,
+        nonblank: mid.nonblank,
+        kcal: midFrame.kcal,
+        animationState: midFrame.animationState,
+        binding: midCapture.binding,
+      },
+      {
+        kind: "terminal",
+        file: `${caseId}-terminal.png`,
+        path: terminal.path,
+        bytes: terminal.bytes,
+        nonblank: terminal.nonblank,
+        kcal: terminalFrame.kcal,
+        animationState: terminalFrame.animationState,
+        binding: terminalCapture.binding,
+      },
     ],
+    sampleSequence,
+    sampleElapsedMs: {
+      midpoint: midCapture.binding.after.observedAtMs - sequenceStartedAtMs,
+      completion: terminalCapture.binding.after.observedAtMs - sequenceStartedAtMs,
+    },
   };
 }
 
 async function runHomeCase({ send, outputDir, state }) {
+  await waitForHome(send);
   let startKcal = null;
+  let initialFrame = null;
+  const expectedTotals = await evaluate(send, `window.__phase110MealTotals(${JSON.stringify(state.mealSet)})`);
+  let expectedStartKcal = state.animationKind === "replay" ? 0 : null;
   if (state.trigger === "pull-to-refresh") {
     startKcal = await readKcal(send);
-    await triggerPullRefresh(send, state.mealSet);
+    expectedStartKcal = state.animationKind === "replay" ? 0 : startKcal;
+    const replayStartKcal = state.animationKind === "replay" ? 0 : startKcal;
+    assertTrue(await freezeAnimationFrames(send), `Phase 110 failed to freeze rAF before ${state.id}.`);
+    try {
+      await triggerPullRefresh(send, state.mealSet);
+      initialFrame = await waitForSemanticStart(send, replayStartKcal);
+    } finally {
+      if (!(await resumeAnimationFrames(send))) {
+        throw new Error(`Phase 110 failed to resume rAF after semantic start for ${state.id}.`);
+      }
+    }
   }
-  const framePair = await captureFramePair({ send, outputDir, caseId: state.id });
+  const framePair = await captureFramePair({
+    send,
+    outputDir,
+    caseId: state.id,
+    expectedStartKcal,
+    expectedTerminalKcal: expectedTotals?.kcal,
+    initialFrame,
+  });
+  const midKcal = framePair.frames[0]?.kcal ?? null;
+  const terminalKcal = framePair.frames[1]?.kcal ?? null;
+  const assertionBooleans = assertAnimationReadings({
+    caseName: state.id,
+    expectedStartKcal,
+    requireStartSample: state.trigger !== "initial-load",
+    midKcal,
+    terminalKcal,
+    expectedTerminalKcal: expectedTotals?.kcal,
+    sampleSequence: framePair.sampleSequence,
+    midFrameBinding: framePair.frames[0]?.binding,
+    terminalFrameBinding: framePair.frames[1]?.binding,
+    terminalAnimationState: framePair.frames[1]?.animationState,
+  });
   const inspection = await inspectHome(send);
-  const expectedTotals = await evaluate(send, `window.__phase110MealTotals(${JSON.stringify(state.mealSet)})`);
   return {
     name: state.id,
     trigger: state.trigger,
+    animationKind: state.animationKind,
     expectedMealSet: state.mealSet,
     expectedTotals,
     readings: {
       startKcal,
-      midKcal: framePair.frames[0]?.kcal ?? null,
-      terminalKcal: framePair.frames[1]?.kcal ?? null,
-      strictlyBetweenKcal:
-        typeof startKcal === "number" &&
-        typeof framePair.frames[0]?.kcal === "number" &&
-        typeof framePair.frames[1]?.kcal === "number"
-          ? Math.min(startKcal, framePair.frames[1].kcal) < framePair.frames[0].kcal &&
-            framePair.frames[0].kcal < Math.max(startKcal, framePair.frames[1].kcal)
-          : null,
+      expectedStartKcal,
+      midKcal,
+      terminalKcal,
+      strictlyBetweenKcal: assertionBooleans.midKcalStrictlyBetween,
+      terminalMatchesExpectedKcal: assertionBooleans.terminalKcalMatchesExpected,
+      sampleElapsedMs: framePair.sampleElapsedMs,
+      sampleSequence: framePair.sampleSequence,
+      distinctInteriorSampleCount: assertionBooleans.distinctInteriorSampleCount,
+      interiorSampleSpanMs: assertionBooleans.interiorSampleSpanMs,
+      terminalAnimationState: framePair.frames[1]?.animationState ?? null,
     },
+    assertionBooleans,
     triggerDocumentation:
       state.trigger === "initial-load"
         ? "initial load: Home mounts and the first authoritative meals response arms the cold-start replay"
@@ -547,36 +1012,18 @@ function buildManifest(cases) {
     scenario: SCENARIO,
     status: "passed",
     viewport: VIEWPORT,
-    command: "node tests/harness/scenarios/110-home-nutrition-animation-visual.mjs --output-dir tests/harness/artifacts/110-home-nutrition-animation/latest",
+    command: "yarn node tests/harness/scenarios/110-home-nutrition-animation-visual.mjs --output-dir tests/harness/artifacts/110-home-nutrition-animation/latest",
     generatedArtifactPolicy: "latest outputs are generated evidence and must be regenerated by the harness, not hand-edited.",
-    privacyPolicy: {
-      kind: "metadata-only",
-      excludes: ["sensitive runtime material", "provider material", "prompt material", "image material", "persistent store dumps", "non-loopback hosts"],
-    },
+    bundlePolicy: "Each run builds a fresh scenario-owned Vite bundle with --emptyOutDir; no pre-existing dist/client is used.",
     cases,
-    framePolicy: "mid and terminal PNGs support human review; this harness asserts only file existence, minimum byte size, nonblank screenshots, and optional kcal range metadata.",
-    syncVerdictPolicy: "time-based start and finish perception is recorded only in the fixed human visual checklist.",
+    framePolicy: "Each PNG is captured while the injected requestAnimationFrame gate is frozen; DOM nutrition fields are reread after an intentional capture delay, must remain identical, and the reread is the manifest value.",
+    timingProofPolicy: `The harness requires a running-to-complete lifecycle, a monotonic endpoint-bounded sequence with at least ${MIN_INTERIOR_SAMPLES} distinct interior kcal samples spanning at least ${MIN_INTERIOR_SPAN_MS}ms, and terminal capture only after the Home DOM reports complete.`,
+    syncVerdictPolicy: "Subjective motion quality, synchrony, and perception remain recorded only in the fixed human visual checklist; this automated evidence does not claim to prove them.",
     screenshots: cases.flatMap((entry) => entry.screenshots),
   };
 }
 
-function assertManifestPrivacySchema(manifest) {
-  const serialized = JSON.stringify(manifest);
-  for (const pattern of FORBIDDEN_MANIFEST_PATTERNS) {
-    if (pattern.test(serialized)) {
-      throw new Error(`Phase 110 manifest privacy schema rejected forbidden content: ${pattern}`);
-    }
-  }
-  if (/https?:\/\/(?!127\.0\.0\.1)/.test(serialized)) {
-    throw new Error("Phase 110 manifest privacy schema rejected external URL content.");
-  }
-}
-
-async function validateHarness(args) {
-  const outputDir = resolveSafeOutputDir(args.outputDir);
-  await rm(outputDir, { recursive: true, force: true });
-  await mkdir(outputDir, { recursive: true });
-  await assertReadable(DIST_INDEX, `Build output missing: ${DIST_INDEX}. Run yarn build first.`);
+async function validateHarness({ outputDir, bundleContext }) {
   let artifactRootRejected = false;
   try {
     resolveSafeOutputDir("tests/harness/artifacts/110-home-nutrition-animation");
@@ -594,9 +1041,10 @@ async function validateHarness(args) {
   assertTrue(outsideRejected, "Phase 110 validate-harness failed: path outside latest root was not rejected.");
 
   const browser = await findBrowser();
-  const server = await startStaticServer();
+  const server = await startStaticServer(bundleContext);
+  let output;
   try {
-    const output = await withBrowserPage({
+    output = await withBrowserPage({
       browser,
       url: server.origin,
       outputDir,
@@ -612,7 +1060,7 @@ async function validateHarness(args) {
           trigger: "validation",
           expectedMealSet: "base",
           expectedTotals: null,
-          readings: { startKcal: null, midKcal: null, terminalKcal: null, strictlyBetweenKcal: null },
+          readings: { startKcal: null, expectedStartKcal: null, midKcal: null, terminalKcal: null, strictlyBetweenKcal: null, terminalMatchesExpectedKcal: null, sampleElapsedMs: null },
           triggerDocumentation: "validation-only Home load",
           frames: [{ kind: "validation", file: "validate-harness.png", path: screenshot.path, bytes: screenshot.bytes, nonblank: screenshot.nonblank, kcal: null }],
           screenshots: ["validate-harness.png"],
@@ -620,30 +1068,30 @@ async function validateHarness(args) {
         };
       },
     });
-    const manifest = buildManifest([output]);
-    manifest.validationOnly = true;
-    assertManifestPrivacySchema(manifest);
-    await writeFile(join(outputDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
   } finally {
     await server.close();
   }
+  const manifest = buildManifest([output]);
+  manifest.validationOnly = true;
+  await writeFile(join(outputDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const outputDir = resolveSafeOutputDir(args.outputDir);
+  await rm(outputDir, { recursive: true, force: true });
+  await mkdir(outputDir, { recursive: true });
+  const bundleContext = await prepareHarnessBundle(outputDir);
   if (args.validateHarness) {
-    await validateHarness(args);
+    await validateHarness({ outputDir, bundleContext });
     return;
   }
 
-  await assertReadable(DIST_INDEX, `Build output missing: ${DIST_INDEX}. Run yarn build first.`);
-  await rm(outputDir, { recursive: true, force: true });
-  await mkdir(outputDir, { recursive: true });
   const browser = await findBrowser();
-  const server = await startStaticServer();
+  const server = await startStaticServer(bundleContext);
+  let caseOutputs;
   try {
-    const caseOutputs = await withBrowserPage({
+    caseOutputs = await withBrowserPage({
       browser,
       url: server.origin,
       outputDir,
@@ -672,16 +1120,28 @@ async function main() {
           throw new Error(`Phase 110 visual evidence failed final frame assertion for ${output.name}/${frame.file}.`);
         }
       }
+      assertAnimationReadings({
+        caseName: output.name,
+        expectedStartKcal: output.readings.expectedStartKcal,
+        midKcal: output.readings.midKcal,
+        terminalKcal: output.readings.terminalKcal,
+        expectedTerminalKcal: output.expectedTotals?.kcal,
+        sampleSequence: output.readings.sampleSequence,
+        midFrameBinding: output.frames[0]?.binding,
+        terminalFrameBinding: output.frames[1]?.binding,
+        terminalAnimationState: output.frames[1]?.animationState,
+      });
     }
-    const manifest = buildManifest(caseOutputs);
-    assertManifestPrivacySchema(manifest);
-    await writeFile(join(outputDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
   } finally {
     await server.close();
   }
+  const manifest = buildManifest(caseOutputs);
+  await writeFile(join(outputDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}

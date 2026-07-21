@@ -18,8 +18,8 @@ import {
   assertPolicyFact,
   assertVisibleOutcomeSummary,
 } from "../policy-assertions.js";
-import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
+import { buildPositiveScenarioResult } from "../positive-metadata.js";
 import type {
   VerificationScenario,
   ScenarioContext,
@@ -75,13 +75,7 @@ function failResult(
   failedStepName: string,
   artifacts: Record<string, unknown>,
 ): ScenarioResult {
-  return {
-    ok: false,
-    failedStep: failedStepName,
-    steps,
-    artifacts,
-    consoleSummary: `FAIL ${SCENARIO_NAME} ${failedStepName}`,
-  };
+  return buildPositiveScenarioResult(SCENARIO_NAME, false, steps, failedStepName);
 }
 
 function summarizePolicyFact(fact: Record<string, unknown>): PolicyEvidence {
@@ -183,19 +177,31 @@ function summarizeMealState(input: {
 const scenario: VerificationScenario = {
   name: SCENARIO_NAME,
 
-  async run(_ctx: ScenarioContext): Promise<ScenarioResult> {
-    const steps: ScenarioStepResult[] = [];
-    const artifacts = evidenceArtifacts();
+  prepareApp() {
     const provider = new StreamingLLMProvider();
     const traceRecorders: Array<ReturnType<typeof createLlmTraceRecorder>> = [];
-    const fixture = await createScenarioApp({
-      llmProvider: provider,
-      llmTraceRecorderFactory() {
-        const recorder = createLlmTraceRecorder();
-        traceRecorders.push(recorder);
-        return recorder;
+    return {
+      appOptions: {
+        llmProvider: provider,
+        admissionLimiterOptions: { budgets: { provider: { maxRequests: 100, maxConcurrent: 3 } } },
+        llmTraceRecorderFactory() {
+          const recorder = createLlmTraceRecorder();
+          traceRecorders.push(recorder);
+          return recorder;
+        },
       },
-    });
+      state: { provider, traceRecorders },
+    };
+  },
+
+  async run(ctx: ScenarioContext): Promise<ScenarioResult> {
+    const steps: ScenarioStepResult[] = [];
+    const artifacts = evidenceArtifacts();
+    const { provider, traceRecorders } = ctx.prepared as {
+      provider: StreamingLLMProvider;
+      traceRecorders: Array<ReturnType<typeof createLlmTraceRecorder>>;
+    };
+    const fixture = ctx;
 
     const publishCounts = {
       dailySummary: 0,
@@ -492,7 +498,7 @@ const scenario: VerificationScenario = {
         tool: "delete_meal",
         policyClass: "confirm-first",
         decision: "allowed",
-        ruleId: "delete_meal_approval_consume",
+        ruleId: "typed_meal_delete_approve",
         requireTurnId: false,
       });
       assert.equal(approvalPolicyFact.success, true);
@@ -833,7 +839,7 @@ const scenario: VerificationScenario = {
         goalsPublishCount: publishCounts.goals,
       });
       const staleVisibleOutcome = summarizeVisibleOutcome({
-        keyLabels: { staleCopy: /餐點內容已經變更/.test(stale.body.reply ?? "") },
+        keyLabels: { staleCopy: /提案已不是目前有效狀態/.test(stale.body.reply ?? "") },
         meaning: {
           returnedHttpSuccess: stale.status === 200,
           didNotMutateMeal: stale.body.didMutateMeal === false,
@@ -845,7 +851,7 @@ const scenario: VerificationScenario = {
         tool: "delete_meal",
         policyClass: "confirm-first",
         decision: "blocked",
-        ruleId: "delete_meal_approval_stale",
+        ruleId: "typed_meal_delete_approve",
         requireTurnId: false,
       });
       assert.equal(stalePolicyFact.success, false);
@@ -1132,18 +1138,14 @@ const scenario: VerificationScenario = {
       assert.equal(steps.length, STEP_NAMES.length, "negative delete controls not implemented");
       assertPolicyEvidenceHasNoForbiddenFields(artifacts);
 
-      return {
-        ok: true,
-        steps,
-        artifacts,
-        consoleSummary: `PASS ${SCENARIO_NAME} ${steps.length}/${STEP_NAMES.length}`,
-      };
+      return buildPositiveScenarioResult(SCENARIO_NAME, true, steps, undefined, {
+        counts: { expectedStepCount: STEP_NAMES.length },
+        assertions: { policyEvidenceValidated: true, metadataOnly: true },
+      });
     } catch (error) {
       const failedStep = STEP_NAMES.find((stepName) => !steps.some((step) => step.name === stepName)) ?? SCENARIO_NAME;
       steps.push(fail(failedStep, error instanceof Error ? error.message : String(error)));
       return failResult(steps, failedStep, artifacts);
-    } finally {
-      await fixture.close();
     }
   },
 };

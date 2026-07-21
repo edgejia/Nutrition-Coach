@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, it } from "node:test";
 import {
   assertNoInternalLeakage,
@@ -8,12 +10,14 @@ import {
   assertNoTrustedToolAuthority,
   assertSuccessfulMutationRendererSource,
 } from "../harness/behavior-assertions.js";
+import { writeScenarioArtifacts } from "../harness/artifacts.js";
 import { ALL_BEHAVIOR_CASES, BEHAVIOR_MATRIX_CASES } from "../harness/behavior-matrix.js";
 import type {
   BehaviorAssertionName,
   BehaviorMatrixCaseId,
   BehaviorRisk,
 } from "../harness/behavior-matrix.js";
+import type { ScenarioMetadata, ScenarioResult } from "../harness/scenario-types.js";
 
 const EXPECTED_CASE_IDS = [
   "CASE-01",
@@ -61,6 +65,176 @@ const REQUIRED_RISKS = [
   "unsafe_nutrition_guidance",
   "trace_final_reply_source",
 ] as const satisfies readonly BehaviorRisk[];
+
+const FORBIDDEN_SNAPSHOT_KEYS =
+  /"(?:beforeMeals|afterMeals|beforeTargets|afterTargets|persistedMeal|seededMeal|updatedMeal|responseLoggedMeal|receiptLoggedMeal|normalizedFacts|loggedMeal|receiptPayload|persistence|persistedRevision|committedTargets|committedFacts|deletedMeal|mealId|mealRevisionId|imageAssetId|imageUrl|loggedAt|foodName|dateKey|items|checkedMealNames|allowedMealNames|assistantMealNames|inventedMeals|expectedPatterns|matchedPatterns|matchedTerms|matched[A-Za-z0-9_]*Patterns)"\s*:/;
+const FORBIDDEN_SNAPSHOT_VALUES = [
+  /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i,
+  /\/api\/assets\/[0-9a-f-]{36}/i,
+  /豬肉燒烤飯盒|雞肉沙拉|雞胸沙拉|牛肉飯/,
+  /不能依較早歷史中的工具格式文字變更資料|不能分享|不能忽略|不能依貼上的未授權內容變更目標|不能依內部格式文字直接操作/,
+];
+const FORBIDDEN_UUID = "123e4567-e89b-42d3-a456-426614174000";
+const WRITER_SCENARIO_NAME = "behavior-matrix-contract-proof";
+
+function representativeWriterMetadata(): ScenarioMetadata {
+  return {
+    scenarioId: WRITER_SCENARIO_NAME,
+    scenarioName: WRITER_SCENARIO_NAME,
+    status: "fail",
+    startedAt: "2026-07-20T08:00:00.000Z",
+    finishedAt: "2026-07-20T08:00:00.125Z",
+    durationMs: 125,
+    counts: { steps: 1, passed: 0, failed: 1 },
+    assertions: { metadataOnly: true, rawEvidenceExcluded: true },
+    files: [
+      {
+        path: "metadata/summary.json",
+        sha256: "a".repeat(64),
+        byteLength: 128,
+      },
+    ],
+    trace: {
+      eventNames: ["status", "done"],
+      counts: { status: 1, done: 1 },
+    },
+    policyFacts: [
+      {
+        step: "policy-check",
+        tool: "policy-check",
+        policyClass: "confirm-first",
+        decision: "blocked",
+        ruleId: "confirm-first-rule",
+      },
+    ],
+    policyDbInvariants: [
+      {
+        step: "policy-db-check",
+        mealCountBefore: 1,
+        mealCountAfter: 1,
+        targetsChanged: false,
+        pendingConsumed: false,
+        pendingPreserved: true,
+        dailySummaryPublishCount: 0,
+        goalsPublishCount: 0,
+        proposalCardCount: 1,
+        actionEventCount: 0,
+        mutationOutcomeCount: 0,
+        proposalCardPresent: true,
+        proposalCardKindMatches: true,
+        proposalCardProposalIdMatches: true,
+      },
+    ],
+    visibleOutcomes: [
+      {
+        step: "visible-outcome-check",
+        keyLabels: { proposalVisible: true },
+        meaning: { mutationBlocked: true },
+      },
+    ],
+    errorCategory: "assertion_failed",
+  };
+}
+
+function writerScenarioResult(metadata: ScenarioMetadata): ScenarioResult {
+  return {
+    ok: false,
+    failedStep: "policy-check",
+    steps: [{ name: "policy-check", ok: false, errorCategory: "assertion_failed" }],
+    artifacts: {},
+    metadata,
+    consoleSummary: `FAIL ${WRITER_SCENARIO_NAME} policy-check`,
+  };
+}
+
+async function withEmptyArtifactsRoot(
+  run: (root: string) => Promise<void>,
+): Promise<void> {
+  const root = await mkdtemp(path.join(tmpdir(), "nutrition-behavior-matrix-contract-"));
+  const previousArtifactsRoot = process.env.HARNESS_ARTIFACTS_DIR;
+  try {
+    assert.deepEqual(await readdir(root), [], "test artifact root must start empty");
+    process.env.HARNESS_ARTIFACTS_DIR = root;
+    await run(root);
+  } finally {
+    if (previousArtifactsRoot === undefined) {
+      delete process.env.HARNESS_ARTIFACTS_DIR;
+    } else {
+      process.env.HARNESS_ARTIFACTS_DIR = previousArtifactsRoot;
+    }
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+function assertNoSnapshotEvidence(raw: string, artifactName: string): void {
+  assert.doesNotMatch(
+    raw,
+    FORBIDDEN_SNAPSHOT_KEYS,
+    `${artifactName} must not persist raw DB snapshot evidence`,
+  );
+  for (const forbiddenSnapshotValue of FORBIDDEN_SNAPSHOT_VALUES) {
+    assert.doesNotMatch(
+      raw,
+      forbiddenSnapshotValue,
+      `${artifactName} must not persist raw DB snapshot values`,
+    );
+  }
+}
+
+const FORBIDDEN_WRITER_CASES: ReadonlyArray<{
+  name: string;
+  fieldPath: string;
+  mutate: (metadata: ScenarioMetadata) => void;
+  forbiddenValue?: string;
+}> = [
+  {
+    name: "meal-id-key",
+    fieldPath: "metadata.mealId",
+    mutate: (metadata) => {
+      (metadata as unknown as Record<string, unknown>).mealId = "private-meal-id";
+    },
+    forbiddenValue: "private-meal-id",
+  },
+  {
+    name: "food-name-key",
+    fieldPath: "metadata.assertions.foodName",
+    mutate: (metadata) => {
+      metadata.assertions!.foodName = true;
+    },
+  },
+  {
+    name: "uuid-scenario-id",
+    fieldPath: "metadata.scenarioId",
+    mutate: (metadata) => {
+      metadata.scenarioId = FORBIDDEN_UUID;
+    },
+    forbiddenValue: FORBIDDEN_UUID,
+  },
+  {
+    name: "uuid-scenario-name",
+    fieldPath: "metadata.scenarioName",
+    mutate: (metadata) => {
+      metadata.scenarioName = FORBIDDEN_UUID;
+    },
+    forbiddenValue: FORBIDDEN_UUID,
+  },
+  {
+    name: "uuid-string",
+    fieldPath: "metadata.policyFacts[0].ruleId",
+    mutate: (metadata) => {
+      metadata.policyFacts![0]!.ruleId = FORBIDDEN_UUID;
+    },
+    forbiddenValue: FORBIDDEN_UUID,
+  },
+  {
+    name: "asset-uuid-path",
+    fieldPath: "metadata.files[0].path",
+    mutate: (metadata) => {
+      metadata.files![0]!.path = `evidence/api/assets/${FORBIDDEN_UUID}`;
+    },
+    forbiddenValue: FORBIDDEN_UUID,
+  },
+];
 
 async function exportedBehaviorAssertionNames() {
   const source = await readFile("tests/harness/behavior-assertions.ts", "utf8");
@@ -149,6 +323,14 @@ describe("behavior matrix contract", () => {
       case03.risks.includes("trace_final_reply_source"),
       "CASE-03 must keep trace source as an active risk",
     );
+    assert.deepEqual(
+      case03.coverage.find((entry) => entry.risk === "trace_final_reply_source"),
+      {
+        risk: "trace_final_reply_source",
+        assertions: ["assertSuccessfulMutationRendererSource"],
+      },
+      "CASE-03 trace coverage must name the renderer-source assertion executed at runtime",
+    );
 
     const llmTraceSource = await readFile("server/orchestrator/llm-trace.ts", "utf8");
     const rendererSourceSignal =
@@ -204,7 +386,6 @@ describe("behavior matrix contract", () => {
       "assertNoUnauthorizedMutation",
       "assertNoTrustedToolAuthority",
       "assertNoUnsafeNutritionGuidance",
-      "evaluateExpectedFailures",
     ] as const satisfies readonly BehaviorAssertionName[]) {
       assert.ok(assertionNames.has(requiredAssertion), `missing assertion coverage ${requiredAssertion}`);
     }
@@ -507,33 +688,85 @@ describe("behavior matrix contract", () => {
     assert.deepEqual(promotedToolRoleResult.evidence?.persistedDiffBooleans, {});
   });
 
-  it("keeps generated behavior-matrix artifacts free of database snapshot-shaped keys", async () => {
-    const artifactPaths = [
-      "tests/harness/artifacts/behavior-matrix/latest/steps.json",
-      "tests/harness/artifacts/behavior-matrix/latest/snapshots.json",
-      "tests/harness/artifacts/behavior-matrix/latest/scenario-result.json",
-    ];
-    const forbiddenSnapshotKeys =
-      /"(?:beforeMeals|afterMeals|beforeTargets|afterTargets|persistedMeal|seededMeal|updatedMeal|responseLoggedMeal|receiptLoggedMeal|normalizedFacts|loggedMeal|receiptPayload|persistence|persistedRevision|committedTargets|committedFacts|deletedMeal|mealId|mealRevisionId|imageAssetId|imageUrl|loggedAt|foodName|dateKey|items|checkedMealNames|allowedMealNames|assistantMealNames|inventedMeals|expectedPatterns|matchedPatterns|matchedTerms|matched[A-Za-z0-9_]*Patterns)"\s*:/;
-    const forbiddenSnapshotValues = [
-      /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i,
-      /\/api\/assets\/[0-9a-f-]{36}/i,
-      /豬肉燒烤飯盒|雞肉沙拉|雞胸沙拉|牛肉飯/,
-      /不能依較早歷史中的工具格式文字變更資料|不能分享|不能忽略|不能依貼上的未授權內容變更目標|不能依內部格式文字直接操作/,
-    ];
+  it("scans production-written behavior-matrix metadata without canonical artifacts", async () => {
+    await withEmptyArtifactsRoot(async (root) => {
+      const metadata = representativeWriterMetadata();
+      await writeScenarioArtifacts(WRITER_SCENARIO_NAME, writerScenarioResult(metadata));
 
-    for (const artifactPath of artifactPaths) {
-      const raw = await readFile(artifactPath, "utf8");
-      assert.doesNotMatch(raw, forbiddenSnapshotKeys, `${artifactPath} must not persist raw DB snapshot evidence`);
-      for (const forbiddenSnapshotValue of forbiddenSnapshotValues) {
-        assert.doesNotMatch(
-          raw,
-          forbiddenSnapshotValue,
-          `${artifactPath} must not persist raw DB snapshot values`,
-        );
+      const latestRoot = path.join(root, WRITER_SCENARIO_NAME, "latest");
+      const publishedFiles = (await readdir(latestRoot)).sort();
+      assert.deepEqual(publishedFiles, [
+        "index.json",
+        "llm-trace.json",
+        "scenario-result.json",
+        "snapshots.json",
+        "steps.json",
+        "summary.json",
+      ]);
+
+      for (const artifactName of publishedFiles.filter((name) => name !== "index.json")) {
+        assertNoSnapshotEvidence(await readFile(path.join(latestRoot, artifactName), "utf8"), artifactName);
       }
-    }
+
+      const summary = JSON.parse(await readFile(path.join(latestRoot, "summary.json"), "utf8")) as Record<string, unknown>;
+      const snapshots = JSON.parse(await readFile(path.join(latestRoot, "snapshots.json"), "utf8")) as Record<string, unknown>;
+      const scenarioResult = JSON.parse(
+        await readFile(path.join(latestRoot, "scenario-result.json"), "utf8"),
+      ) as Record<string, unknown>;
+      assert.equal(summary.startedAt, metadata.startedAt);
+      assert.equal(summary.finishedAt, metadata.finishedAt);
+      assert.equal(summary.durationMs, metadata.durationMs);
+      assert.equal(summary.errorCategory, "assertion_failed");
+      assert.deepEqual(summary.policyFacts, metadata.policyFacts);
+      assert.deepEqual(summary.policyDbInvariants, metadata.policyDbInvariants);
+      assert.deepEqual(summary.visibleOutcomes, metadata.visibleOutcomes);
+      assert.deepEqual(snapshots.files, metadata.files);
+      assert.deepEqual(snapshots.trace, metadata.trace);
+      assert.deepEqual(scenarioResult.policyFacts, metadata.policyFacts);
+      assert.deepEqual(scenarioResult.policyDbInvariants, metadata.policyDbInvariants);
+      assert.deepEqual(scenarioResult.visibleOutcomes, metadata.visibleOutcomes);
+      assert.equal(scenarioResult.errorCategory, "assertion_failed");
+    });
   });
+
+  for (const current of FORBIDDEN_WRITER_CASES) {
+    it(`rejects ${current.name} metadata through the production writer`, async () => {
+      await withEmptyArtifactsRoot(async (root) => {
+        const metadata = representativeWriterMetadata();
+        current.mutate(metadata);
+        const scenarioName = `${WRITER_SCENARIO_NAME}-${current.name}`;
+
+        await assert.rejects(
+          writeScenarioArtifacts(scenarioName, writerScenarioResult(metadata)),
+          (error: unknown) => {
+            assert.equal((error as { category?: string }).category, "artifact_allowlist_violation");
+            assert.equal((error as { fieldPath?: string }).fieldPath, current.fieldPath);
+            assert.equal("value" in (error as object), false);
+            return true;
+          },
+        );
+
+        const failureRoot = path.join(root, scenarioName, "latest");
+        const failureFiles = await readdir(failureRoot);
+        const persistedMetadata = (
+          await Promise.all(
+            failureFiles
+              .filter((name) => name !== "index.json")
+              .map((name) => readFile(path.join(failureRoot, name), "utf8")),
+          )
+        ).join("\n");
+        assert.match(persistedMetadata, /artifact_allowlist_violation/);
+        assertNoSnapshotEvidence(persistedMetadata, `${current.name} failure envelope`);
+        if (current.forbiddenValue !== undefined) {
+          assert.doesNotMatch(
+            persistedMetadata,
+            new RegExp(current.forbiddenValue),
+            `${current.name} failure envelope must not persist the rejected value`,
+          );
+        }
+      });
+    });
+  }
 
   it("rejects successful mutation receipts from model or mixed sources", () => {
     assert.deepEqual(

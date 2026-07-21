@@ -10,10 +10,10 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdir, rm } from "node:fs/promises";
-import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { collectEventSequence, parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import { validJpegBytes } from "../../fixtures/image-bytes.js";
+import { buildPositiveScenarioResult } from "../positive-metadata.js";
 import type {
   VerificationScenario,
   ScenarioContext,
@@ -105,13 +105,7 @@ function failResult(
   failedStepName: string,
   artifacts: Record<string, unknown>,
 ): ScenarioResult {
-  return {
-    ok: false,
-    failedStep: failedStepName,
-    steps,
-    artifacts,
-    consoleSummary: `FAIL ${scenarioName} ${failedStepName}`,
-  };
+  return buildPositiveScenarioResult(scenarioName, false, steps, failedStepName);
 }
 
 function makeJpegBytes(): ArrayBuffer {
@@ -217,7 +211,17 @@ async function waitForDailySummaryCount(
 const scenario: VerificationScenario = {
   name: "meal-delete-consistency",
 
-  async run(_ctx: ScenarioContext): Promise<ScenarioResult> {
+  async prepareApp() {
+    const provider = new StreamingLLMProvider();
+    await mkdir(SCENARIO_UPLOADS_DIR, { recursive: true });
+    await mkdir(SCENARIO_ASSETS_DIR, { recursive: true });
+    return {
+      appOptions: { llmProvider: provider, uploadsDir: SCENARIO_UPLOADS_DIR, assetsDir: SCENARIO_ASSETS_DIR },
+      state: { provider },
+    };
+  },
+
+  async run(ctx: ScenarioContext): Promise<ScenarioResult> {
     const scenarioName = "meal-delete-consistency";
     const steps: ScenarioStepResult[] = [];
     const artifacts: Record<string, unknown> = {};
@@ -226,7 +230,7 @@ const scenario: VerificationScenario = {
     await mkdir(SCENARIO_UPLOADS_DIR, { recursive: true });
     await mkdir(SCENARIO_ASSETS_DIR, { recursive: true });
 
-    const provider = new StreamingLLMProvider();
+    const { provider } = ctx.prepared as { provider: StreamingLLMProvider };
     provider.queueRoundResponse({
       toolCalls: [
         {
@@ -254,11 +258,7 @@ const scenario: VerificationScenario = {
       "如果之後要修正這筆午餐也可以直接告訴我。",
     ]);
 
-    const fixture = await createScenarioApp({
-      llmProvider: provider,
-      uploadsDir: SCENARIO_UPLOADS_DIR,
-      assetsDir: SCENARIO_ASSETS_DIR,
-    });
+    const fixture = ctx;
 
     let sseController: AbortController | undefined;
     let sseTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -728,12 +728,123 @@ const scenario: VerificationScenario = {
       }
       steps.push(pass("verify_artifact_contract", artifacts.artifactContract));
 
-      return {
-        ok: true,
-        steps,
-        artifacts,
-        consoleSummary: `PASS ${scenarioName} ${steps.length}/${steps.length}`,
+      const stream = artifacts.stream as {
+        eventSequence?: string[];
+        doneEventCount?: number;
+        statusLabels?: string[];
       };
+      const preDeleteMealEvidence = artifacts.preDeleteMeals as { mealCount?: number };
+      const summaryEvents = artifacts.summaryEvents as { dailySummaryEventCount?: number; eventSequence?: string[] };
+      const deleteResponse = artifacts.deleteResponse as {
+        status?: number;
+        mealIdMatched?: boolean;
+        affectedDateShapeValid?: boolean;
+        summary?: { dateMatchesAffectedDate?: boolean; mealCount?: number };
+      };
+      const postDeleteSummary = artifacts.summaryAfterDelete as {
+        dateShapeValid?: boolean;
+        mealCount?: number;
+        totalCalories?: number;
+        totalProtein?: number;
+        totalCarbs?: number;
+        totalFat?: number;
+      };
+      const postDeleteMealEvidence = artifacts.postDeleteMeals as {
+        mealCount?: number;
+        containsDeletedMeal?: boolean;
+      };
+      const historyAfterDelete = artifacts.historyAfterDelete as {
+        messageCount?: number;
+        userImageMessageFound?: boolean;
+        deletedReceipt?: {
+          receiptStatus?: string;
+          hasMealId?: boolean;
+          hasMealRevisionId?: boolean;
+          hasDateKey?: boolean;
+          itemCount?: number;
+          imageAssetIdMatched?: boolean;
+          imageUrlMatched?: boolean;
+        };
+      };
+      const assetFetch = artifacts.assetFetch as { status?: number; contentType?: string | null };
+      const followup = artifacts.postDeleteFollowup as {
+        chunkTextLength?: number;
+        chunkMentionsDeletedFacts?: boolean;
+        compressedContextMentionsDeletedFacts?: boolean;
+        donePayload?: {
+          didLogMeal?: boolean;
+          didMutateMeal?: boolean;
+          hasLoggedMeal?: boolean;
+        };
+        currentSummary?: { mealCount?: number; totalCalories?: number; totalProtein?: number; totalCarbs?: number; totalFat?: number };
+      };
+      const artifactContract = artifacts.artifactContract as { missingStepNames?: string[]; metadataOnly?: boolean };
+      const eventNames = [...new Set((stream.eventSequence ?? summaryEvents.eventSequence ?? []).map((eventName) => {
+        return ["status", "chunk", "done", "error", "close"].includes(eventName)
+          ? eventName
+          : "scenario";
+      }))];
+      const safeCount = (value: number | undefined): number => (
+        typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0
+      );
+      const postDeleteSummaryEmpty = postDeleteSummary.mealCount === 0
+        && postDeleteSummary.totalCalories === 0
+        && postDeleteSummary.totalProtein === 0
+        && postDeleteSummary.totalCarbs === 0
+        && postDeleteSummary.totalFat === 0;
+      const followupSummaryEmpty = followup.currentSummary?.mealCount === 0
+        && followup.currentSummary.totalCalories === 0
+        && followup.currentSummary.totalProtein === 0
+        && followup.currentSummary.totalCarbs === 0
+        && followup.currentSummary.totalFat === 0;
+
+      return buildPositiveScenarioResult(scenarioName, true, steps, undefined, {
+        counts: {
+          preDeleteMealCount: safeCount(preDeleteMealEvidence.mealCount),
+          postDeleteMealCount: safeCount(postDeleteMealEvidence.mealCount),
+          dailySummaryEventCount: safeCount(summaryEvents.dailySummaryEventCount),
+          historyMessageCount: safeCount(historyAfterDelete.messageCount),
+          followupChunkTextLength: safeCount(followup.chunkTextLength),
+          streamEventCount: (stream.eventSequence ?? []).length,
+        },
+        assertions: {
+          initialSummaryEmpty: true,
+          mealPersistedBeforeDelete: preDeleteMealEvidence.mealCount === 1,
+          deleteRouteSucceeded: deleteResponse.status === 200
+            && deleteResponse.mealIdMatched === true
+            && deleteResponse.affectedDateShapeValid === true
+            && deleteResponse.summary?.dateMatchesAffectedDate === true,
+          deleteSummaryEmpty: postDeleteSummaryEmpty,
+          deletedMealAbsent: postDeleteMealEvidence.containsDeletedMeal === false && postDeleteMealEvidence.mealCount === 0,
+          deletedReceiptPreserved: historyAfterDelete.deletedReceipt?.receiptStatus === "deleted"
+            && historyAfterDelete.deletedReceipt.hasMealId === false
+            && historyAfterDelete.deletedReceipt.hasMealRevisionId === false
+            && historyAfterDelete.deletedReceipt.hasDateKey === false
+            && historyAfterDelete.deletedReceipt.itemCount === 1,
+          deletedReceiptImagePreserved: typeof historyAfterDelete.deletedReceipt?.imageAssetIdMatched === "string"
+            && typeof historyAfterDelete.deletedReceipt.imageUrlMatched === "string",
+          historyImagePreserved: historyAfterDelete.userImageMessageFound === true,
+          assetFetchSucceeded: assetFetch.status === 200 && assetFetch.contentType === "image/jpeg",
+          followupExcludesDeletedFacts: followup.chunkMentionsDeletedFacts === false
+            && followup.compressedContextMentionsDeletedFacts === false,
+          followupNonMutating: followup.donePayload?.didLogMeal === false
+            && followup.donePayload?.didMutateMeal === false
+            && followup.donePayload?.hasLoggedMeal === false,
+          followupSummaryEmpty,
+          artifactContractComplete: artifactContract.metadataOnly === true
+            && (artifactContract.missingStepNames?.length ?? 0) === 0,
+          rawEvidenceExcluded: true,
+        },
+        trace: {
+          eventNames,
+          counts: {
+            eventCount: (stream.eventSequence ?? []).length,
+            statusEventCount: (stream.statusLabels ?? []).length,
+            doneEventCount: safeCount(stream.doneEventCount),
+            dailySummaryEventCount: safeCount(summaryEvents.dailySummaryEventCount),
+          },
+        },
+      });
     } finally {
       if (sseTimeout) {
         clearTimeout(sseTimeout);
@@ -742,7 +853,6 @@ const scenario: VerificationScenario = {
         sseController.abort();
       }
       if (fixture) {
-        await fixture.close();
       }
       await rm(SCENARIO_ROOT, { recursive: true, force: true });
     }

@@ -6,7 +6,6 @@
  */
 
 import { Writable } from "node:stream";
-import { createScenarioApp } from "../app-fixture.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { LLMProviderError } from "../../../server/llm/errors.js";
@@ -16,6 +15,7 @@ import {
   type LlmTraceArtifact,
   type LlmTraceTimelineEvent,
 } from "../../../server/orchestrator/llm-trace.js";
+import { buildPositiveScenarioResult } from "../positive-metadata.js";
 import type {
   ScenarioContext,
   ScenarioResult,
@@ -80,17 +80,38 @@ function failResult(
   artifacts: Record<string, unknown>,
   llmTrace?: LlmTraceArtifact,
 ): ScenarioResult {
-  const result: ScenarioResult = {
-    ok: false,
-    failedStep: failedStepName,
-    steps,
-    artifacts,
-    consoleSummary: `FAIL ${SCENARIO_NAME} ${failedStepName}`,
+  return buildPositiveScenarioResult(SCENARIO_NAME, false, steps, failedStepName, {
+    counts: {
+      expectedStepCount: STEP_NAMES.length,
+      providerErrorCount: llmTrace?.summary.providerErrorCount ?? 0,
+      sseEventCount: sseEventNames.length,
+    },
+    assertions: {
+      detailedChecksCompleted: Object.keys(artifacts).length > 0,
+      privacyScanPassed: steps.some((step) => step.name === "verify_privacy" && step.ok),
+    },
+    trace: projectTrace(llmTrace),
+  });
+}
+
+let sseEventNames: string[] = [];
+
+function projectTrace(trace: LlmTraceArtifact | undefined) {
+  const count = (type: LlmTraceTimelineEvent["type"]) => trace
+    ? trace.timeline.filter((event) => event.type === type).length
+    : 0;
+  return {
+    eventNames: sseEventNames.filter((name) => ["status", "chunk", "done", "error", "close", "boot", "seed", "listen", "scenario", "interrupt"].includes(name)),
+    counts: {
+      sseStatus: sseEventNames.filter((name) => name === "status").length,
+      sseChunk: sseEventNames.filter((name) => name === "chunk").length,
+      sseDone: sseEventNames.filter((name) => name === "done").length,
+      llmError: count("llm_error"),
+      orchestratorFallback: count("orchestrator_fallback"),
+      routeFallback: count("route_fallback"),
+      routeCompletion: count("route_completion"),
+    },
   };
-  if (llmTrace !== undefined) {
-    result.llmTrace = llmTrace as unknown as Record<string, unknown>;
-  }
-  return result;
 }
 
 function createLogCapture() {
@@ -195,12 +216,29 @@ function buildPrivacyEvidence(
 const scenario: VerificationScenario = {
   name: SCENARIO_NAME,
 
-  async run(_ctx: ScenarioContext): Promise<ScenarioResult> {
-    const steps: ScenarioStepResult[] = [];
-    const artifacts: Record<string, unknown> = {};
+  prepareApp() {
     const { logLines, stream: logStream } = createLogCapture();
     const provider = new StreamingLLMProvider();
     const recorder = createLlmTraceRecorder();
+    return {
+      appOptions: {
+        llmProvider: provider,
+        llmTraceRecorderFactory: () => recorder,
+        logger: { level: "info", stream: logStream },
+      },
+      state: { provider, recorder, logLines },
+    };
+  },
+
+  async run(ctx: ScenarioContext): Promise<ScenarioResult> {
+    const steps: ScenarioStepResult[] = [];
+    const artifacts: Record<string, unknown> = {};
+    sseEventNames = [];
+    const { provider, recorder, logLines } = ctx.prepared as {
+      provider: StreamingLLMProvider;
+      recorder: ReturnType<typeof createLlmTraceRecorder>;
+      logLines: string[];
+    };
     provider.queueRoundError(new LLMProviderError(AUTH_PROVIDER_METADATA_FIXTURE));
 
     let trace: LlmTraceArtifact | undefined;
@@ -208,11 +246,7 @@ const scenario: VerificationScenario = {
     let routeFallbackTurnId: string | undefined;
     let traceRouteFallbackTurnId: string | undefined;
 
-    const fixture = await createScenarioApp({
-      llmProvider: provider,
-      llmTraceRecorderFactory: () => recorder,
-      logger: { level: "info", stream: logStream },
-    });
+    const fixture = ctx;
 
     const failScenario = (failedStepName: string): ScenarioResult => {
       trace = recorder.build({ scenario: SCENARIO_NAME, status: "fail" });
@@ -296,6 +330,7 @@ const scenario: VerificationScenario = {
         startTurnId = typeof startPayload?.turnId === "string" ? startPayload.turnId : undefined;
         terminalTurnId = typeof donePayload?.turnId === "string" ? donePayload.turnId : undefined;
         const eventNames = events.map((event) => event.event);
+        sseEventNames = eventNames;
         const chunkTokens = events
           .filter((event) => event.event === "chunk")
           .map((event) => parseJsonObject(event.data)?.token)
@@ -507,15 +542,21 @@ const scenario: VerificationScenario = {
       };
       steps.push(pass("verify_privacy", artifacts.privacyProof));
 
-      return {
-        ok: true,
-        steps,
-        artifacts,
-        llmTrace: trace as unknown as Record<string, unknown>,
-        consoleSummary: `PASS ${SCENARIO_NAME} ${steps.filter((step) => step.ok).length}/${steps.length}`,
-      };
+      return buildPositiveScenarioResult(SCENARIO_NAME, true, steps, undefined, {
+        counts: {
+          expectedStepCount: STEP_NAMES.length,
+          providerErrorCount: trace.summary.providerErrorCount,
+          sseEventCount: sseEventNames.length,
+        },
+        assertions: {
+          fallbackLocalized: true,
+          providerAuthDetailsRedacted: true,
+          turnIdsCorrelated: true,
+          privacyScanPassed: true,
+        },
+        trace: projectTrace(trace),
+      });
     } finally {
-      await fixture.close();
     }
   },
 };

@@ -5,11 +5,11 @@
  * while keeping artifact generation owned by the harness runner.
  */
 
-import { createScenarioApp } from "../app-fixture.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import type { VerificationScenario, ScenarioContext, ScenarioResult, ScenarioStepResult } from "../scenario-types.js";
 import { currentAppDate, formatLocalDate } from "../../../server/lib/time.js";
 import type { DailySummary } from "../../../server/services/summary.js";
+import { buildPositiveScenarioResult } from "../positive-metadata.js";
 
 interface DailySummaryEnvelope {
   summary?: unknown;
@@ -40,7 +40,7 @@ function failResult(
   failedStepName: string,
   artifacts: Record<string, unknown>,
 ): ScenarioResult {
-  return { ok: false, failedStep: failedStepName, steps, artifacts, consoleSummary: `FAIL ${scenarioName} ${failedStepName}` };
+  return buildPositiveScenarioResult(scenarioName, false, steps, failedStepName);
 }
 
 const STEP_NAMES = [
@@ -142,14 +142,13 @@ function parseDailySummaryEnvelope(data: string): DailySummaryEnvelope {
 const dailyRolloverScenario: VerificationScenario = {
   name: "daily-rollover",
 
-  async run(_ctx: ScenarioContext): Promise<ScenarioResult> {
+  async run(ctx: ScenarioContext): Promise<ScenarioResult> {
     const scenarioName = "daily-rollover";
     const steps: ScenarioStepResult[] = [];
     const artifacts: Record<string, unknown> = {};
-    const fixture = await createScenarioApp({});
+    const fixture = ctx;
     let afterMealForMutation: { id: string; mealRevisionId: string } | undefined;
 
-    try {
       try {
         const pingRes = await fetch(`${fixture.address}/api/meals`, {
           headers: { cookie: fixture.cookieHeader },
@@ -381,15 +380,9 @@ const dailyRolloverScenario: VerificationScenario = {
       }
 
       const passedCount = steps.filter((step) => step.ok).length;
-      return {
-        ok: true,
-        steps,
-        artifacts,
-        consoleSummary: `PASS ${scenarioName} ${passedCount}/${STEP_NAMES.length}`,
-      };
-    } finally {
-      await fixture.close();
-    }
+      return buildPositiveScenarioResult(scenarioName, true, steps, undefined, {
+        counts: { expectedStepCount: STEP_NAMES.length, passedStepCount: passedCount },
+      });
   },
 };
 

@@ -2,6 +2,9 @@
 import { eq, sql } from "drizzle-orm";
 import { devices } from "../db/schema.js";
 import type { AppDatabase } from "../db/client.js";
+import type { SyncTransactionClient } from "./turn-state.js";
+import { checkNutritionSafetyTargets } from "../orchestrator/nutrition-safety-policy.js";
+import { isGoalMacroCaloriesOverAllocated } from "../orchestrator/goal-adjustment-policy.js";
 
 const GOAL_DEFAULTS = {
   fat_loss: { calories: 1500, protein: 120, carbs: 150, fat: 50 },
@@ -17,6 +20,18 @@ export interface DailyTargets {
 }
 
 export type Goal = keyof typeof GOAL_DEFAULTS;
+
+export type DeviceGoalsValidationCode = "UNSAFE_CALORIE_FLOOR" | "MACRO_CALORIE_INCONSISTENT";
+
+export class DeviceGoalsValidationError extends Error {
+  readonly code: DeviceGoalsValidationCode;
+
+  constructor(code: DeviceGoalsValidationCode) {
+    super(code);
+    this.name = "DeviceGoalsValidationError";
+    this.code = code;
+  }
+}
 
 export interface IntakeFields {
   sex: string;
@@ -39,6 +54,75 @@ export function getGoalDefaults(goal: Goal): DailyTargets {
 }
 
 export function createDeviceService(db: AppDatabase) {
+  function getDeviceSync(deviceId: string, client: SyncTransactionClient = db.$client) {
+    return client
+      .prepare(`
+        SELECT
+          id,
+          daily_calories AS dailyCalories,
+          daily_protein AS dailyProtein,
+          daily_carbs AS dailyCarbs,
+          daily_fat AS dailyFat
+        FROM devices
+        WHERE id = ?
+        LIMIT 1
+      `)
+      .get(deviceId) as {
+        id: string;
+        dailyCalories: number;
+        dailyProtein: number;
+        dailyCarbs: number;
+        dailyFat: number;
+      } | undefined;
+  }
+
+  function updateGoalsSync(
+    deviceId: string,
+    goals: Partial<DailyTargets>,
+    client: SyncTransactionClient = db.$client,
+  ): DailyTargets {
+    const device = getDeviceSync(deviceId, client);
+    if (!device) throw new Error("Device not found");
+    const updated = {
+      dailyCalories: goals.calories ?? device.dailyCalories,
+      dailyProtein: goals.protein ?? device.dailyProtein,
+      dailyCarbs: goals.carbs ?? device.dailyCarbs,
+      dailyFat: goals.fat ?? device.dailyFat,
+    };
+    const candidateTargets: DailyTargets = {
+      calories: updated.dailyCalories,
+      protein: updated.dailyProtein,
+      carbs: updated.dailyCarbs,
+      fat: updated.dailyFat,
+    };
+    if (!checkNutritionSafetyTargets(candidateTargets).ok) {
+      throw new DeviceGoalsValidationError("UNSAFE_CALORIE_FLOOR");
+    }
+    if (isGoalMacroCaloriesOverAllocated(candidateTargets)) {
+      throw new DeviceGoalsValidationError("MACRO_CALORIE_INCONSISTENT");
+    }
+
+    const columns: Array<[keyof Partial<DailyTargets>, string, number | undefined]> = [
+      ["calories", "daily_calories", goals.calories],
+      ["protein", "daily_protein", goals.protein],
+      ["carbs", "daily_carbs", goals.carbs],
+      ["fat", "daily_fat", goals.fat],
+    ];
+    const supplied = columns.filter(([, , value]) => value !== undefined);
+    if (supplied.length === 0) throw new Error("At least one goal field is required");
+    const assignments = supplied.map(([, column]) => `${column} = ?`).join(", ");
+    client.prepare(`UPDATE devices SET ${assignments} WHERE id = ?`).run(
+      ...supplied.map(([, , value]) => value as number),
+      deviceId,
+    );
+    return {
+      calories: updated.dailyCalories,
+      protein: updated.dailyProtein,
+      carbs: updated.dailyCarbs,
+      fat: updated.dailyFat,
+    };
+  }
+
   return {
     async createDevice(
       goal: Goal,
@@ -79,6 +163,8 @@ export function createDeviceService(db: AppDatabase) {
       return rows[0];
     },
 
+    getDeviceSync,
+
     async bumpSessionVersion(deviceId: string) {
       await db
         .update(devices)
@@ -87,21 +173,21 @@ export function createDeviceService(db: AppDatabase) {
     },
 
     async updateGoals(deviceId: string, goals: Partial<DailyTargets>): Promise<DailyTargets> {
-      const device = (await db.select().from(devices).where(eq(devices.id, deviceId)))[0];
-      if (!device) throw new Error("Device not found");
-      const updated = {
-        dailyCalories: goals.calories ?? device.dailyCalories,
-        dailyProtein: goals.protein ?? device.dailyProtein,
-        dailyCarbs: goals.carbs ?? device.dailyCarbs,
-        dailyFat: goals.fat ?? device.dailyFat,
-      };
-      await db.update(devices).set(updated).where(eq(devices.id, deviceId));
-      return {
-        calories: updated.dailyCalories,
-        protein: updated.dailyProtein,
-        carbs: updated.dailyCarbs,
-        fat: updated.dailyFat,
-      };
+      db.$client.prepare("BEGIN IMMEDIATE").run();
+      try {
+        const updated = updateGoalsSync(deviceId, goals, db.$client);
+        db.$client.prepare("COMMIT").run();
+        return updated;
+      } catch (error) {
+        try {
+          db.$client.prepare("ROLLBACK").run();
+        } catch {
+          // Preserve the original validation or persistence error.
+        }
+        throw error;
+      }
     },
+
+    updateGoalsSync,
   };
 }

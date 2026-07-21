@@ -122,6 +122,8 @@ interface HistorySearchCursor extends HistoryCursor {
   matchedItemPosition: number;
 }
 
+export const MAX_HISTORY_TREND_DAYS = 366;
+
 interface MatchedHistoryMealHeader extends HistoryMealHeader {
   matchedItemPosition: number;
   matchedItemName: string;
@@ -137,20 +139,38 @@ export function parseHistoryDateKey(dateKey: string, field: string): Date {
   }
 
   const parsedDate = new Date(`${dateKey}T12:00:00`);
-  if (Number.isNaN(parsedDate.getTime()) || formatLocalDate(parsedDate) !== dateKey) {
+  const normalizedDateKey = Number.isNaN(parsedDate.getTime())
+    ? ""
+    : [
+        String(parsedDate.getFullYear()).padStart(4, "0"),
+        String(parsedDate.getMonth() + 1).padStart(2, "0"),
+        String(parsedDate.getDate()).padStart(2, "0"),
+      ].join("-");
+  if (normalizedDateKey !== dateKey) {
     throw new HistoryQueryValidationError([invalidIssue(field)]);
   }
 
   return parsedDate;
 }
 
-function resolveHistoryDateRange(from: string, to: string): HistoryDateRange {
+function resolveHistoryDateRange(from: string, to: string, maxDays?: number): HistoryDateRange {
   const fromDate = parseHistoryDateKey(from, "from");
   const toDate = parseHistoryDateKey(to, "to");
 
   if (fromDate.getTime() > toDate.getTime()) {
     throw new HistoryQueryValidationError([
       { field: "from", message: "from must be on or before to" },
+    ]);
+  }
+
+  const fromUtc = new Date(Date.UTC(2000, fromDate.getMonth(), fromDate.getDate()));
+  fromUtc.setUTCFullYear(fromDate.getFullYear());
+  const toUtc = new Date(Date.UTC(2000, toDate.getMonth(), toDate.getDate()));
+  toUtc.setUTCFullYear(toDate.getFullYear());
+  const inclusiveDays = Math.floor((toUtc.getTime() - fromUtc.getTime()) / 86_400_000) + 1;
+  if (maxDays !== undefined && inclusiveDays > maxDays) {
+    throw new HistoryQueryValidationError([
+      { field: "to", message: `date range must not exceed ${maxDays} days` },
     ]);
   }
 
@@ -623,7 +643,7 @@ export function createHistoryQueryService(
       from: string;
       to: string;
     }): Promise<HistoryTrendResponseDto> {
-      const range = resolveHistoryDateRange(args.from, args.to);
+      const range = resolveHistoryDateRange(args.from, args.to, MAX_HISTORY_TREND_DAYS);
       const dateKeys = buildInclusiveLocalDateKeys(range.fromDate, range.toDate);
       const bucketsByDate = new Map<string, HistoryTrendBucketDto & { transactionIds: Set<string> }>();
 

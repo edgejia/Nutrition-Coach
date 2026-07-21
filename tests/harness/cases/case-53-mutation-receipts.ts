@@ -6,7 +6,7 @@ import {
   type BehaviorAssertionResult,
   type BehaviorCaseOutcome,
 } from "../behavior-assertions.js";
-import { createScenarioApp, type ScenarioAppContext } from "../app-fixture.js";
+import { type ScenarioAppContext, type ScenarioAppFactory } from "../app-fixture.js";
 import { parseSSEEvents } from "../sse.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { createLlmTraceRecorder } from "../../../server/orchestrator/llm-trace.js";
@@ -56,13 +56,13 @@ interface SubflowResult {
 
 const CASE_ID = "PHASE-53-MUTATION-RECEIPTS";
 
-export async function runCase53MutationReceipts(): Promise<BehaviorCaseOutcome> {
+export async function runCase53MutationReceipts(createApp: ScenarioAppFactory): Promise<BehaviorCaseOutcome> {
   const subflows = [
-    await runLogSubflow(),
-    await runUpdateSubflow(),
-    await runDeleteSubflow(),
-    await runGoalsSubflow(),
-    await runNonMutationModelSubflow(),
+    await runLogSubflow(createApp),
+    await runUpdateSubflow(createApp),
+    await runDeleteSubflow(createApp),
+    await runGoalsSubflow(createApp),
+    await runNonMutationModelSubflow(createApp),
   ];
   const assertions = subflows.flatMap((subflow) => subflow.assertions);
   const ok = assertions.every((assertion) => assertion.ok);
@@ -78,7 +78,7 @@ export async function runCase53MutationReceipts(): Promise<BehaviorCaseOutcome> 
   };
 }
 
-async function runLogSubflow(): Promise<SubflowResult> {
+async function runLogSubflow(createApp: ScenarioAppFactory): Promise<SubflowResult> {
   const llmProvider = new StreamingLLMProvider();
   const recorder = createLlmTraceRecorder();
   llmProvider.queueRoundResponse({
@@ -104,7 +104,7 @@ async function runLogSubflow(): Promise<SubflowResult> {
     }],
   });
 
-  const fixture = await createScenarioApp({
+  const fixture = await createApp({
     llmProvider,
     llmTraceRecorderFactory: () => recorder,
   });
@@ -152,10 +152,10 @@ async function runLogSubflow(): Promise<SubflowResult> {
   }
 }
 
-async function runUpdateSubflow(): Promise<SubflowResult> {
+async function runUpdateSubflow(createApp: ScenarioAppFactory): Promise<SubflowResult> {
   const llmProvider = new StreamingLLMProvider();
   const recorder = createLlmTraceRecorder();
-  const fixture = await createScenarioApp({
+  const fixture = await createApp({
     llmProvider,
     llmTraceRecorderFactory: () => recorder,
   });
@@ -234,10 +234,10 @@ async function runUpdateSubflow(): Promise<SubflowResult> {
   }
 }
 
-async function runDeleteSubflow(): Promise<SubflowResult> {
+async function runDeleteSubflow(createApp: ScenarioAppFactory): Promise<SubflowResult> {
   const llmProvider = new StreamingLLMProvider();
   const recorder = createLlmTraceRecorder();
-  const fixture = await createScenarioApp({
+  const fixture = await createApp({
     llmProvider,
     llmTraceRecorderFactory: () => recorder,
   });
@@ -322,7 +322,7 @@ async function runDeleteSubflow(): Promise<SubflowResult> {
   }
 }
 
-async function runGoalsSubflow(): Promise<SubflowResult> {
+async function runGoalsSubflow(createApp: ScenarioAppFactory): Promise<SubflowResult> {
   const llmProvider = new StreamingLLMProvider();
   const recorder = createLlmTraceRecorder();
   llmProvider.queueRoundResponse({
@@ -341,7 +341,7 @@ async function runGoalsSubflow(): Promise<SubflowResult> {
       },
     }],
   });
-  const fixture = await createScenarioApp({
+  const fixture = await createApp({
     llmProvider,
     llmTraceRecorderFactory: () => recorder,
   });
@@ -388,13 +388,13 @@ async function runGoalsSubflow(): Promise<SubflowResult> {
   }
 }
 
-async function runNonMutationModelSubflow(): Promise<SubflowResult> {
+async function runNonMutationModelSubflow(createApp: ScenarioAppFactory): Promise<SubflowResult> {
   const llmProvider = new StreamingLLMProvider();
   const recorder = createLlmTraceRecorder();
   llmProvider.queueRoundResponse({
     content: "可以，今天先維持原本節奏，下一餐補足蛋白質即可。",
   });
-  const fixture = await createScenarioApp({
+  const fixture = await createApp({
     llmProvider,
     llmTraceRecorderFactory: () => recorder,
   });

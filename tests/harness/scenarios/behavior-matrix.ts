@@ -3,6 +3,7 @@ import type {
   ScenarioStepResult,
   VerificationScenario,
 } from "../scenario-types.js";
+import { buildPositiveScenarioResult } from "../positive-metadata.js";
 import {
   type BehaviorCaseId,
   type BehaviorMatrixCaseId,
@@ -13,6 +14,7 @@ import type {
   BehaviorCaseOutcome,
   BehaviorCaseStatus,
 } from "../behavior-assertions.js";
+import type { ScenarioContext } from "../scenario-types.js";
 import { runCase01ImageOnly } from "../cases/case-01-image-only.js";
 import { runCase02UncertainQuantity } from "../cases/case-02-uncertain-quantity.js";
 import { runCase03ReceiptConsistency } from "../cases/case-03-receipt-consistency.js";
@@ -32,28 +34,34 @@ import { runCase16RapidWeightLoss } from "../cases/case-16-rapid-weight-loss.js"
 import { runCase17PunitiveExercise } from "../cases/case-17-punitive-exercise.js";
 import { runCase53MutationReceipts } from "../cases/case-53-mutation-receipts.js";
 
-type BehaviorCaseRunner = () => Promise<BehaviorCaseOutcome>;
+type BehaviorCaseRunner = (ctx: ScenarioContext) => Promise<BehaviorCaseOutcome>;
 type ExecutableBehaviorCaseId = BehaviorCaseId | "PHASE-53-MUTATION-RECEIPTS";
 
+type FactoryCaseRunner = (createApp: ScenarioContext["createApp"]) => Promise<BehaviorCaseOutcome>;
+
+function withRunnerFactory(runner: FactoryCaseRunner): BehaviorCaseRunner {
+  return (ctx) => runner(ctx.createApp);
+}
+
 const CASE_RUNNERS = {
-  "CASE-01": runCase01ImageOnly,
-  "CASE-02": runCase02UncertainQuantity,
-  "CASE-03": runCase03ReceiptConsistency,
-  "CASE-04": runCase04HistoricalDate,
-  "CASE-05": runCase05GoalAuthorization,
-  "CASE-06": runCase06UpdateDeleteClarification,
-  "CASE-07": runCase07PromptInjection,
-  "CASE-08": runCase08MedicalBoundary,
-  "CASE-09": runCase09ProfileInjection,
-  "CASE-10": runCase10PromptToolDisclosure,
-  "CASE-11": runCase11MaliciousToolJson,
-  "CASE-12": runCase12UnauthorizedGoalUpdate,
-  "CASE-13": runCase13HistoryToolLikeInjection,
-  "CASE-14": runCase14UnsafeLowCalorieGoal,
-  "CASE-15": runCase15ExtremeRestriction,
-  "CASE-16": runCase16RapidWeightLoss,
-  "CASE-17": runCase17PunitiveExercise,
-  "PHASE-53-MUTATION-RECEIPTS": runCase53MutationReceipts,
+  "CASE-01": withRunnerFactory(runCase01ImageOnly),
+  "CASE-02": withRunnerFactory(runCase02UncertainQuantity),
+  "CASE-03": withRunnerFactory(runCase03ReceiptConsistency),
+  "CASE-04": withRunnerFactory(runCase04HistoricalDate),
+  "CASE-05": withRunnerFactory(runCase05GoalAuthorization),
+  "CASE-06": withRunnerFactory(runCase06UpdateDeleteClarification),
+  "CASE-07": withRunnerFactory(runCase07PromptInjection),
+  "CASE-08": withRunnerFactory(runCase08MedicalBoundary),
+  "CASE-09": withRunnerFactory(runCase09ProfileInjection),
+  "CASE-10": withRunnerFactory(runCase10PromptToolDisclosure),
+  "CASE-11": withRunnerFactory(runCase11MaliciousToolJson),
+  "CASE-12": withRunnerFactory(runCase12UnauthorizedGoalUpdate),
+  "CASE-13": withRunnerFactory(runCase13HistoryToolLikeInjection),
+  "CASE-14": withRunnerFactory(runCase14UnsafeLowCalorieGoal),
+  "CASE-15": withRunnerFactory(runCase15ExtremeRestriction),
+  "CASE-16": withRunnerFactory(runCase16RapidWeightLoss),
+  "CASE-17": withRunnerFactory(runCase17PunitiveExercise),
+  "PHASE-53-MUTATION-RECEIPTS": withRunnerFactory(runCase53MutationReceipts),
 } as const satisfies Record<ExecutableBehaviorCaseId, BehaviorCaseRunner>;
 
 const EXECUTABLE_BEHAVIOR_CASE_IDS: readonly ExecutableBehaviorCaseId[] = [
@@ -206,7 +214,7 @@ function normalizeOutcome(
   return outcome;
 }
 
-async function runCase(caseId: ExecutableBehaviorCaseId): Promise<BehaviorCaseOutcome> {
+async function runCase(caseId: ExecutableBehaviorCaseId, ctx: ScenarioContext): Promise<BehaviorCaseOutcome> {
   const runner = CASE_RUNNERS[caseId];
   if (!runner) {
     return buildMetadataErrorOutcome(caseId, {
@@ -217,7 +225,7 @@ async function runCase(caseId: ExecutableBehaviorCaseId): Promise<BehaviorCaseOu
   }
 
   try {
-    return normalizeOutcome(caseId, await runner());
+    return normalizeOutcome(caseId, await runner(ctx));
   } catch (error) {
     return {
       caseId,
@@ -286,7 +294,7 @@ function consoleSummary(counts: Record<BehaviorCaseStatus, number>, ok: boolean)
 const behaviorMatrixScenario: VerificationScenario = {
   name: "behavior-matrix",
 
-  async run(): Promise<ScenarioResult> {
+  async run(ctx: ScenarioContext): Promise<ScenarioResult> {
     const caseIds = [...EXECUTABLE_BEHAVIOR_CASE_IDS];
     const errors = registryErrors();
     let outcomes: BehaviorCaseOutcome[];
@@ -302,7 +310,7 @@ const behaviorMatrixScenario: VerificationScenario = {
     } else {
       outcomes = [];
       for (const caseId of caseIds) {
-        outcomes.push(await runCase(caseId));
+        outcomes.push(await runCase(caseId, ctx));
       }
     }
 
@@ -311,23 +319,22 @@ const behaviorMatrixScenario: VerificationScenario = {
     const counts = statusCounts(outcomes);
     const ok = firstFailedStep === undefined;
 
-    return {
+    return buildPositiveScenarioResult(
+      "behavior-matrix",
       ok,
-      ...(firstFailedStep ? { failedStep: firstFailedStep } : {}),
       steps,
-      artifacts: {
-        outcomes: outcomes.map(artifactOutcome),
-        statusCounts: counts,
-        expectedFailures: outcomes.flatMap((outcome) =>
-          (outcome.expectedFailures ?? []).map((failure) => ({
-            caseId: outcome.caseId,
-            ...failure,
-          }))
-        ),
-        caseIds,
+      firstFailedStep,
+      {
+        counts: {
+          ...counts,
+          caseCount: caseIds.length,
+        },
+        assertions: {
+          registryMatches: errors.missingRunnerIds.length === 0 && errors.extraRunnerIds.length === 0,
+          allCasesPassed: ok,
+        },
       },
-      consoleSummary: consoleSummary(counts, ok),
-    };
+    );
   },
 };
 

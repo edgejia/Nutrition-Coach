@@ -19,13 +19,107 @@ const RISK_PATTERN = /\b(?:production|migration|migrate|restore|backup|database|
 const INERT_COMMANDS = new Set(["echo", "false", "printf", "true"]);
 const READ_ONLY_NODE_CHECKERS = new Set([
   "scripts/workflow/plan-proof-lint.mjs",
-  "scripts/workflow/runtime-parity.mjs",
   "scripts/workflow/state-check.mjs",
 ]);
 const NEGATIVE_CONTROL_TEST_FILES = new Set([
   "tests/integration/production-recovery-rehearsal.test.ts",
   "tests/unit/plan-proof-lint.test.ts",
+  "tests/integration/phase-126-proposal-negative-controls.test.ts",
+  "tests/integration/phase-126-admission-negative-controls.test.ts",
+  "tests/integration/phase-126-ai-boundary-negative-controls.test.ts",
+  "tests/integration/phase-126-privacy-negative-controls.test.ts",
+  "tests/integration/phase-127-meal-snapshot-negative-controls.test.ts",
+  "tests/integration/phase-127-chat-lifecycle-negative-controls.test.ts",
+  "tests/integration/phase-127-goal-patch-negative-controls.test.ts",
+  "tests/integration/phase-127-history-bound-negative-controls.test.ts",
+  "tests/integration/phase-127-startup-schema-negative-controls.test.ts",
+  "tests/integration/phase-128-artifact-negative-controls.test.ts",
+  "tests/integration/phase-128-sse-negative-controls.test.ts",
+  "tests/integration/phase-128-policy-side-effect-negative-controls.test.ts",
+  "tests/integration/phase-128-harness-lifecycle-negative-controls.test.ts",
+  "tests/integration/phase-128-git-authority-negative-controls.test.ts",
+  "tests/integration/phase-128-policy-taxonomy-negative-controls.test.ts",
+  "tests/integration/phase-128-advisory-negative-controls.test.ts",
+  "tests/integration/phase-128-readiness-audit-negative-controls.test.ts",
 ]);
+const PHASE_126_NEGATIVE_CONTROL_BY_TASK = [
+  {
+    path: "tests/integration/phase-126-ai-boundary-negative-controls.test.ts",
+    pattern: /\b(?:field-scoped|source evidence|affirmative intent|cross-field|incompatible units)\b/i,
+  },
+  {
+    path: "tests/integration/phase-126-proposal-negative-controls.test.ts",
+    pattern: /\b(?:proposal|transaction)\b/i,
+  },
+  {
+    path: "tests/integration/phase-126-admission-negative-controls.test.ts",
+    pattern: /\badmission\b/i,
+  },
+  {
+    path: "tests/integration/phase-126-ai-boundary-negative-controls.test.ts",
+    pattern: /\b(?:ai|safety|planning|late-frame)\b/i,
+  },
+  {
+    path: "tests/integration/phase-126-privacy-negative-controls.test.ts",
+    pattern: /\bprivacy\b/i,
+  },
+];
+const PHASE_127_NEGATIVE_CONTROL_BY_TASK = [
+  {
+    path: "tests/integration/phase-127-meal-snapshot-negative-controls.test.ts",
+    pattern: /\bmeal correction\b|\bmeal snapshot\b/i,
+  },
+  {
+    path: "tests/integration/phase-127-chat-lifecycle-negative-controls.test.ts",
+    pattern: /\bchat lifecycle\b|\bdisconnect\b|\bprovider-backed chat\b/i,
+  },
+  {
+    path: "tests/integration/phase-127-goal-patch-negative-controls.test.ts",
+    pattern: /\bgoal (?:patch|updates?)\b|\bsparse goal\b/i,
+  },
+  {
+    path: "tests/integration/phase-127-history-bound-negative-controls.test.ts",
+    pattern: /\btrend\b|\bhistory (?:route|bound|range)\b/i,
+  },
+  {
+    path: "tests/integration/phase-127-startup-schema-negative-controls.test.ts",
+    pattern: /\bstartup schema\b|\bschema (?:and|\/)\s*migration\b|\bmigration provenance\b/i,
+  },
+];
+const PHASE_128_NEGATIVE_CONTROL_BY_TASK = [
+  {
+    path: "tests/integration/phase-128-readiness-audit-negative-controls.test.ts",
+    pattern: /\b(?:readiness|finding map|PASS|NO-GO|disposition)\b/i,
+  },
+  {
+    path: "tests/integration/phase-128-policy-taxonomy-negative-controls.test.ts",
+    pattern: /\b(?:taxonomy|registry row|generated row|drift)\b/i,
+  },
+  {
+    path: "tests/integration/phase-128-advisory-negative-controls.test.ts",
+    pattern: /\b(?:advisory|scanner|410|incomplete|malformed)\b/i,
+  },
+  {
+    path: "tests/integration/phase-128-harness-lifecycle-negative-controls.test.ts",
+    pattern: /\b(?:harness lifecycle|lifecycle|boot|close|publication|cas|writer|artifact directories)\b/i,
+  },
+  {
+    path: "tests/integration/phase-128-artifact-negative-controls.test.ts",
+    pattern: /\b(?:artifact|sentinel|denylist)\b/i,
+  },
+  {
+    path: "tests/integration/phase-128-sse-negative-controls.test.ts",
+    pattern: /\b(?:sse|terminal|stream|close)\b/i,
+  },
+  {
+    path: "tests/integration/phase-128-policy-side-effect-negative-controls.test.ts",
+    pattern: /\b(?:policy|proposal|idempotent|side effect|mutation)\b/i,
+  },
+  {
+    path: "tests/integration/phase-128-git-authority-negative-controls.test.ts",
+    pattern: /\b(?:git|source bytes|authority|replace-ref)\b/i,
+  },
+];
 const READ_ONLY_SIMPLE_COMMANDS = new Set([
   "[",
   "[[",
@@ -908,11 +1002,31 @@ function isSingleLineOrTailProof(line) {
   return /\btail(?:\s|$)/.test(line) || /\bhead\s+(?:-1\b|-n\s*1\b|--lines(?:=|\s+)1\b)/.test(line) || /\bsed\s+-n\s+['"]?\$p/.test(line);
 }
 
-function executesStructuredNegativeControl(line, parsed) {
+function requiredPhase126NegativeControlPath(taskText, isPhase126Plan) {
+  const description = taskText.split(/<verify\b|<automated\b/i, 1)[0];
+  if (!isPhase126Plan || /\b(?:registry|plan-proof)\b/i.test(description)) return undefined;
+  return PHASE_126_NEGATIVE_CONTROL_BY_TASK.find(({ pattern }) => pattern.test(description))?.path;
+}
+
+function requiredPhase127NegativeControlPath(taskText, isPhase127Plan) {
+  const description = taskText.split(/<verify\b|<automated\b/i, 1)[0];
+  if (!isPhase127Plan || /\b(?:registry|plan-proof)\b/i.test(description)) return undefined;
+  return PHASE_127_NEGATIVE_CONTROL_BY_TASK.find(({ pattern }) => pattern.test(description))?.path;
+}
+
+function requiredPhase128NegativeControlPath(taskText, isPhase128Plan) {
+  const description = taskText.match(/<name>([\s\S]*?)<\/name>/i)?.[1]?.trim() ?? taskText;
+  const preVerificationText = taskText.split(/<verify\b|<automated\b/i, 1)[0];
+  if (!isPhase128Plan || /\b(?:registry|plan-proof)\b/i.test(preVerificationText)) return undefined;
+  return PHASE_128_NEGATIVE_CONTROL_BY_TASK.find(({ pattern }) => pattern.test(description))?.path;
+}
+
+function executesStructuredNegativeControl(line, parsed, requiredPath) {
   if (!parsed?.valid || parsed.commands.length === 0) return false;
   return parsed.commands.some((command) => {
     if (command.name !== "node" || !isReadOnlyCommand(command) || !command.args.includes("--test")) return false;
     if (command.args.some((argument) => /^--test-(?:name|skip)-pattern(?:=|$)/.test(argument))) return false;
+    if (requiredPath !== undefined) return command.args.includes(requiredPath);
     return command.args.some((argument) => NEGATIVE_CONTROL_TEST_FILES.has(argument));
   });
 }
@@ -928,6 +1042,9 @@ export function lintPlanProof(content) {
   const tasksWithCommands = new Set();
   const negativeControlTasks = new Set();
   const negativeControlWaiverTasks = new Set();
+  const isPhase126Plan = lines.some((line) => /^\s*phase:\s*126\s*$/i.test(line));
+  const isPhase127Plan = lines.some((line) => /^\s*phase:\s*127\s*$/i.test(line));
+  const isPhase128Plan = lines.some((line) => /^\s*phase:\s*128\s*$/i.test(line));
 
   for (const range of ranges) {
     const parsedByLine = new Map();
@@ -976,8 +1093,13 @@ export function lintPlanProof(content) {
 
     const task = taskForRange(tasks, range);
     if (task) tasksWithCommands.add(task.startPosition);
+    const requiredNegativeControlPath = task
+      ? requiredPhase126NegativeControlPath(lines.slice(task.start, task.end + 1).join("\n"), isPhase126Plan)
+        ?? requiredPhase127NegativeControlPath(lines.slice(task.start, task.end + 1).join("\n"), isPhase127Plan)
+        ?? requiredPhase128NegativeControlPath(lines.slice(task.start, task.end + 1).join("\n"), isPhase128Plan)
+      : undefined;
     const hasNegativeControl = commandLines.some(({ index, line }) =>
-      executesStructuredNegativeControl(line, parsedByLine.get(index)),
+      executesStructuredNegativeControl(line, parsedByLine.get(index), requiredNegativeControlPath),
     );
     if (task && hasNegativeControl) negativeControlTasks.add(task.startPosition);
     if (task && annotationAllows(lines, range.start, "allow-no-negative-control")) {

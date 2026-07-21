@@ -29,6 +29,7 @@ import type {
   ToolDefinition,
 } from "../../server/llm/types.js";
 import { validJpegBytes, validPngBytes } from "../fixtures/image-bytes.js";
+import { assertSSETerminalProof, readStreamThroughClose } from "../harness/sse.js";
 
 type LLMCallOptions = { signal?: AbortSignal };
 type RoundQueueItem = LLMRoundResult | Error | ((opts?: LLMCallOptions) => LLMRoundResult);
@@ -598,6 +599,8 @@ describe("chat-streaming", () => {
       });
 
       assert.match(res.headers.get("content-type") ?? "", /text\/event-stream/);
+      const reader = res.body?.getReader();
+      if (reader) await reader.cancel();
     } finally {
       if (timeout) clearTimeout(timeout);
       if (app.server.listening) {
@@ -1287,7 +1290,11 @@ describe("chat-streaming", () => {
       const reader = res.body?.getReader();
       assert.ok(reader);
 
-      const text = await readStreamUntil(reader, "event: done");
+      const collection = await readStreamThroughClose(reader, { maxReads: 60, readTimeoutMs: 5000 });
+      const terminalProof = assertSSETerminalProof(collection);
+      assert.equal(terminalProof.ok, true);
+      assert.equal(terminalProof.evidence.doneCount, 1);
+      const text = collection.raw;
       assert.match(text, /event: done/);
       assert.equal(parseSSEEvents(text).filter((event) => event.event === "done").length, 1);
 
