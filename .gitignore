@@ -26,7 +26,6 @@ data/*
 # Local GSD workflow state and generated planning evidence
 .planning/
 graphify-out/
-scripts/check-planning-closeout.mjs
 
 # Harness artifacts are generated evidence, not source
 tests/harness/artifacts/

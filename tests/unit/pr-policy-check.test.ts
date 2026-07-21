@@ -21,7 +21,45 @@ type PolicyFixture = {
   issues?: Record<number, IssueFixture>;
 };
 
-function runPrPolicy(fixture: PolicyFixture) {
+type PolicyRunOptions = {
+  cwd?: string;
+  args?: string[];
+};
+
+const policyScriptPath = path.resolve("scripts/pr-policy-check.mjs");
+
+function runCommand(command: string, args: string[], cwd: string) {
+  const result = spawnSync(command, args, { cwd, encoding: "utf8" });
+  assert.equal(result.status, 0, `${command} ${args.join(" ")} failed:\n${result.stdout}${result.stderr}`);
+}
+
+function withTemporaryGitRepo(callback: (repoDir: string) => void) {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "nutrition-pr-policy-git-"));
+
+  try {
+    runCommand("git", ["init", "--quiet"], repoDir);
+    runCommand("git", ["config", "user.email", "test@example.com"], repoDir);
+    runCommand("git", ["config", "user.name", "PR Policy Test"], repoDir);
+    fs.writeFileSync(path.join(repoDir, ".gitignore"), "ignored-secret.txt\n.env\n!.env.example\n");
+    runCommand("git", ["add", ".gitignore"], repoDir);
+    runCommand("git", ["commit", "--quiet", "-m", "initial fixture"], repoDir);
+    callback(repoDir);
+  } finally {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  }
+}
+
+function policyEnvironment() {
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    GITHUB_EVENT_PATH: "",
+    GITHUB_TOKEN: "",
+  };
+  delete env.PR_POLICY_OFFLINE_ISSUES;
+  return env;
+}
+
+function runPrPolicy(fixture: PolicyFixture, options: PolicyRunOptions = {}) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nutrition-pr-policy-"));
   const eventPath = path.join(tempDir, "event.json");
   fs.writeFileSync(
@@ -37,20 +75,35 @@ function runPrPolicy(fixture: PolicyFixture) {
     }),
   );
 
-  const env: NodeJS.ProcessEnv = { ...process.env, GITHUB_TOKEN: "" };
+  const env = policyEnvironment();
   if (fixture.issues) {
     env.PR_POLICY_OFFLINE_ISSUES = JSON.stringify(fixture.issues);
-  } else {
-    delete env.PR_POLICY_OFFLINE_ISSUES;
   }
 
-  const result = spawnSync(process.execPath, ["scripts/pr-policy-check.mjs", `--event=${eventPath}`], {
-    cwd: process.cwd(),
-    env,
-    encoding: "utf8",
-  });
+  const result = spawnSync(
+    process.execPath,
+    [policyScriptPath, `--event=${eventPath}`, ...(options.args || [])],
+    {
+      cwd: options.cwd || process.cwd(),
+      env,
+      encoding: "utf8",
+    },
+  );
 
   fs.rmSync(tempDir, { recursive: true, force: true });
+
+  return {
+    ...result,
+    output: `${result.stdout}${result.stderr}`,
+  };
+}
+
+function runFileOnlyPolicy(cwd: string) {
+  const result = spawnSync(process.execPath, [policyScriptPath, "--allow-no-pr", "--base=HEAD"], {
+    cwd,
+    env: policyEnvironment(),
+    encoding: "utf8",
+  });
 
   return {
     ...result,
@@ -100,5 +153,66 @@ describe("pr policy gate", () => {
 
     assert.notEqual(result.status, 0);
     assert.match(result.output, /must link at least one GitHub issue/);
+  });
+
+  test("allows ignored files that remain untracked in file-only mode", () => {
+    withTemporaryGitRepo((repoDir) => {
+      fs.writeFileSync(path.join(repoDir, "ignored-secret.txt"), "untracked secret contents\n");
+
+      const result = runFileOnlyPolicy(repoDir);
+
+      assert.equal(result.status, 0, result.output);
+      assert.match(result.output, /No pull_request payload; ran file-only policy/);
+      assert.match(result.output, /\[pr-policy\] PASS/);
+      assert.doesNotMatch(result.output, /untracked secret contents/);
+    });
+  });
+
+  test("rejects force-added ignored files in file-only mode without printing their contents", () => {
+    withTemporaryGitRepo((repoDir) => {
+      fs.writeFileSync(path.join(repoDir, "ignored-secret.txt"), "tracked secret contents\n");
+      runCommand("git", ["add", "--force", "ignored-secret.txt"], repoDir);
+
+      const result = runFileOnlyPolicy(repoDir);
+
+      assert.notEqual(result.status, 0);
+      assert.match(result.output, /Tracked paths match the current ignore policy: "ignored-secret\.txt"/);
+      assert.doesNotMatch(result.output, /tracked secret contents/);
+    });
+  });
+
+  test("rejects force-added ignored files in pull-request mode", () => {
+    withTemporaryGitRepo((repoDir) => {
+      fs.writeFileSync(path.join(repoDir, "ignored-secret.txt"), "tracked secret contents\n");
+      runCommand("git", ["add", "--force", "ignored-secret.txt"], repoDir);
+
+      const result = runPrPolicy(
+        {
+          title: "feat: add tracker",
+          body: "Closes #123",
+          labels: ["no-changelog"],
+          issues: {
+            123: { title: "Feature tracker", labels: ["feature-request", "approved-feature"] },
+          },
+        },
+        { cwd: repoDir, args: ["--base=HEAD"] },
+      );
+
+      assert.notEqual(result.status, 0);
+      assert.match(result.output, /Tracked paths match the current ignore policy: "ignored-secret\.txt"/);
+      assert.doesNotMatch(result.output, /tracked secret contents/);
+    });
+  });
+
+  test("allows tracked files explicitly unignored by policy", () => {
+    withTemporaryGitRepo((repoDir) => {
+      fs.writeFileSync(path.join(repoDir, ".env.example"), "SAFE_EXAMPLE=value\n");
+      runCommand("git", ["add", ".env.example"], repoDir);
+
+      const result = runFileOnlyPolicy(repoDir);
+
+      assert.equal(result.status, 0, result.output);
+      assert.match(result.output, /\[pr-policy\] PASS/);
+    });
   });
 });

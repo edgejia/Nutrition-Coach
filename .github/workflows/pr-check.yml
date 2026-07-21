@@ -42,4 +42,11 @@ jobs:
         run: cp .env.example .env
 
       - name: Run release gate
+        id: release_gate
         run: yarn release:check --base="origin/${RELEASE_BASE_REF}"
+
+      - name: Report failing test names
+        if: ${{ always() && steps.release_gate.outcome == 'failure' }}
+        run: |
+          set -o pipefail
+          yarn test 2>&1 | sed -n -E '/^[[:space:]#]*not ok [0-9]+ - /p'
