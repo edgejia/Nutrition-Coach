@@ -9,6 +9,7 @@
 - 將 v3.5 的 readiness 明確限制在 committed source SHA 與 source/release checks；NC-COR-07、NC-COR-08、NC-CLI-01 保留為具體的 future follow-up，不把 NC-TST-02 或 NC-REL-03 誤列為已完成。
 - 保留 PR-ready → maintainer merge → post-merge local archive → separately approved runtime refresh 的發布順序；本次收尾不包含 `main` merge、tag、production runtime、Cloudflare Tunnel 或 public smoke。
 - 將 direct runtime dependency `drizzle-orm` 從 resolved `0.39.3` 升級至修補 `GHSA-gpj5-g38j-94v9` 的 `0.45.2`；ADR 0009 以專屬 ORM 相容性證據將原先 deferral 更新為 source/PR review acceptance，且不擴張為 merge 或 production runtime 授權。
+- 將 OpenAI 傳遞 runtime 路徑 `openai > @types/node-fetch > form-data` 的 lockfile 解析由 `form-data@4.0.5` 更新至已修補的 `4.0.6`，關閉 `GHSA-hmw2-7cc7-3qxx` 的 CRLF injection advisory；未變更 OpenAI SDK 版本或 provider API surface。
 
 ### 驗證
 
@@ -16,6 +17,7 @@
 - Phase 126：6/6 requirements verified；Phase 127：15/15 success criteria passed；Phase 128：16/16 executed-scope criteria passed，25-entry disposition map 為 20 CLOSED / 3 DEFERRED / 2 OUT-OF-SCOPE。
 - `yarn workflow:state-check`、active planning artifact provenance/seal checks，以及 source wrap 後重新執行的 `yarn release:check` 共同綁定最終 committed source SHA；測試僅使用 mocked 或 harness providers，不宣稱 live-provider、Docker、production 或主觀視覺品質 readiness。
 - Drizzle 升級驗證通過 frozen install、無高風險／跨 minor API surface 使用的 source scan、`drizzle-kit@0.31.10` 與 ORM compatibility API version `10` 配對、`yarn native:check` `6/6` file-backed migration/persistence roundtrip、`yarn db:generate` `13` tables／no schema drift，以及 `yarn release:check --base=origin/main`；fresh `yarn deps:audit` 已不再回報 Drizzle advisory，且只剩 `form-data` 一個 high finding，因此尚不宣稱 audit clean。
+- `form-data` 升級驗證通過 frozen install、唯一 lock path、OpenAI files/audio multipart negative scan、provider `22/22`、`yarn native:check` `6/6` 與 `yarn release:check --base=origin/main`；fresh `yarn deps:audit` 回報 `Clean: yes`、所有 severity 均為 `0`。
 
 ## v3.4 - Unreleased
 
