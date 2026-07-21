@@ -75,6 +75,16 @@ function runGit(args) {
   return execFileSync("git", args, { encoding: "utf8" }).trim();
 }
 
+function listTrackedIgnoredFiles() {
+  return execFileSync(
+    "git",
+    ["ls-files", "--cached", "--ignored", "--exclude-standard", "-z"],
+    { encoding: "utf8" },
+  )
+    .split("\0")
+    .filter(Boolean);
+}
+
 function listChangedFilesFromGit(baseRef) {
   try {
     const mergeBase = runGit(["merge-base", "HEAD", baseRef]);
@@ -252,6 +262,13 @@ async function main() {
   const pr = event.pull_request;
   const errors = [];
   const notes = [];
+  const trackedIgnoredFiles = listTrackedIgnoredFiles();
+
+  if (trackedIgnoredFiles.length > 0) {
+    errors.push(
+      `Tracked paths match the current ignore policy: ${trackedIgnoredFiles.map((file) => JSON.stringify(file)).join(", ")}`,
+    );
+  }
 
   if (!pr) {
     const files = listChangedFilesFromGit(options.baseRef);
