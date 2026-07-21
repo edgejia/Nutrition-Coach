@@ -18,7 +18,7 @@
 
 - [Production runtime](deploy/production-runtime.md)：目前 local production-mode runtime、Cloudflare Tunnel 與 public smoke
 - [Storage recovery](deploy/storage-recovery.md)：B01 backup、R05 migration 與 B02 restore gate
-- [`deploy/archive/`](deploy/archive/)：Railway baseline 與歷史草稿
+- [`deploy/archive/`](deploy/archive/)：Railway baseline 與歷史 postmortem
 
 ### Workflow contracts
 
