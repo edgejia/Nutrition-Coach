@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import process from "node:process";
 
 const READ_ONLY_PRAGMAS = new Set([
@@ -67,6 +70,42 @@ function validateQuery(rawQuery) {
   return query;
 }
 
+function isWithin(root, target) {
+  const relative = path.relative(path.resolve(root), path.resolve(target));
+  return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
+}
+
+function allowedRoots() {
+  const configured = (process.env.DB_QUERY_ALLOWED_ROOTS || "")
+    .split(path.delimiter)
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return [...new Set([process.cwd(), os.tmpdir(), ...configured].map((value) => path.resolve(value)))];
+}
+
+function validateDatabasePath(databasePath) {
+  const resolved = path.resolve(databasePath);
+  if (!allowedRoots().some((root) => isWithin(root, resolved))) {
+    throw new Error(`database path is outside approved local roots: ${resolved}`);
+  }
+  let stat;
+  try {
+    stat = fs.lstatSync(resolved);
+  } catch (error) {
+    throw new Error(error?.code === "ENOENT" ? `database path is missing: ${resolved}` : `database path is unreadable: ${resolved}`);
+  }
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`database path must be a regular non-symlink file: ${resolved}`);
+
+  const root = allowedRoots().find((candidate) => isWithin(candidate, resolved));
+  let current = root;
+  const parentRelative = path.relative(root, path.dirname(resolved));
+  for (const part of parentRelative ? parentRelative.split(path.sep) : []) {
+    current = path.join(current, part);
+    const parentStat = fs.lstatSync(current);
+    if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) throw new Error(`database path has a symlinked or unsafe ancestor: ${current}`);
+  }
+}
+
 function main() {
   const args = process.argv.slice(2);
   if (args.length !== 2 || !args[0].startsWith("--db=")) {
@@ -77,6 +116,12 @@ function main() {
   const databasePath = args[0].slice("--db=".length);
   if (!databasePath) {
     reject("database path must not be empty");
+    return;
+  }
+  try {
+    validateDatabasePath(databasePath);
+  } catch (error) {
+    reject(error instanceof Error ? error.message : String(error));
     return;
   }
 
@@ -90,7 +135,7 @@ function main() {
 
   const result = spawnSync(
     "sqlite3",
-    ["-readonly", "-safe", "-header", "-column", databasePath, query],
+    ["-readonly", "-safe", "-nofollow", "-header", "-column", databasePath, query],
     { env: { ...process.env, TZ: "Asia/Taipei" }, encoding: "utf8" },
   );
   if (result.stdout) process.stdout.write(result.stdout);

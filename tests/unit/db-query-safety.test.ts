@@ -80,4 +80,14 @@ describe("nutrition DB query safety wrapper", () => {
     assert.notEqual(extraArg.status, 0);
     assert.equal(digest(fixture.databasePath), before);
   });
+
+  it("rejects a database symlink instead of following it", (t) => {
+    const fixture = createFixture();
+    t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
+    const linkedPath = path.join(fixture.root, "linked.sqlite");
+    fs.symlinkSync(fixture.databasePath, linkedPath);
+    const result = runQuery(linkedPath, "SELECT 1");
+    assert.notEqual(result.status, 0);
+    assert.match(`${result.stdout}${result.stderr}`, /regular non-symlink|symbolic|nofollow/i);
+  });
 });
