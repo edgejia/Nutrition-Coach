@@ -117,12 +117,12 @@ async function runPrPolicyAsync(fixture: PolicyFixture, options: PolicyRunOption
   const child = spawn(process.execPath, [policyScriptPath, `--event=${eventPath}`, ...(options.args || [])], {
     cwd: options.cwd || process.cwd(),
     env: { ...env, ...(options.env || {}) },
-    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
   });
   let stdout = "";
   let stderr = "";
-  child.stdout.on("data", (chunk) => { stdout += chunk; });
-  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+  child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
   const status = await new Promise<number | null>((resolve, reject) => {
     child.once("error", reject);
     child.once("exit", (code) => resolve(code));

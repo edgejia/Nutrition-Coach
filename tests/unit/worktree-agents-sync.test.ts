@@ -14,6 +14,10 @@ function git(args: string[], cwd: string) {
   return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 }
 
+function commonGitDir(cwd: string) {
+  return path.resolve(cwd, git(["rev-parse", "--git-common-dir"], cwd).trim());
+}
+
 describe("ignored AGENTS worktree synchronization", () => {
   it("keeps the fixture primary file authoritative and links detached worktrees to it", async () => {
     const fixtureParent = await mkdtemp(path.join(os.tmpdir(), "nutrition-agents-sync-"));
@@ -32,7 +36,7 @@ describe("ignored AGENTS worktree synchronization", () => {
       git(["worktree", "add", "--detach", secondary], primary);
 
       await writeFile(path.join(secondary, "AGENTS.md"), "stale detached policy\n");
-      const commonDir = git(["rev-parse", "--git-common-dir"], secondary).trim();
+      const commonDir = commonGitDir(secondary);
       await mkdir(path.join(commonDir, "codex-local"), { recursive: true });
       await writeFile(path.join(commonDir, "codex-local", "AGENTS.md"), "stale common policy\n");
 
@@ -92,7 +96,7 @@ describe("ignored AGENTS worktree synchronization", () => {
       await writeFile(external, "external policy must survive\n");
       await unlink(path.join(primary, "AGENTS.md"));
       await symlink(external, path.join(primary, "AGENTS.md"));
-      const commonDir = git(["rev-parse", "--git-common-dir"], primary).trim();
+      const commonDir = commonGitDir(primary);
       await mkdir(path.join(primary, "scripts/workflow"), { recursive: true });
       await copyFile(helperSource, path.join(primary, "scripts/workflow/sync-worktree-agents.mjs"));
       await mkdir(path.join(commonDir, "codex-local"), { recursive: true });
@@ -121,7 +125,8 @@ describe("ignored AGENTS worktree synchronization", () => {
       git(["add", "AGENTS.md"], primary);
       git(["commit", "-m", "fixture policy"], primary);
       await writeFile(path.join(external, "AGENTS.md"), "external duplicate must survive\n");
-      const commonDir = git(["rev-parse", "--git-common-dir"], primary).trim();
+      const commonDir = commonGitDir(primary);
+      await rm(path.join(commonDir, "codex-local"), { recursive: true, force: true });
       await symlink(external, path.join(commonDir, "codex-local"), "dir");
       await mkdir(path.join(primary, "scripts/workflow"), { recursive: true });
       await copyFile(helperSource, path.join(primary, "scripts/workflow/sync-worktree-agents.mjs"));
@@ -150,7 +155,7 @@ describe("ignored AGENTS worktree synchronization", () => {
       git(["commit", "-m", "fixture policy"], primary);
       git(["worktree", "add", "--detach", stale], primary);
       await rm(stale, { recursive: true, force: true });
-      const commonDir = git(["rev-parse", "--git-common-dir"], primary).trim();
+      const commonDir = commonGitDir(primary);
       await mkdir(path.join(primary, "scripts/workflow"), { recursive: true });
       await copyFile(helperSource, path.join(primary, "scripts/workflow/sync-worktree-agents.mjs"));
       await mkdir(path.join(commonDir, "codex-local"), { recursive: true });

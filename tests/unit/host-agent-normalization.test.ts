@@ -127,7 +127,7 @@ function createFixture({
   const expectedSkillHash = crypto.createHash("sha256").update("managed skill immutable\n").digest("hex");
   fs.writeFileSync(path.join(codexHome, "gsd-file-manifest.json"), JSON.stringify({ version: "fixture", files: { "skills/gsd-fixture/SKILL.md": expectedSkillHash } }, null, 2));
 
-  const defaults = {
+  const defaults: Record<string, unknown> = {
     resolve_model_ids: "omit",
     model_profile: "adaptive",
     model_overrides: { "gsd-planner": wrong ? "gpt-5.6-sol" : CANONICAL_MODEL, "gsd-executor": CANONICAL_MODEL },
