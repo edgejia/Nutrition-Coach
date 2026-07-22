@@ -18,6 +18,7 @@
     "workflow:closeout": "node scripts/workflow/planning-closeout.mjs",
     "workflow:command-receipt": "node scripts/workflow/command-receipt.mjs",
     "workflow:gsd-wiring": "node scripts/workflow/gsd-wiring.mjs",
+    "workflow:normalize-gsd-host": "node scripts/workflow/normalize-gsd-host.mjs",
     "workflow:lease": "node scripts/workflow/workflow-lease.mjs",
     "workflow:plan-proof": "node scripts/workflow/plan-proof-lint.mjs",
     "workflow:state-check": "node scripts/workflow/state-check.mjs --project-root=.",
