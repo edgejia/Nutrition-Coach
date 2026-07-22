@@ -180,11 +180,14 @@ async function fetchPaginated(path, token) {
     }
     results.push(...batch);
     if (batch.length < 100) {
-      break;
+      return results;
+    }
+    if (page === 10) {
+      throw new Error(`GitHub file list for ${path} is incomplete after 1,000 entries; refusing to make a policy decision.`);
     }
   }
 
-  return results;
+  throw new Error(`GitHub file list for ${path} is incomplete; refusing to make a policy decision.`);
 }
 
 async function listChangedFiles({ event, repo, prNumber, baseRef }) {

@@ -2,7 +2,8 @@ process.env.TZ = "Asia/Taipei";
 
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { createServer } from "node:http";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -24,6 +25,7 @@ type PolicyFixture = {
 type PolicyRunOptions = {
   cwd?: string;
   args?: string[];
+  env?: NodeJS.ProcessEnv;
 };
 
 const policyScriptPath = path.resolve("scripts/pr-policy-check.mjs");
@@ -85,7 +87,7 @@ function runPrPolicy(fixture: PolicyFixture, options: PolicyRunOptions = {}) {
     [policyScriptPath, `--event=${eventPath}`, ...(options.args || [])],
     {
       cwd: options.cwd || process.cwd(),
-      env,
+      env: { ...env, ...(options.env || {}) },
       encoding: "utf8",
     },
   );
@@ -96,6 +98,37 @@ function runPrPolicy(fixture: PolicyFixture, options: PolicyRunOptions = {}) {
     ...result,
     output: `${result.stdout}${result.stderr}`,
   };
+}
+
+async function runPrPolicyAsync(fixture: PolicyFixture, options: PolicyRunOptions = {}) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nutrition-pr-policy-"));
+  const eventPath = path.join(tempDir, "event.json");
+  fs.writeFileSync(eventPath, JSON.stringify({
+    repository: { full_name: "edgejia/Nutrition-Coach" },
+    pull_request: {
+      number: 999,
+      title: fixture.title,
+      body: fixture.body,
+      labels: (fixture.labels || []).map((name) => ({ name })),
+    },
+  }));
+  const env = policyEnvironment();
+  if (fixture.issues) env.PR_POLICY_OFFLINE_ISSUES = JSON.stringify(fixture.issues);
+  const child = spawn(process.execPath, [policyScriptPath, `--event=${eventPath}`, ...(options.args || [])], {
+    cwd: options.cwd || process.cwd(),
+    env: { ...env, ...(options.env || {}) },
+    encoding: "utf8",
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk; });
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  const status = await new Promise<number | null>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("exit", (code) => resolve(code));
+  });
+  fs.rmSync(tempDir, { recursive: true, force: true });
+  return { status, stdout, stderr, output: `${stdout}${stderr}` };
 }
 
 function runFileOnlyPolicy(cwd: string, base = "HEAD") {
@@ -112,6 +145,43 @@ function runFileOnlyPolicy(cwd: string, base = "HEAD") {
 }
 
 describe("pr policy gate", () => {
+  test("fails closed when GitHub file pagination reaches the hard page limit", async () => {
+    const server = createServer((request, response) => {
+      const url = new URL(request.url || "/", "http://127.0.0.1");
+      if (url.pathname.endsWith("/files")) {
+        response.setHeader("content-type", "application/json");
+        response.end(JSON.stringify(Array.from({ length: 100 }, (_, index) => ({ filename: `src/file-${url.searchParams.get("page")}-${index}.ts` }))));
+        return;
+      }
+      response.statusCode = 404;
+      response.end("not found");
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    assert.equal(typeof address, "object");
+    try {
+      const result = await runPrPolicyAsync(
+        {
+          title: "chore: large policy fixture",
+          body: "Closes #123",
+          labels: ["no-changelog"],
+          issues: { 123: { title: "Maintenance", labels: [] } },
+        },
+        {
+          env: {
+            GITHUB_TOKEN: "fixture-token",
+            GITHUB_API_URL: `http://127.0.0.1:${(address as { port: number }).port}`,
+          },
+        },
+      );
+      assert.notEqual(result.status, 0);
+      assert.match(result.output, /file list .*incomplete/i);
+      assert.doesNotMatch(result.output, /\[pr-policy\] PASS/);
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+    }
+  });
+
   test("passes when a feature PR closes an approved feature issue", () => {
     const result = runPrPolicy({
       title: "feat: add tracker",
