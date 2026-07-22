@@ -586,8 +586,16 @@ export async function normalizeGsdHost(rawOptions = {}) {
   const inspected = await inspectHost({ ...rawOptions, mode });
   if (mode === "apply" && inspected.ok && inspected.changes.length > 0) {
     await atomicApply(inspected.changes);
-    const { changes: _changes, ...publicResult } = inspected;
-    return { ...publicResult, changedPaths: inspected.changes.map((change) => change.path).sort() };
+    // Re-read the complete surface, including every manifest-backed managed
+    // adapter, after publication. A concurrent update must be reported rather
+    // than mistaken for a successful normalization.
+    const postApply = await inspectHost({ ...rawOptions, mode });
+    const { changes: _postChanges, ...postPublicResult } = postApply;
+    return {
+      ...postPublicResult,
+      ok: postApply.ok,
+      changedPaths: inspected.changes.map((change) => change.path).sort(),
+    };
   }
   const { changes: _changes, ...publicResult } = inspected;
   return publicResult;
