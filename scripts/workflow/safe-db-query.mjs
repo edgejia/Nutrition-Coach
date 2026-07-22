@@ -85,7 +85,17 @@ function allowedRoots() {
 
 function validateDatabasePath(databasePath) {
   const resolved = path.resolve(databasePath);
-  if (!allowedRoots().some((root) => isWithin(root, resolved))) {
+  const roots = allowedRoots();
+  for (const root of roots) {
+    let rootStat;
+    try {
+      rootStat = fs.lstatSync(root);
+    } catch (error) {
+      throw new Error(error?.code === "ENOENT" ? `approved database root is missing: ${root}` : `approved database root is unreadable: ${root}`);
+    }
+    if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error(`approved database root must be a physical directory: ${root}`);
+  }
+  if (!roots.some((root) => isWithin(root, resolved))) {
     throw new Error(`database path is outside approved local roots: ${resolved}`);
   }
   let stat;
@@ -96,7 +106,7 @@ function validateDatabasePath(databasePath) {
   }
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`database path must be a regular non-symlink file: ${resolved}`);
 
-  const root = allowedRoots().find((candidate) => isWithin(candidate, resolved));
+  const root = roots.find((candidate) => isWithin(candidate, resolved));
   let current = root;
   const parentRelative = path.relative(root, path.dirname(resolved));
   for (const part of parentRelative ? parentRelative.split(path.sep) : []) {
@@ -104,6 +114,11 @@ function validateDatabasePath(databasePath) {
     const parentStat = fs.lstatSync(current);
     if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) throw new Error(`database path has a symlinked or unsafe ancestor: ${current}`);
   }
+  // sqlite3's -nofollow checks every path component. macOS exposes /var as a
+  // compatibility symlink, so pass the canonical regular-file path after the
+  // lstat/ancestor checks above rather than making safe temporary fixtures
+  // fail on a harmless system alias.
+  return fs.realpathSync.native(resolved);
 }
 
 function main() {
@@ -118,8 +133,9 @@ function main() {
     reject("database path must not be empty");
     return;
   }
+  let canonicalDatabasePath;
   try {
-    validateDatabasePath(databasePath);
+    canonicalDatabasePath = validateDatabasePath(databasePath);
   } catch (error) {
     reject(error instanceof Error ? error.message : String(error));
     return;
@@ -135,7 +151,7 @@ function main() {
 
   const result = spawnSync(
     "sqlite3",
-    ["-readonly", "-safe", "-nofollow", "-header", "-column", databasePath, query],
+    ["-readonly", "-safe", "-nofollow", "-header", "-column", canonicalDatabasePath, query],
     { env: { ...process.env, TZ: "Asia/Taipei" }, encoding: "utf8" },
   );
   if (result.stdout) process.stdout.write(result.stdout);

@@ -90,4 +90,15 @@ describe("nutrition DB query safety wrapper", () => {
     assert.notEqual(result.status, 0);
     assert.match(`${result.stdout}${result.stderr}`, /regular non-symlink|symbolic|nofollow/i);
   });
+
+  it("rejects a symlinked database ancestor", (t) => {
+    const fixture = createFixture();
+    t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
+    const linkedDirectory = path.join(fixture.root, "linked-dir");
+    fs.symlinkSync(fixture.root, linkedDirectory, "dir");
+    const linkedPath = path.join(linkedDirectory, path.basename(fixture.databasePath));
+    const result = runQuery(linkedPath, "SELECT 1");
+    assert.notEqual(result.status, 0);
+    assert.match(`${result.stdout}${result.stderr}`, /symlinked|unsafe ancestor|symbolic/i);
+  });
 });
