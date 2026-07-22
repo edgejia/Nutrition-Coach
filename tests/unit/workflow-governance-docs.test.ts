@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 
 const governancePath = "docs/workflow/runtime-governance.md";
 const planningProofPath = "docs/workflow/planning-proof.md";
+const productionRuntimePath = "docs/deploy/production-runtime.md";
 const gitignorePath = ".gitignore";
 const stateCheckPath = "scripts/workflow/state-check.mjs";
 
@@ -51,5 +52,12 @@ describe("workflow runtime governance docs", () => {
     assert.match(stateCheck, /arg\.startsWith\("--project-root="\)/);
     assert.doesNotMatch(stateCheck, /--planning-root/);
     assert.match(stateCheck, /path\.join\(path\.resolve\(projectRoot\), "\.planning"\)/);
+  });
+
+  it("keeps Railway retired and Cloudflare Tunnel as the active production path", async () => {
+    const productionRuntime = await readFile(productionRuntimePath, "utf8");
+    assert.match(productionRuntime, /Railway is retired/);
+    assert.match(productionRuntime, /local production-mode Fastify server exposed through a Cloudflare Tunnel/);
+    assert.doesNotMatch(productionRuntime, /while Railway is unavailable/);
   });
 });

@@ -1,6 +1,6 @@
 # Cloudflare Tunnel Production Runtime
 
-This is the current production runtime path while Railway is unavailable. The deployed user path is a local production-mode Fastify server exposed through a Cloudflare Tunnel public hostname.
+This is the current production runtime path. Railway is retired; the deployed user path is a local production-mode Fastify server exposed through a Cloudflare Tunnel public hostname.
 
 The original v3.4.1 five-phase runtime/demo plan is terminated; its one-page
 postmortem is [archived here](archive/v3.4.1-postmortem.md). The deployment
