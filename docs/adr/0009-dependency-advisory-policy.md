@@ -9,7 +9,7 @@
 
 Nutrition Coach uses Yarn Classic and keeps release readiness, CI, production runtime refresh, Cloudflare Tunnel changes, public smoke, tag movement, and `main` promotion as separate gates. Phase 100 adds `yarn deps:audit` as advisory evidence, and Phase 101 adds `yarn native:check` as native dependency compatibility evidence. Neither command is wired into `release:check` by default.
 
-The current runtime dependency audit reports high advisories for direct `drizzle-orm@0.39.3` and transitive `form-data@4.0.5` through `openai > @types/node-fetch > form-data`. This ADR is the canonical source record for dependency advisory triage policy and the current `drizzle-orm` / `form-data` release decisions.
+The current runtime dependency audit reports high advisories for direct `drizzle-orm@0.39.3` and transitive `form-data@4.0.5` through `openai > @types/node-fetch > form-data`. A fresh 2026-07-22 audit also found newly disclosed runtime advisories in direct `sharp@0.34.5` and the Fastify transitive paths for `fast-uri@3.1.2` and `brace-expansion@5.0.6`; those three packages are remediated by the versions and evidence recorded below. This ADR is the canonical source record for dependency advisory triage policy, the current `drizzle-orm` / `form-data` release decisions, and completed runtime advisory remediation.
 
 ## Policy
 
@@ -52,6 +52,9 @@ Deferrals must be revisited on:
 |---|---|---|---|---|---|---|---|---|---|
 | `drizzle-orm@0.39.3` | `GHSA-gpj5-g38j-94v9` - SQL injection via improperly escaped SQL identifiers | high | direct dependency `drizzle-orm` from `package.json` dependencies; vulnerable `<0.45.2`, patched `>=0.45.2` | runtime | No current app/test/script matches for `sql.identifier` or dynamic `.as(` source patterns. Drizzle remains a database-path runtime dependency, so this is a recorded deferral, not a permanent waiver. | Deferred for source release until dedicated ORM compatibility work; blocks if new dynamic identifier or alias evidence appears before release. | Active milestone owner | Package upgrade, new dynamic SQL reachability evidence, source PR readiness, or production runtime refresh readiness | Keep `drizzle-orm@0.39.x` deferred until ORM compatibility work: scan dynamic SQL risks, run migrations against a file-backed DB, run persistence/service tests, upgrade to a patched compatible version, and update this ADR. |
 | `form-data@4.0.5` | `GHSA-hmw2-7cc7-3qxx` - CRLF injection via unescaped multipart field names and filenames | high | transitive runtime path `openai > @types/node-fetch > form-data`; vulnerable `>=4.0.0 <4.0.6`, patched `>=4.0.6` | runtime | Current runtime provider calls `client.chat.completions.create`; image input is passed to Chat Completions as base64 `image_url`; compile-visible SDK shape evidence binds Chat Completions message/tool/stream shapes. Source scan shows no OpenAI files/audio multipart upload calls (`client.files`, `client.audio`, `.files.create`, `.audio.transcriptions`, `.audio.translations`). Browser/test `FormData` matches are auxiliary only and do not prove OpenAI SDK multipart reachability. | Non-blocking recorded deferral for source release because the vulnerable transitive multipart path is not reached by current OpenAI SDK usage. Blocks if OpenAI files/audio multipart usage appears or if new evidence shows Chat Completions reaches this vulnerable path. | Active milestone owner | `openai` upgrade, `form-data` upgrade, new multipart reachability evidence, source PR readiness, or production runtime refresh readiness | Prefer upgrading the transitive path through a reviewed `openai` update or package resolution only after provider compatibility re-verification. Re-run provider tests, `tests/types/openai-sdk-shape.ts` through `yarn tsc --noEmit`, lockfile path review, and `yarn deps:audit`. |
+| `sharp@0.35.3` (upgraded from `0.34.5`) | `GHSA-f88m-g3jw-g9cj` - libvips out-of-bounds read and denial of service when decoding malicious image input | high | direct dependency `sharp`; vulnerable `<0.35.0`, patched `>=0.35.0` | runtime | Reachable: `POST /api/chat` accepts untrusted upload bytes and passes them through `validateImageBytes` to `sharp(buffer)`. Existing guards limit upload bytes, decoded pixels, MIME types, and concurrent decodes, but do not disprove the vulnerable decoder path. | Resolved for source release by upgrading to `sharp@0.35.3` / packaged libvips `8.18.3`. The 0.35 breaking changes were reviewed against the app's supported `failOn`, `limitInputPixels`, `metadata`, and `raw().toBuffer()` usage; `yarn native:check` and image-upload integration tests pass. | Active milestone owner | Future `sharp` upgrade, new decoder advisory, source PR readiness, or production runtime refresh readiness | Keep the direct version at or above the patched line and retain native decode/reject plus upload-path verification. |
+| `fast-uri@3.1.4` (resolved from `3.1.2`) | `GHSA-4c8g-83qw-93j6` and `GHSA-v2hh-gcrm-f6hx` - URI hostname validation/canonicalization bypasses | high | transitive runtime paths through `fastify > @fastify/ajv-compiler > fast-uri`, `fastify > fast-json-stringify > fast-uri`, and Ajv; the two advisories together require `>=3.1.4` on the 3.x line | runtime | No direct app import exists, but Fastify schema compilation and serialization are runtime paths, so non-reachability was not assumed. | Resolved for source release with the security resolution `fast-uri@3.1.4`; dependency-path review and Fastify integration tests pass. | Active milestone owner | Fastify/Ajv/`fast-json-stringify` upgrade, resolution removal, new URI advisory, source PR readiness, or production runtime refresh readiness | Keep the resolution until every accepted parent range resolves to a non-vulnerable version, then remove it only with lockfile-path and release-gate evidence. |
+| `brace-expansion@5.0.7` (resolved from `5.0.6`) | `GHSA-3jxr-9vmj-r5cp` - uncontrolled resource consumption from recursive brace expansion | high | transitive runtime path `@fastify/static > glob > minimatch > brace-expansion`; vulnerable `5.0.0` through `5.0.6`, patched `>=5.0.7` | runtime | No direct app import or user-controlled glob construction exists, but the package remains under the runtime static-serving stack. The package was patched instead of relying on that narrower reachability. | Resolved for source release with the security resolution `brace-expansion@5.0.7`; dependency-path review and static-serving integration tests pass. | Active milestone owner | `@fastify/static`/Glob/Minimatch upgrade, resolution removal, new expansion advisory, source PR readiness, or production runtime refresh readiness | Keep the resolution until the parent dependency graph naturally resolves to the patched line, then remove it only with lockfile-path and static-serving evidence. |
 
 ## Upgrade Trigger Boundaries
 
@@ -60,6 +63,28 @@ Deferrals must be revisited on:
 - Major or minor `drizzle-orm` upgrades require a dedicated ORM compatibility task: dynamic SQL source scan, file-backed migration run, persistence/service tests, and an updated release decision here.
 - Fastify upload/static stack changes, security-pinned transitive changes (`fast-uri`, `brace-expansion`), and current advisory packages such as `form-data` require lockfile dependency-path review, targeted affected-path tests, and then `yarn release:check`.
 - No package install, dependency upgrade, npm workflow, `package-lock.json`, CI workflow change, production runtime refresh, Cloudflare Tunnel change, public smoke, tag movement, `main` promotion, direct push, or `release:check` coupling is authorized by this ADR.
+
+## 2026-07-22 Runtime Advisory Refresh Evidence
+
+Issue `#134` records the source remediation boundary. The source change upgrades direct `sharp` from `0.34.5` to `0.35.3` and advances the existing security resolutions from `fast-uri@3.1.2` to `3.1.4` and from `brace-expansion@5.0.6` to `5.0.7`. It does not authorize or perform a production runtime refresh, Cloudflare Tunnel change, public smoke, or tag movement.
+
+### Dependency And Reachability Review
+
+- `yarn install --frozen-lockfile` completed with the committed manifest and lockfile state.
+- `yarn why sharp` resolves the direct dependency to `sharp@0.35.3`.
+- `yarn why fast-uri` resolves one `fast-uri@3.1.4` through Fastify's Ajv compiler, Ajv, and `fast-json-stringify` paths.
+- `yarn why brace-expansion` resolves one `brace-expansion@5.0.7` through `@fastify/static > glob > minimatch`.
+- The regenerated lockfile integrity values match the npm registry metadata for all three selected versions. Sharp's package and native artifacts expose npm trusted-publisher/SLSA provenance; `fast-uri` and `brace-expansion` expose registry signatures but not SLSA attestations, so their exact lock integrity and upstream security-fix diffs were reviewed before acceptance.
+- `rg -n "from ['\"]sharp|sharp\\(" server tests scripts --glob '*.ts' --glob '*.mjs'` finds the direct import and decode call only in `server/lib/image-validation.ts`; `server/routes/chat.ts` passes uploaded image bytes to that validator.
+- `rg -n "fast-uri|brace-expansion" server client tests scripts package.json --glob '*.ts' --glob '*.tsx' --glob '*.mjs' --glob '*.json'` finds only the two explicit security resolutions in `package.json`, not direct application imports.
+- The Sharp 0.35 boundary was reviewed for its Node `>=20.9.0` requirement, install-script removal, default input-channel limit, removed deprecated APIs, JPEG 2000 option rename, and AVIF changes. The application runs on Node 22 in CI and does not use the removed or renamed APIs.
+
+### Targeted Compatibility And Audit
+
+- `yarn native:check` passes `6/6`: Sharp accepts generated JPEG/PNG/WebP, rejects invalid or mismatched bytes, and the `better-sqlite3` compatibility checks remain green.
+- `node scripts/run-node-with-tz.mjs --import tsx --test tests/integration/web-app.test.ts tests/integration/chat-api.test.ts` passes `97/97`, including Fastify static serving and accepted/rejected multipart image paths.
+- `yarn deps:audit` reports `2` high advisories and no critical, moderate, low, or info advisories. The Sharp, `fast-uri`, and `brace-expansion` rows are absent; the only remaining rows are the existing `drizzle-orm` and `form-data` deferrals recorded above.
+- Final acceptance also requires `yarn release:check --base=origin/main` on the completed source diff and the repository's GitHub Node 22 `Release Check` on the pushed PR head.
 
 ## Evidence Appendix
 
@@ -171,7 +196,7 @@ Result:
 ## Consequences
 
 - Developers can distinguish source-release blockers from recorded deferrals with explicit severity, runtime/dev scope, reachability, owner, revisit trigger, and follow-up requirements.
-- Current `drizzle-orm` and `form-data` advisories remain visible for source-release review and production runtime refresh readiness.
+- Current `drizzle-orm` and `form-data` advisories remain visible for source-release review and production runtime refresh readiness; the remediated Sharp, `fast-uri`, and `brace-expansion` advisories remain visible as completed triage evidence.
 - `deps:audit` remains advisory evidence in Phase 100 and is not part of `release:check`.
 
 ## Verification
@@ -179,7 +204,7 @@ Result:
 Use these source checks for this ADR:
 
 - `rg -n "severity|runtime|dev|reachability|release decision|owner|revisit|deferral" docs/adr/0009-dependency-advisory-policy.md`
-- `rg -n "drizzle-orm|form-data|GHSA-gpj5-g38j-94v9|GHSA-hmw2-7cc7-3qxx|release decision|follow-up" docs/adr/0009-dependency-advisory-policy.md`
+- `rg -n "drizzle-orm|form-data|sharp|fast-uri|brace-expansion|GHSA-gpj5-g38j-94v9|GHSA-hmw2-7cc7-3qxx|GHSA-f88m-g3jw-g9cj|GHSA-4c8g-83qw-93j6|GHSA-v2hh-gcrm-f6hx|GHSA-3jxr-9vmj-r5cp|release decision|follow-up" docs/adr/0009-dependency-advisory-policy.md`
 - `rg -n "server/llm/openai.ts|chat\\.completions\\.create|server/orchestrator/index.ts|image_url|tests/types/openai-sdk-shape.ts|files/audio|multipart upload|auxiliary" docs/adr/0009-dependency-advisory-policy.md`
 - `rg -n "native:check|sharp|better-sqlite3|sanitized console summary|raw image bytes|DB row dumps|copied DB files|session material|secrets|prompts|provider payloads|assistant text" docs/adr/0009-dependency-advisory-policy.md`
 - `yarn native:check`
