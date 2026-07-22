@@ -214,6 +214,8 @@ describe("host GSD normalizer", () => {
     assert.deepEqual(JSON.parse(fs.readFileSync(fixture.paths.projectConfig, "utf8")).unknown_project_key, ["keep", { value: 7 }]);
     const defaults = JSON.parse(fs.readFileSync(fixture.paths.defaults, "utf8"));
     const project = JSON.parse(fs.readFileSync(fixture.paths.projectConfig, "utf8"));
+    assert.equal(defaults.model_policy.provider, "custom");
+    assert.equal(defaults.model_policy.high, CANONICAL_MODEL);
     assert.equal(defaults.dynamic_routing.escalate_on_failure, false);
     assert.equal(defaults.dynamic_routing.max_escalations, 0);
     assert.equal(defaults.parallelization.max_concurrent_agents, 3);

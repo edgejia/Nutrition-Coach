@@ -357,14 +357,14 @@ function normalizeResolverConfig(input) {
   // model_policy is an alternate resolver path in the installed GSD model
   // resolver. Force a provider-neutral custom policy so a future provider/budget
   // preset cannot select a non-Luna model before the runtime-tier fallback.
-  if (isObject(config.model_policy)) {
-    config.model_policy.provider = "custom";
-    config.model_policy.high = CANONICAL_MODEL;
-    config.model_policy.medium = CANONICAL_MODEL;
-    config.model_policy.low = CANONICAL_MODEL;
-    delete config.model_policy.budget;
-    delete config.model_policy.runtime_tiers;
-  }
+  const modelPolicy = isObject(config.model_policy) ? config.model_policy : {};
+  modelPolicy.provider = "custom";
+  modelPolicy.high = CANONICAL_MODEL;
+  modelPolicy.medium = CANONICAL_MODEL;
+  modelPolicy.low = CANONICAL_MODEL;
+  delete modelPolicy.budget;
+  delete modelPolicy.runtime_tiers;
+  config.model_policy = modelPolicy;
 
   return config;
 }
