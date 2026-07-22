@@ -164,9 +164,9 @@ function parseTomlScalar(raw, key) {
 
 function setTomlScalar(raw, key, value) {
   const escaped = String(value).replaceAll("\\", "\\\\").replaceAll('"', '\\"');
-  const expression = new RegExp(`^(\\s*)${key.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}\\s*=.*$`, "m");
+  const expression = new RegExp(`^(\\s*)${key.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}\\s*=.*?(\\s+#.*)?$`, "m");
   if (expression.test(raw)) {
-    return raw.replace(expression, (_line, indentation) => `${indentation}${key} = "${escaped}"`);
+    return raw.replace(expression, (_line, indentation, comment) => `${indentation}${key} = "${escaped}"${comment || ""}`);
   }
   const suffix = raw.endsWith("\n") ? "" : "\n";
   return `${raw}${suffix}${key} = "${escaped}"\n`;
@@ -601,6 +601,11 @@ function parseArgs(argv) {
     const key = match[1].replaceAll("-", "");
     const value = match[2] ?? argv[++index];
     if (!value || value.startsWith("--")) throw new Error("missing_argument_value");
+    if (match[1] === "mode") {
+      if (value !== "check" && value !== "apply") throw new Error("invalid_mode");
+      mode = value;
+      continue;
+    }
     const aliases = {
       codexhome: "codexHome",
       agentshome: "agentsHome",
