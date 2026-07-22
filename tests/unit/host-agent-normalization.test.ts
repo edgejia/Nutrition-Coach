@@ -214,6 +214,15 @@ describe("host GSD normalizer", () => {
     assert.equal(project.parallelization.max_concurrent_agents, 3);
     assert.equal(fs.statSync(fixture.paths.config).mode & 0o777, 0o640);
     assert.equal(fs.statSync(fixture.paths.defaults).mode & 0o777, 0o600);
+    const newestConfigMtime = Math.max(
+      fs.statSync(fixture.paths.config).mtimeMs,
+      fs.statSync(fixture.paths.defaults).mtimeMs,
+      fs.statSync(fixture.paths.projectConfig).mtimeMs,
+    );
+    const globalAgentMtimes = fs.readdirSync(path.join(fixture.options.codexHome, "agents"))
+      .filter((name) => name.endsWith(".toml"))
+      .map((name) => fs.statSync(path.join(fixture.options.codexHome, "agents", name)).mtimeMs);
+    assert.ok(globalAgentMtimes.every((mtime) => mtime >= newestConfigMtime));
     assert.equal(fs.readFileSync(fixture.paths.globalPolicy, "utf8"), fs.readFileSync(fixture.paths.codexPolicy, "utf8"));
     assert.match(fs.readFileSync(fixture.paths.globalPolicy, "utf8"), new RegExp(`${fixture.options.codexHome}/gsd-core/workflows`));
   });

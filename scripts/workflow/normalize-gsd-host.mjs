@@ -581,11 +581,31 @@ async function atomicApply(changes) {
   }
 }
 
+async function refreshGlobalAgentBakeMtimes(options) {
+  const agentPaths = await listTomlFiles(options.globalAgentsDir);
+  const configStats = await Promise.all(
+    [options.configPath, options.defaultsPath, options.projectConfigPath].map((filePath) => fs.stat(filePath)),
+  );
+  const newestConfigMtime = Math.max(...configStats.map((stat) => stat.mtimeMs));
+  const bakedAt = new Date(Math.max(Date.now(), Math.ceil(newestConfigMtime) + 1));
+  for (const agentPath of agentPaths) {
+    const stat = await fs.lstat(agentPath);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`agent_file_unsafe:${agentPath}`);
+    await fs.utimes(agentPath, stat.atime, bakedAt);
+  }
+  return agentPaths;
+}
+
 export async function normalizeGsdHost(rawOptions = {}) {
   const mode = rawOptions.mode === "apply" ? "apply" : "check";
   const inspected = await inspectHost({ ...rawOptions, mode });
-  if (mode === "apply" && inspected.ok && inspected.changes.length > 0) {
-    await atomicApply(inspected.changes);
+  if (mode === "apply" && inspected.ok) {
+    if (inspected.changes.length > 0) await atomicApply(inspected.changes);
+    // Codex uses statically baked agent TOMLs. Refresh every validated global
+    // agent after the resolver/config CAS so GSD's stale-bake guard records
+    // this normalization as the bake boundary even when an agent's bytes were
+    // already canonical before another config path changed.
+    const refreshedAgentPaths = await refreshGlobalAgentBakeMtimes(inspected.options);
     // Re-read the complete surface, including every manifest-backed managed
     // adapter, after publication. A concurrent update must be reported rather
     // than mistaken for a successful normalization.
@@ -595,6 +615,7 @@ export async function normalizeGsdHost(rawOptions = {}) {
       ...postPublicResult,
       ok: postApply.ok,
       changedPaths: inspected.changes.map((change) => change.path).sort(),
+      refreshedAgentPaths,
     };
   }
   const { changes: _changes, ...publicResult } = inspected;
