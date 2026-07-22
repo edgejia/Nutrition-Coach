@@ -121,6 +121,11 @@ function validateDatabasePath(databasePath) {
   return fs.realpathSync.native(resolved);
 }
 
+function sqliteSupportsNoFollow() {
+  const probe = spawnSync("sqlite3", ["-help"], { encoding: "utf8" });
+  return /(?:^|\s)-nofollow(?:\s|$)/m.test(`${probe.stdout || ""}\n${probe.stderr || ""}`);
+}
+
 function main() {
   const args = process.argv.slice(2);
   if (args.length !== 2 || !args[0].startsWith("--db=")) {
@@ -149,9 +154,12 @@ function main() {
     return;
   }
 
+  const sqliteArgs = ["-readonly", "-safe"];
+  if (sqliteSupportsNoFollow()) sqliteArgs.push("-nofollow");
+  sqliteArgs.push("-header", "-column", canonicalDatabasePath, query);
   const result = spawnSync(
     "sqlite3",
-    ["-readonly", "-safe", "-nofollow", "-header", "-column", canonicalDatabasePath, query],
+    sqliteArgs,
     { env: { ...process.env, TZ: "Asia/Taipei" }, encoding: "utf8" },
   );
   if (result.stdout) process.stdout.write(result.stdout);
