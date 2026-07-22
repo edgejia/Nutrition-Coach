@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 function gitOutput(args, cwd) {
   return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
@@ -14,22 +15,51 @@ function physicalPath(candidate) {
 }
 
 function parseWorktreeList(output) {
-  return output
-    .split(/\r?\n/)
-    .filter((line) => line.startsWith("worktree "))
-    .map((line) => line.slice("worktree ".length).trim())
-    .filter(Boolean);
+  const records = [];
+  let current = null;
+  for (const line of output.split(/\r?\n/)) {
+    if (line.startsWith("worktree ")) {
+      if (current) records.push(current);
+      current = { root: line.slice("worktree ".length).trim(), prunable: false };
+    } else if (current && line.startsWith("prunable ")) {
+      current.prunable = true;
+    } else if (!line.trim() && current) {
+      records.push(current);
+      current = null;
+    }
+  }
+  if (current) records.push(current);
+  return records.filter((record) => record.root);
 }
 
 function samePath(left, right) {
   return physicalPath(left) === physicalPath(right);
 }
 
-async function removeIfPresent(target) {
+async function removeIfPresent(target, expectedParent) {
+  const parent = path.dirname(target);
+  if (expectedParent && path.resolve(parent) !== path.resolve(expectedParent)) {
+    throw new Error(`refusing to remove outside expected parent: ${target}`);
+  }
+  let parentStat;
+  try {
+    parentStat = await fs.promises.lstat(parent);
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+  if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) {
+    throw new Error(`refusing to remove through non-physical parent: ${parent}`);
+  }
   try {
     const stat = await fs.promises.lstat(target);
     if (stat.isDirectory() && !stat.isSymbolicLink()) {
       throw new Error(`refusing to remove directory at ${target}`);
+    }
+    if (stat.isSymbolicLink()) throw new Error(`refusing to remove symlink at ${target}`);
+    const parentAfter = await fs.promises.lstat(parent);
+    if (parentAfter.dev !== parentStat.dev || parentAfter.ino !== parentStat.ino) {
+      throw new Error(`refusing to remove after parent replacement: ${parent}`);
     }
     await fs.promises.unlink(target);
     return true;
@@ -50,12 +80,7 @@ async function ensurePrimarySource(sourcePath) {
     throw error;
   }
 
-  if (stat.isSymbolicLink()) {
-    const bytes = await fs.promises.readFile(sourcePath);
-    await fs.promises.unlink(sourcePath);
-    await fs.promises.writeFile(sourcePath, bytes, { mode: 0o644 });
-    stat = await fs.promises.lstat(sourcePath);
-  }
+  if (stat.isSymbolicLink()) throw new Error(`primary AGENTS.md must not be a symlink: ${sourcePath}`);
   if (!stat.isFile()) throw new Error(`primary AGENTS.md is not a regular file: ${sourcePath}`);
   return fs.promises.readFile(sourcePath);
 }
@@ -74,7 +99,7 @@ async function linkSecondaryAgent(worktreeRoot, sourcePath) {
     if (path.resolve(worktreeRoot, currentTarget) === sourcePath) return false;
   }
 
-  if (stat) await removeIfPresent(target);
+  if (stat) await removeIfPresent(target, worktreeRoot);
   await fs.promises.symlink(sourcePath, target);
   return true;
 }
@@ -94,12 +119,24 @@ export async function syncWorktreeAgents({ projectRoot = process.cwd() } = {}) {
 
   // A previous hook used this common-dir file as the source, creating a
   // split-brain policy. Remove only that exact stale duplicate.
-  await removeIfPresent(path.join(commonDir, "codex-local", "AGENTS.md"));
+  const commonLocal = path.join(commonDir, "codex-local");
+  await removeIfPresent(path.join(commonLocal, "AGENTS.md"), commonLocal);
 
-  const worktreeRoots = parseWorktreeList(gitOutput(["worktree", "list", "--porcelain"], cwd));
+  const worktreeRecords = parseWorktreeList(gitOutput(["worktree", "list", "--porcelain"], cwd));
+  const worktreeRoots = worktreeRecords.filter((record) => !record.prunable).map((record) => record.root);
+  const skippedWorktrees = worktreeRecords.filter((record) => record.prunable).map((record) => record.root);
   const changed = [];
   for (const listedRoot of worktreeRoots) {
-    const worktreeRoot = physicalPath(listedRoot);
+    let worktreeRoot;
+    try {
+      worktreeRoot = physicalPath(listedRoot);
+    } catch (error) {
+      if (error?.code === "ENOENT") {
+        skippedWorktrees.push(listedRoot);
+        continue;
+      }
+      throw error;
+    }
     if (samePath(worktreeRoot, primaryRoot)) {
       const stat = await fs.promises.lstat(sourcePath);
       if (!stat.isFile() || stat.isSymbolicLink()) {
@@ -116,6 +153,7 @@ export async function syncWorktreeAgents({ projectRoot = process.cwd() } = {}) {
     sourcePath,
     sourceSha256: (await import("node:crypto")).createHash("sha256").update(sourceBytes).digest("hex"),
     worktrees: worktreeRoots,
+    skippedWorktrees,
     linked: changed,
   };
 }
@@ -128,7 +166,8 @@ function parseProjectRoot(argv) {
   return projectRoot;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : null;
+if (invokedPath && fileURLToPath(import.meta.url) === invokedPath) {
   syncWorktreeAgents({ projectRoot: parseProjectRoot(process.argv.slice(2)) })
     .then((result) => {
       process.stdout.write(`${JSON.stringify(result)}\n`);

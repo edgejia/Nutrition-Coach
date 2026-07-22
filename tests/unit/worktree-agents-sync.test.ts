@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { lstat, mkdir, mkdtemp, readFile, readlink, realpath, rm, writeFile, copyFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, readlink, realpath, rm, writeFile, copyFile, symlink, unlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -73,6 +73,94 @@ describe("ignored AGENTS worktree synchronization", () => {
         // The fixture directory is disposable; a failed metadata cleanup must
         // never reach the real repository's Git common directory.
       }
+      await rm(fixtureParent, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a symlinked primary policy without changing either file", async () => {
+    const fixtureParent = await mkdtemp(path.join(os.tmpdir(), "nutrition-agents-primary-link-"));
+    const primary = path.join(fixtureParent, "primary");
+    const external = path.join(fixtureParent, "external-agents.md");
+    try {
+      await mkdir(primary, { recursive: true });
+      git(["init", "--initial-branch=main"], primary);
+      git(["config", "user.name", "fixture"], primary);
+      git(["config", "user.email", "fixture@example.invalid"], primary);
+      await writeFile(path.join(primary, "AGENTS.md"), "tracked placeholder\n");
+      git(["add", "AGENTS.md"], primary);
+      git(["commit", "-m", "fixture policy"], primary);
+      await writeFile(external, "external policy must survive\n");
+      await unlink(path.join(primary, "AGENTS.md"));
+      await symlink(external, path.join(primary, "AGENTS.md"));
+      const commonDir = git(["rev-parse", "--git-common-dir"], primary).trim();
+      await mkdir(path.join(primary, "scripts/workflow"), { recursive: true });
+      await copyFile(helperSource, path.join(primary, "scripts/workflow/sync-worktree-agents.mjs"));
+      await mkdir(path.join(commonDir, "codex-local"), { recursive: true });
+      await copyFile(hookSource, path.join(commonDir, "codex-local/sync-agents.sh"));
+
+      const result = spawnSync("sh", [path.join(commonDir, "codex-local/sync-agents.sh")], { cwd: primary, encoding: "utf8" });
+      assert.notEqual(result.status, 0);
+      assert.equal((await lstat(path.join(primary, "AGENTS.md"))).isSymbolicLink(), true);
+      assert.equal(await readFile(external, "utf8"), "external policy must survive\n");
+    } finally {
+      await rm(fixtureParent, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a symlinked common codex-local parent without unlinking outside it", async () => {
+    const fixtureParent = await mkdtemp(path.join(os.tmpdir(), "nutrition-agents-common-link-"));
+    const primary = path.join(fixtureParent, "primary");
+    const external = path.join(fixtureParent, "external");
+    try {
+      await mkdir(primary, { recursive: true });
+      await mkdir(external, { recursive: true });
+      git(["init", "--initial-branch=main"], primary);
+      git(["config", "user.name", "fixture"], primary);
+      git(["config", "user.email", "fixture@example.invalid"], primary);
+      await writeFile(path.join(primary, "AGENTS.md"), "authoritative policy\n");
+      git(["add", "AGENTS.md"], primary);
+      git(["commit", "-m", "fixture policy"], primary);
+      await writeFile(path.join(external, "AGENTS.md"), "external duplicate must survive\n");
+      const commonDir = git(["rev-parse", "--git-common-dir"], primary).trim();
+      await symlink(external, path.join(commonDir, "codex-local"), "dir");
+      await mkdir(path.join(primary, "scripts/workflow"), { recursive: true });
+      await copyFile(helperSource, path.join(primary, "scripts/workflow/sync-worktree-agents.mjs"));
+      await mkdir(path.join(fixtureParent, "hooks"), { recursive: true });
+      await copyFile(hookSource, path.join(fixtureParent, "hooks/sync-agents.sh"));
+
+      const result = spawnSync("sh", [path.join(fixtureParent, "hooks/sync-agents.sh")], { cwd: primary, encoding: "utf8" });
+      assert.notEqual(result.status, 0);
+      assert.equal(await readFile(path.join(external, "AGENTS.md"), "utf8"), "external duplicate must survive\n");
+    } finally {
+      await rm(fixtureParent, { recursive: true, force: true });
+    }
+  });
+
+  it("skips a prunable worktree and still synchronizes the primary checkout", async () => {
+    const fixtureParent = await mkdtemp(path.join(os.tmpdir(), "nutrition-agents-prunable-"));
+    const primary = path.join(fixtureParent, "primary");
+    const stale = path.join(fixtureParent, "stale");
+    try {
+      await mkdir(primary, { recursive: true });
+      git(["init", "--initial-branch=main"], primary);
+      git(["config", "user.name", "fixture"], primary);
+      git(["config", "user.email", "fixture@example.invalid"], primary);
+      await writeFile(path.join(primary, "AGENTS.md"), "authoritative policy\n");
+      git(["add", "AGENTS.md"], primary);
+      git(["commit", "-m", "fixture policy"], primary);
+      git(["worktree", "add", "--detach", stale], primary);
+      await rm(stale, { recursive: true, force: true });
+      const commonDir = git(["rev-parse", "--git-common-dir"], primary).trim();
+      await mkdir(path.join(primary, "scripts/workflow"), { recursive: true });
+      await copyFile(helperSource, path.join(primary, "scripts/workflow/sync-worktree-agents.mjs"));
+      await mkdir(path.join(commonDir, "codex-local"), { recursive: true });
+      await copyFile(hookSource, path.join(commonDir, "codex-local/sync-agents.sh"));
+
+      const result = spawnSync("sh", [path.join(commonDir, "codex-local/sync-agents.sh")], { cwd: primary, encoding: "utf8" });
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stdout, /skippedWorktrees/);
+    } finally {
+      try { git(["worktree", "prune"], primary); } catch { /* disposable fixture */ }
       await rm(fixtureParent, { recursive: true, force: true });
     }
   });
