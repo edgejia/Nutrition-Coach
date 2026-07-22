@@ -57,6 +57,7 @@ async function removeIfPresent(target, expectedParent) {
       throw new Error(`refusing to remove directory at ${target}`);
     }
     if (stat.isSymbolicLink()) throw new Error(`refusing to remove symlink at ${target}`);
+    if (!stat.isFile()) throw new Error(`refusing to remove non-regular file at ${target}`);
     const parentAfter = await fs.promises.lstat(parent);
     if (parentAfter.dev !== parentStat.dev || parentAfter.ino !== parentStat.ino) {
       throw new Error(`refusing to remove after parent replacement: ${parent}`);
