@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-06-22
-**Last Reviewed:** 2026-07-22 (`drizzle-orm@0.45.2` acceptance)
+**Last Reviewed:** 2026-07-22 (runtime advisory remediation complete)
 **Milestone:** v3.1 Runtime & LLM Dependency Trust Baseline
 **Requirement:** ADVS-01 / ADVS-02 / ADVS-03 / NATV-03
 
@@ -10,7 +10,7 @@
 
 Nutrition Coach uses Yarn Classic and keeps release readiness, CI, production runtime refresh, Cloudflare Tunnel changes, public smoke, tag movement, and `main` promotion as separate gates. Phase 100 adds `yarn deps:audit` as advisory evidence, and Phase 101 adds `yarn native:check` as native dependency compatibility evidence. Neither command is wired into `release:check` by default.
 
-The 2026-06-22 runtime dependency audit reported high advisories for direct `drizzle-orm@0.39.3` and transitive `form-data@4.0.5` through `openai > @types/node-fetch > form-data`. A fresh 2026-07-22 audit also found newly disclosed runtime advisories in direct `sharp@0.34.5` and the Fastify transitive paths for `fast-uri@3.1.2` and `brace-expansion@5.0.6`; issue #134 remediated those three packages. The Drizzle compatibility review below accepts resolved `drizzle-orm@0.45.2` and removes `GHSA-gpj5-g38j-94v9` from the current audit output. The current audit is not yet clean: transitive `form-data@4.0.5` remains the sole high finding and retains its recorded deferral. This ADR is the canonical source record for dependency advisory triage policy, the current `form-data` release decision, and completed runtime advisory remediation.
+The 2026-06-22 runtime dependency audit reported high advisories for direct `drizzle-orm@0.39.3` and transitive `form-data@4.0.5` through `openai > @types/node-fetch > form-data`. A fresh 2026-07-22 audit also found newly disclosed runtime advisories in direct `sharp@0.34.5` and the Fastify transitive paths for `fast-uri@3.1.2` and `brace-expansion@5.0.6`; issue #134 remediated those three packages. The Drizzle compatibility review below accepts resolved `drizzle-orm@0.45.2`, and the final `form-data@4.0.6` update closes the remaining high finding. The current fresh runtime dependency audit is clean. This ADR is the canonical source record for dependency advisory triage policy and the completed runtime advisory remediation.
 
 ## Policy
 
@@ -52,7 +52,7 @@ Deferrals must be revisited on:
 | Package | Advisory | Severity | Dependency Path | Runtime/Dev Scope | Reachability | Release Decision | Owner | Revisit Trigger | Follow-up |
 |---|---|---|---|---|---|---|---|---|---|
 | `drizzle-orm@0.45.2` | `GHSA-gpj5-g38j-94v9` - SQL injection via improperly escaped SQL identifiers | high | direct dependency `drizzle-orm` from `package.json` dependencies; vulnerable `<0.45.2`, patched `>=0.45.2`; lockfile resolves `0.45.2` | runtime | The resolved version is patched. Current app/test/script source has no `sql.identifier()`, `sql.as()`, `sql.raw()`, dynamic `.as()`, SQLite `blob()`, `$onUpdate`, `.returning()`, `relations()`, or `db.query` use. Existing custom SQL uses parameterized `sql\`...\`` tagged templates. This surface review supplements, but does not replace, the patched dependency and compatibility evidence. | Patched and accepted for source/PR review at resolved `0.45.2` after dedicated ORM compatibility verification. This does not authorize merge or production runtime refresh. | Active milestone owner | Future `drizzle-orm` upgrade, new dynamic SQL or relational-query surface, source PR readiness, or production runtime refresh readiness | Keep the resolved version on a patched release (`>=0.45.2`). For future minor or major upgrades, repeat the dynamic SQL scan, Drizzle Kit API compatibility check, file-backed migration/persistence check, schema drift check, dependency audit, and release gate. |
-| `form-data@4.0.5` | `GHSA-hmw2-7cc7-3qxx` - CRLF injection via unescaped multipart field names and filenames | high | transitive runtime path `openai > @types/node-fetch > form-data`; vulnerable `>=4.0.0 <4.0.6`, patched `>=4.0.6` | runtime | Current runtime provider calls `client.chat.completions.create`; image input is passed to Chat Completions as base64 `image_url`; compile-visible SDK shape evidence binds Chat Completions message/tool/stream shapes. Source scan shows no OpenAI files/audio multipart upload calls (`client.files`, `client.audio`, `.files.create`, `.audio.transcriptions`, `.audio.translations`). Browser/test `FormData` matches are auxiliary only and do not prove OpenAI SDK multipart reachability. | Non-blocking recorded deferral for source release because the vulnerable transitive multipart path is not reached by current OpenAI SDK usage. Blocks if OpenAI files/audio multipart usage appears or if new evidence shows Chat Completions reaches this vulnerable path. | Active milestone owner | `openai` upgrade, `form-data` upgrade, new multipart reachability evidence, source PR readiness, or production runtime refresh readiness | Prefer upgrading the transitive path through a reviewed `openai` update or package resolution only after provider compatibility re-verification. Re-run provider tests, `tests/types/openai-sdk-shape.ts` through `yarn tsc --noEmit`, lockfile path review, and `yarn deps:audit`. |
+| `form-data@4.0.6` | `GHSA-hmw2-7cc7-3qxx` - CRLF injection via unescaped multipart field names and filenames | high | transitive runtime path `openai@4.104.0 > @types/node-fetch@2.6.13 > form-data@4.0.6`; vulnerable `>=4.0.0 <4.0.6`, patched `>=4.0.6` | runtime | Current runtime provider calls `client.chat.completions.create`; image input remains base64 `image_url`; source scan finds no OpenAI files/audio multipart upload calls. The resolved `4.0.6` version is outside the vulnerable range regardless of that non-reachability evidence. | Resolved in source by the reviewed transitive lockfile update; the former deferral is closed. No `openai` version or provider API behavior changed. | Active milestone owner | `openai` or `form-data` change, downgrade below `4.0.6`, new advisory or multipart reachability evidence, source PR readiness, or production runtime refresh readiness | Keep the transitive path at `form-data>=4.0.6`; on future path changes re-run provider tests, `tests/types/openai-sdk-shape.ts` through `yarn tsc --noEmit`, lockfile-path review, and `yarn deps:audit`. |
 | `sharp@0.35.3` (upgraded from `0.34.5`) | `GHSA-f88m-g3jw-g9cj` - libvips out-of-bounds read and denial of service when decoding malicious image input | high | direct dependency `sharp`; vulnerable `<0.35.0`, patched `>=0.35.0` | runtime | Reachable: `POST /api/chat` accepts untrusted upload bytes and passes them through `validateImageBytes` to `sharp(buffer)`. Existing guards limit upload bytes, decoded pixels, MIME types, and concurrent decodes, but do not disprove the vulnerable decoder path. | Resolved for source release by upgrading to `sharp@0.35.3` / packaged libvips `8.18.3`. The 0.35 breaking changes were reviewed against the app's supported `failOn`, `limitInputPixels`, `metadata`, and `raw().toBuffer()` usage; `yarn native:check` and image-upload integration tests pass. | Active milestone owner | Future `sharp` upgrade, new decoder advisory, source PR readiness, or production runtime refresh readiness | Keep the direct version at or above the patched line and retain native decode/reject plus upload-path verification. |
 | `fast-uri@3.1.4` (resolved from `3.1.2`) | `GHSA-4c8g-83qw-93j6` and `GHSA-v2hh-gcrm-f6hx` - URI hostname validation/canonicalization bypasses | high | transitive runtime paths through `fastify > @fastify/ajv-compiler > fast-uri`, `fastify > fast-json-stringify > fast-uri`, and Ajv; the two advisories together require `>=3.1.4` on the 3.x line | runtime | No direct app import exists, but Fastify schema compilation and serialization are runtime paths, so non-reachability was not assumed. | Resolved for source release with the security resolution `fast-uri@3.1.4`; dependency-path review and Fastify integration tests pass. | Active milestone owner | Fastify/Ajv/`fast-json-stringify` upgrade, resolution removal, new URI advisory, source PR readiness, or production runtime refresh readiness | Keep the resolution until every accepted parent range resolves to a non-vulnerable version, then remove it only with lockfile-path and release-gate evidence. |
 | `brace-expansion@5.0.7` (resolved from `5.0.6`) | `GHSA-3jxr-9vmj-r5cp` - uncontrolled resource consumption from recursive brace expansion | high | transitive runtime path `@fastify/static > glob > minimatch > brace-expansion`; vulnerable `5.0.0` through `5.0.6`, patched `>=5.0.7` | runtime | No direct app import or user-controlled glob construction exists, but the package remains under the runtime static-serving stack. The package was patched instead of relying on that narrower reachability. | Resolved for source release with the security resolution `brace-expansion@5.0.7`; dependency-path review and static-serving integration tests pass. | Active milestone owner | `@fastify/static`/Glob/Minimatch upgrade, resolution removal, new expansion advisory, source PR readiness, or production runtime refresh readiness | Keep the resolution until the parent dependency graph naturally resolves to the patched line, then remove it only with lockfile-path and static-serving evidence. |
@@ -62,7 +62,7 @@ Deferrals must be revisited on:
 - `openai` upgrades require Phase 99 provider re-verification: provider tests plus `tests/types/openai-sdk-shape.ts` through `yarn tsc --noEmit`, then re-confirm ADR 0008 compatibility facets. No live-model smoke is required by default.
 - `sharp` and `better-sqlite3` upgrades require `yarn native:check` before acceptance: Sharp decode/reject evidence and `better-sqlite3` load/migrate/reopen/persist evidence.
 - Major or minor `drizzle-orm` upgrades require a dedicated ORM compatibility task: dynamic SQL source scan, Drizzle Kit API compatibility check, file-backed migration and persistence/service tests, schema drift check, dependency audit, and an updated release decision here. The resolved `0.39.3` to `0.45.2` change satisfies this boundary only through the 2026-07-22 evidence below; future resolved-version movement must repeat it.
-- Fastify upload/static stack changes, security-pinned transitive changes (`fast-uri`, `brace-expansion`), and current advisory packages such as `form-data` require lockfile dependency-path review, targeted affected-path tests, and then `yarn release:check`.
+- Fastify upload/static stack changes, security-pinned transitive changes (`fast-uri`, `brace-expansion`), and transitive security fixes such as `form-data` require lockfile dependency-path review, targeted affected-path tests, and then `yarn release:check`.
 - No package install, dependency upgrade, npm workflow, `package-lock.json`, CI workflow change, production runtime refresh, Cloudflare Tunnel change, public smoke, tag movement, `main` promotion, direct push, or `release:check` coupling is authorized by this ADR.
 
 ## 2026-07-22 Runtime Advisory Refresh Evidence
@@ -153,6 +153,46 @@ Result:
 
 - `yarn deps:audit` completed with advisory-bitmask evidence and no longer reported `drizzle-orm` or `GHSA-gpj5-g38j-94v9`.
 - The audit remains non-clean with exactly `1` high finding: `form-data@4.0.5` / `GHSA-hmw2-7cc7-3qxx`. The Sharp, `fast-uri`, `brace-expansion`, and Drizzle findings are absent; the remaining `form-data` finding is not remediated or waived by this Drizzle decision.
+- Final acceptance requires `yarn release:check --base=origin/main` to emit `release_check_complete` with a stable workspace on the completed rebased source diff, followed by the repository's GitHub Node 22 `Release Check` on the pushed PR head.
+
+## Form-data 4.0.6 Resolution Evidence
+
+Evidence collected on 2026-07-22 from a clean rebase of PR #125's dependency and documentation commits onto `origin/main@9746501454de5bb58d7c1e2c435d94479001a81d`. The replay used `yarn install --frozen-lockfile`. This is source/PR compatibility evidence only and does not itself authorize merge, production runtime refresh, Cloudflare Tunnel changes, public smoke, or tag movement.
+
+### Lockfile Path And Reachability
+
+Commands:
+
+```bash
+yarn install --frozen-lockfile
+yarn why form-data
+rg -n "chat\\.completions\\.create|image_url" server/llm/openai.ts server/orchestrator/index.ts tests/types/openai-sdk-shape.ts
+if rg -n "client\\.(files|audio)|\\.files\\.|\\.audio\\.|files\\.create|audio\\.transcriptions|audio\\.translations" server/llm server/orchestrator tests/types --glob '*.ts'; then exit 1; else exit 0; fi
+```
+
+Results:
+
+- The frozen install passed.
+- The only lock path is `openai@4.104.0 > @types/node-fetch@2.6.13 > form-data@4.0.6`; no vulnerable `form-data@4.0.5` resolution remains.
+- Runtime provider usage remains Chat Completions with base64 `image_url`.
+- The OpenAI files/audio multipart negative scan returned no matches.
+
+### Provider, Native, Audit, And Release Gates
+
+Commands:
+
+```bash
+node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/openai-provider.test.ts
+yarn native:check
+yarn deps:audit
+yarn release:check --base=origin/main
+```
+
+Results:
+
+- The OpenAI provider suite passes `22/22`.
+- `yarn native:check` passes `6/6`.
+- `yarn deps:audit` exits successfully with `scanner_success: true`, `Clean: yes`, and `0` advisories at every severity.
 - Final acceptance requires `yarn release:check --base=origin/main` to emit `release_check_complete` with a stable workspace on the completed rebased source diff, followed by the repository's GitHub Node 22 `Release Check` on the pushed PR head.
 
 ## Evidence Appendix
@@ -266,7 +306,7 @@ Result:
 
 - Developers can distinguish source-release blockers from recorded deferrals with explicit severity, runtime/dev scope, reachability, owner, revisit trigger, and follow-up requirements.
 - The direct Drizzle advisory is remediated at resolved `drizzle-orm@0.45.2`; the dated 2026-06-22 appendix remains the historical record of the earlier deferral.
-- The existing `form-data` deferral remains in force and is the current audit's sole high finding. The remediated Sharp, `fast-uri`, and `brace-expansion` advisories remain visible as completed triage evidence; Drizzle acceptance does not claim that `yarn deps:audit` is clean.
+- The transitive `form-data` advisory is remediated at resolved `form-data@4.0.6`. Together with the completed Sharp, `fast-uri`, `brace-expansion`, and Drizzle remediations, the fresh runtime dependency audit is clean with `0` advisories; the dated appendix remains the historical record of the earlier findings and deferrals.
 - `deps:audit` remains advisory evidence in Phase 100 and is not part of `release:check`.
 
 ## Verification
@@ -282,8 +322,11 @@ Use these source checks for this ADR:
 - `rg -n 'requiredApiVersion = 10' node_modules/drizzle-kit/bin.cjs`
 - `yarn db:generate`
 - `test -z "$(git status --short -- drizzle)"`
+- `yarn install --frozen-lockfile`
+- `node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/openai-provider.test.ts`
+- `yarn tsc --noEmit`
+- `yarn why form-data`
 - `yarn native:check`
 - `yarn deps:audit`
 - `yarn release:check --base=origin/main`
 - `if rg -n "client\\.(files|audio)|\\.files\\.|\\.audio\\.|files\\.create|audio\\.transcriptions|audio\\.translations" server/llm server/orchestrator tests/types --glob '*.ts'; then exit 1; else exit 0; fi`
-- `yarn audit --groups dependencies --json >/tmp/nutrition-phase-100-audit.jsonl || test -s /tmp/nutrition-phase-100-audit.jsonl`
