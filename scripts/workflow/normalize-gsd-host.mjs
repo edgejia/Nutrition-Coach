@@ -790,7 +790,7 @@ export async function normalizeGsdHost(rawOptions = {}) {
     return {
       ...postPublicResult,
       ok: postApply.ok,
-      changedPaths: inspected.changes.map((change) => change.path).sort(),
+      changedPaths: [...new Set([...inspected.changes.map((change) => change.path), ...postApply.changes.map((change) => change.path)])].sort(),
       refreshedAgentPaths,
     };
   }
