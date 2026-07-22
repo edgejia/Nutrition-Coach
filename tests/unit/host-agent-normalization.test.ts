@@ -301,6 +301,26 @@ describe("host GSD normalizer", () => {
     assert.deepEqual(Object.fromEntries(Object.values(fixture.paths).map((filePath) => [filePath, digest(filePath)])), before);
   });
 
+  test("rejects an explicitly injected target outside the selected roots", async () => {
+    const fixture = createFixture();
+    fixtures.push(fixture);
+    const outsideConfig = path.join(fixture.root, "outside-config.toml");
+    fs.writeFileSync(outsideConfig, fs.readFileSync(fixture.paths.config));
+    const result = await typedApplyHost({ ...fixture.options, configPath: outsideConfig });
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((error) => error.code.includes("target_outside_root")));
+    assert.equal(digest(outsideConfig), digest(fixture.paths.config));
+  });
+
+  test("fails the apply postcondition when a target drifts before readback", async () => {
+    const fixture = createFixture();
+    fixtures.push(fixture);
+    const result = await typedApplyHost({ ...fixture.options, __testDriftAfterPublication: fixture.paths.config });
+    assert.equal(result.ok, false);
+    assert.ok(result.changedPaths.includes(fixture.paths.config));
+    assert.ok(result.errors.length === 0);
+  });
+
   test("the fixture-only contract does not mutate real home or project planning files", async () => {
     const realHome = os.homedir();
     const realProject = process.cwd();

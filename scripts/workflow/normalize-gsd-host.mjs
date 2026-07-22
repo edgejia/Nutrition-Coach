@@ -683,6 +683,10 @@ async function atomicApply(changes, options, testFailAfterPublication = null) {
         throw new Error(`apply_target_changed:${item.target}`);
       }
       if (item.targetStat) {
+        const currentBeforePublish = await readRegular(item.target, "apply_target");
+        if (!currentBeforePublish.raw.equals(item.current.raw)) throw new Error(`apply_target_changed:${item.target}`);
+      }
+      if (item.targetStat) {
         await fs.copyFile(item.target, item.backup);
         await fs.chmod(item.backup, item.current.mode);
       }
@@ -767,6 +771,12 @@ export async function normalizeGsdHost(rawOptions = {}) {
     // this normalization as the bake boundary even when an agent's bytes were
     // already canonical before another config path changed.
     const refreshedAgentPaths = await refreshGlobalAgentBakeMtimes(inspected.options);
+    if (rawOptions.__testDriftAfterPublication) {
+      const driftPath = String(rawOptions.__testDriftAfterPublication);
+      const drifted = await fs.readFile(driftPath, "utf8");
+      const nextDrift = drifted.replace("max_depth = 2", "max_depth = 1");
+      await fs.writeFile(driftPath, nextDrift === drifted ? `${drifted}\n# injected concurrent drift\n` : nextDrift);
+    }
     // Re-read the complete surface, including every manifest-backed managed
     // adapter, after publication. A concurrent update must be reported rather
     // than mistaken for a successful normalization.
