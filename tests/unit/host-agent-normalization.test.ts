@@ -250,18 +250,20 @@ describe("host GSD normalizer", () => {
   });
 
   test("the fixture-only contract does not mutate real home or project planning files", async () => {
+    const realHome = os.homedir();
+    const realProject = process.cwd();
     const realPaths = [
-      "/Users/jia/.codex/AGENTS.md",
-      "/Users/jia/.codex/config.toml",
-      "/Users/jia/.gsd/defaults.json",
-      "/Users/jia/Documents/demo/Nutrition-Coach/.planning/config.json",
+      path.join(realHome, ".codex", "AGENTS.md"),
+      path.join(realHome, ".codex", "config.toml"),
+      path.join(realHome, ".gsd", "defaults.json"),
+      path.join(realProject, ".planning", "config.json"),
     ].filter((filePath) => fs.existsSync(filePath));
     const before = new Map(realPaths.map((filePath) => [filePath, digest(filePath)]));
     const fixture = createFixture();
     fixtures.push(fixture);
     await typedApplyHost(fixture.options);
     for (const [filePath, expected] of before) assert.equal(digest(filePath), expected, filePath);
-    assert.equal(fs.readFileSync(fixture.paths.globalPolicy, "utf8").includes("/Users/jia/.codex"), false);
+    assert.equal(fs.readFileSync(fixture.paths.globalPolicy, "utf8").includes(path.join(realHome, ".codex")), false);
   });
 
   test("partition constants are exact and disjoint", () => {
