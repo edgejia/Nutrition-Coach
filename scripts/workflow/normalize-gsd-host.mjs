@@ -340,6 +340,20 @@ async function listTomlFiles(directory) {
     .sort((left, right) => left.localeCompare(right));
 }
 
+async function listStaticAgentBakeFiles(directory) {
+  let entries;
+  try {
+    entries = await fs.readdir(directory, { withFileTypes: true });
+  } catch (error) {
+    if (error?.code === "ENOENT") throw new Error("agent_directory_missing");
+    throw new Error("agent_directory_unreadable");
+  }
+  return entries
+    .filter((entry) => entry.isFile() && entry.name.startsWith("gsd-") && (entry.name.endsWith(".toml") || entry.name.endsWith(".md")))
+    .map((entry) => path.join(directory, entry.name))
+    .sort((left, right) => left.localeCompare(right));
+}
+
 async function inspectAgentFiles(directory, expectedRoles, label) {
   const files = await listTomlFiles(directory);
   const seen = new Map();
@@ -582,7 +596,9 @@ async function atomicApply(changes) {
 }
 
 async function refreshGlobalAgentBakeMtimes(options) {
-  const agentPaths = await listTomlFiles(options.globalAgentsDir);
+  // GSD's Codex stale-bake guard considers both TOML descriptors and the
+  // generated Markdown role materializations when finding the oldest bake.
+  const agentPaths = await listStaticAgentBakeFiles(options.globalAgentsDir);
   const configStats = await Promise.all(
     [options.configPath, options.defaultsPath, options.projectConfigPath].map((filePath) => fs.stat(filePath)),
   );

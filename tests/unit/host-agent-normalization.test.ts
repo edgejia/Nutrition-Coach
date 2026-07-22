@@ -109,6 +109,7 @@ function createFixture({
       path.join(globalAgentsDir, `${role}.toml`),
       tomlAgent(role, sandbox, wrong && role === "gsd-planner" ? "gpt-5.6-sol" : CANONICAL_MODEL, wrong && role === "gsd-planner" ? "high" : CANONICAL_EFFORT),
     );
+    fs.writeFileSync(path.join(globalAgentsDir, `${role}.md`), `---\nname: "${role}"\n---\n\nfixture role\n`);
   }
   if (extraRole) fs.writeFileSync(path.join(globalAgentsDir, "gsd-extra.toml"), tomlAgent("gsd-extra", "read-only"));
 
@@ -220,7 +221,7 @@ describe("host GSD normalizer", () => {
       fs.statSync(fixture.paths.projectConfig).mtimeMs,
     );
     const globalAgentMtimes = fs.readdirSync(path.join(fixture.options.codexHome, "agents"))
-      .filter((name) => name.endsWith(".toml"))
+      .filter((name) => name.startsWith("gsd-") && (name.endsWith(".toml") || name.endsWith(".md")))
       .map((name) => fs.statSync(path.join(fixture.options.codexHome, "agents", name)).mtimeMs);
     assert.ok(globalAgentMtimes.every((mtime) => mtime >= newestConfigMtime));
     assert.equal(fs.readFileSync(fixture.paths.globalPolicy, "utf8"), fs.readFileSync(fixture.paths.codexPolicy, "utf8"));
