@@ -2,6 +2,17 @@
 
 These tools make writer identity, artifact provenance, signed receipts, and verification seals explicit. They are maintenance controls, not authority to run GSD. Use them only for the explicitly authorized local workflow action and never point them at this checkout's `.planning/**` without a separate current-thread approval.
 
+## Optional high-assurance profile
+
+The normal GSD quick-plan contract is deterministic `plan-proof-lint` plus an
+independent semantic checker. Quick artifacts currently return the explicit
+`artifact_type_not_supported` disposition at this high-assurance boundary; a
+quick PLAN is not signed or receipt-backed. Lease, provenance, receipt, and
+verification-seal controls below are strict and remain available only when a
+maintainer explicitly selects high assurance for the supported phase
+`*-PLAN.md`, `*-SUMMARY.md`, or `*-VERIFICATION.md` artifact types. A held
+lease or a passing linter never upgrades a quick artifact's profile.
+
 ## Single-writer lease
 
 The lease lives under the repository's Git common directory so worktrees of the same clone contend on one record. The private bearer token and Ed25519 private key must be in a canonical physical absolute path outside both the checkout and Git common directory. The token file must be a current-user-owned, single-link `0600` regular file whose immediate parent is current-user-owned and not group/world writable; every holder read rechecks its descriptor, final path, parent identity, and bytes. The Git-common governance directory itself must remain current-user-owned mode `0700`, and its lease, attestation, mutex, writer, and history records are rejected if hardlinked or changed during a read. The ledger retains the matching public-key attestation and declared runtime, GSD version, and model profile. Renewal cannot silently change those fields.

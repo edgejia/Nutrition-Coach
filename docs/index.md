@@ -44,7 +44,7 @@
 
 ## 本機交接與歸檔
 
-- `.planning/handoffs/`：短期 agent handoff；已移出 `docs/`
+- `.planning/STATE.md` 與目前 roadmap 是工作交接與下一步路由的正本；任何 `.planning/handoffs/` 檔案僅保留歷史上下文，不是 active next-step pointer。
 - `.planning/docs-archive/2026-07-16/`：本次合併前的原始研究章節，供需要時回溯
 
 ## 原則

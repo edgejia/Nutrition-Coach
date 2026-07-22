@@ -2,6 +2,21 @@
 
 Planner-authored `<verify>` and `<automated>` commands are executable trust-boundary code. A structurally valid plan can still false-pass, mutate evidence, or destroy the state it is supposed to inspect. This contract adds a deterministic first gate and an independent semantic review; neither replaces the other.
 
+## Artifact profile boundary
+
+Nutrition Coach uses the following proportional boundary for this single-maintainer side project:
+
+| Artifact | Normal proof | Optional high-assurance proof |
+| --- | --- | --- |
+| GSD quick plans under `.planning/quick/**` | Run `plan-proof-lint` and an independent semantic checker. This is the complete normal contract. | The current provenance implementation does not support quick artifact types. Record `artifact_type_not_supported`; do not stamp, sign, or claim a quick PLAN is receipt-backed. |
+| Supported phase `*-PLAN.md`, `*-SUMMARY.md`, and `*-VERIFICATION.md` | Run the same linter and semantic checker. | Only when explicitly selected, add the active writer fence, exact source preimage, signed provenance, lease attestation, and separately signed committed receipt. Missing or stale evidence fails closed. |
+
+The bootstrap quick artifact `260723-3a3` has the explicit high-assurance
+disposition `artifact_type_not_supported`. A held lease is not a signature, and
+passing `workflow:plan-proof` does not make the current PLAN signed. The
+deterministic/semantic quick contract remains active while governed high
+assurance stays opt-in for the supported phase artifact types above.
+
 ## Deterministic gate
 
 Run before a planner returns a plan and again independently inside plan checking:
@@ -45,7 +60,7 @@ For each proof command, the planner must state:
 4. the negative control for any migration, production, security, authorization, storage, runtime, ruleset, or release gate;
 5. why the command is read-only and does not rewrite timestamps, artifacts, generated docs, schema, caches, or runtime state.
 
-Prefer a tested script when a proof needs parsing, transactions, state machines, more than a short inline expression, or reuse in a second plan. Source-token presence is not behavioral proof unless the claim itself is only source presence.
+Prefer a tested script when a proof needs parsing, transactions, state machines, more than a short inline expression, or reuse in a second plan. Source-token presence is not behavioral proof unless the claim itself is only source presence. Quick plans do not enter the signed provenance path; use the optional high-assurance profile only for a supported phase artifact after its artifact type is accepted.
 
 ## Plan-checker contract
 
@@ -56,6 +71,13 @@ Proof-command safety: PASS | FAIL | HUMAN_DECISION_REQUIRED
 ```
 
 For every high-risk proof, the checker names at least one counterexample and explains whether the command rejects it. It also reviews any annotation as a semantic exception; annotation syntax only suppresses a deterministic heuristic and never self-approves the proof.
+
+For quick plans, the checker independently reports the lint-plus-semantic result
+and preserves `artifact_type_not_supported` as the high-assurance disposition;
+it must not invent a signed receipt or infer one from a writer lease. For a
+supported phase PLAN/SUMMARY/VERIFICATION artifact under explicit high
+assurance, it additionally verifies the source SHA, lease attestation, signed
+provenance, committed receipt, path identity, and exact payload correlation.
 
 ## Narrow annotations
 
@@ -72,10 +94,16 @@ Place an annotation at most three lines before the affected command. A rationale
 
 The semantic checker may still reject an annotated command. `allow-verify-mutation` is intended only for disposable fixture setup, never production, live storage, `.planning`, or accepted evidence.
 
-## Wiring and pause boundary
+## Wiring and activation boundary
 
 The project skill is `nutrition-planning-proof`. Both `gsd-planner` and `gsd-plan-checker` must bind exactly the single value `.codex/skills/nutrition-planning-proof`; extra, duplicate, or non-string role values fail closed. The read-only wiring check pins both `SKILL.md` and its delegated `docs/workflow/planning-proof.md` to their exact tracked `100644` blobs at real `HEAD`, requires both worktree files to remain mode `0644`, compares their SHA-256 values with `O_NOFOLLOW` worktree snapshots, and rereads source, config, and both file identities before returning. Any non-empty `GSD_WORKSTREAM` fails closed because a selected overlay could replace the root role bindings. Apply uses a config-digest CAS under the writer fence, reasserts holder/source/config/file evidence immediately before rename, and verifies the renamed config plus file/source evidence again before success. Node does not expose a directory-fd-relative compare-and-rename primitive, so a non-cooperating local process retains a narrow final path-swap race; the writer lease is the mandatory cooperative exclusion boundary. Artifact mutation additionally requires the lease-bound writer fence; PLAN/SUMMARY/VERIFICATION acceptance requires the approved source SHA to equal real `HEAD`, a valid path-identity-bound lease signature, and a separately signed committed off-checkout receipt.
 
 The state invariant checker likewise parses only an immutable, size-bounded two-pass snapshot. Duplicate canonical frontmatter keys, headings, progress sections, phase declarations, SUMMARY status keys, mismatched scalar quotes, unsafe integers, unknown active-phase tree entries, or planning files with off-tree hardlink aliases are errors. A ROADMAP `**Plans**: completed/total` numerator is bound to complete SUMMARY evidence and must stay within its denominator; it is not discarded as presentation prose. Its final source/tree readback includes device, inode, link count, timestamp, mode, size, and digest identity, so an in-place A→B→A restore is stale evidence rather than a pass. Closeout strict verification independently binds the same logical tree to a full identity-bearing freshness snapshot and rejects multi-link files, so replacing an artifact with identical bytes or changing it through an alias cannot pass as fresh.
 
-The active pause boundary forbids unapproved edits to the real `.planning/config.json`. The tracked wiring tool and scratch-config tests prepare the exact digest-bound change without applying it to frozen project state. Applying the binding to the real project remains a separate activation step requiring explicit current-thread authorization; proof tooling never grants that authority.
+Capability/skill binding is active: the read-only wiring check must keep both
+planner roles bound exactly to the tracked skill and delegated guidance. The
+signed governed entrypoint and high-assurance artifact profile remain deferred
+opt-in controls; a successful wiring check does not activate them and proof
+tooling never grants that authority. The project state is routed by the current
+`.planning/STATE.md` and the pinned GSD new-milestone query, not by a stale
+handoff document.
