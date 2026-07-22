@@ -4,12 +4,14 @@
 
 ### 變更
 
+- 修補 issue #134 新揭露的 runtime dependency advisories：將可由圖片上傳路徑觸及的 `sharp` 升至 `0.35.3`，並將 Fastify runtime 鏈上的 `fast-uri` 與 `brace-expansion` security resolutions 分別升至 `3.1.4`、`5.0.7`；既有 Drizzle 與 `form-data` defer 仍依 ADR 0009 明確保留。
 - 完成 Repository Integrity Remediation 的 126–128 三個 phase、15 個 plan，將使用者輸入、營養安全、狀態生命週期、metadata-only harness 證據與 source release boundary 收斂為可重跑的 deterministic contract。
 - 將 v3.5 的 readiness 明確限制在 committed source SHA 與 source/release checks；NC-COR-07、NC-COR-08、NC-CLI-01 保留為具體的 future follow-up，不把 NC-TST-02 或 NC-REL-03 誤列為已完成。
 - 保留 PR-ready → maintainer merge → post-merge local archive → separately approved runtime refresh 的發布順序；本次收尾不包含 `main` merge、tag、production runtime、Cloudflare Tunnel 或 public smoke。
 
 ### 驗證
 
+- Runtime advisory refresh：frozen install 與 dependency-path review 通過；`yarn native:check` 6/6、Fastify static／chat upload targeted integration 97/97 通過；`yarn deps:audit` 從 12 個 high rows 收斂至 ADR 0009 既有的 Drizzle／`form-data` 2 個 high defer。
 - Phase 126：6/6 requirements verified；Phase 127：15/15 success criteria passed；Phase 128：16/16 executed-scope criteria passed，25-entry disposition map 為 20 CLOSED / 3 DEFERRED / 2 OUT-OF-SCOPE。
 - `yarn workflow:state-check`、active planning artifact provenance/seal checks，以及 source wrap 後重新執行的 `yarn release:check` 共同綁定最終 committed source SHA；測試僅使用 mocked 或 harness providers，不宣稱 live-provider、Docker、production 或主觀視覺品質 readiness。
 
