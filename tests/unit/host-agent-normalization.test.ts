@@ -134,10 +134,12 @@ function createFixture({
     },
     dynamic_routing: {
       enabled: true,
+      escalate_on_failure: wrong,
       tier_models: { light: CANONICAL_MODEL, standard: CANONICAL_MODEL, heavy: wrong ? "gpt-5.6-sol" : CANONICAL_MODEL },
       provider_escalation: wrong ? ["gpt-5.6-sol"] : [CANONICAL_MODEL],
-      max_escalations: 1,
+      max_escalations: wrong ? 3 : 0,
     },
+    parallelization: { enabled: true, max_concurrent_agents: wrong ? 7 : 3, unrelated_parallel_key: "preserve" },
     effort: {
       default: wrong ? "high" : CANONICAL_EFFORT,
       routing_tier_defaults: { light: CANONICAL_EFFORT, standard: CANONICAL_EFFORT, heavy: wrong ? "high" : CANONICAL_EFFORT },
@@ -152,6 +154,7 @@ function createFixture({
     model_overrides: { "gsd-plan-checker": wrong ? "gpt-5.6-sol" : CANONICAL_MODEL },
     model_profile_overrides: { codex: { opus: { model: wrong ? "gpt-5.6-sol" : CANONICAL_MODEL, reasoning_effort: wrong ? "high" : CANONICAL_EFFORT } } },
     dynamic_routing: { enabled: true, tier_models: { heavy: wrong ? "gpt-5.6-sol" : CANONICAL_MODEL } },
+    parallelization: { enabled: true, max_concurrent_agents: wrong ? 7 : 3 },
     effort: { agent_overrides: { "gsd-plan-checker": wrong ? "high" : CANONICAL_EFFORT } },
     unknown_project_key: ["keep", { value: 7 }],
   }, null, 2));
@@ -202,6 +205,13 @@ describe("host GSD normalizer", () => {
     assert.equal(checked.ok, true, JSON.stringify(checked.errors));
     assert.deepEqual(JSON.parse(fs.readFileSync(fixture.paths.defaults, "utf8")).unknown_fixture_key, { untouched: true });
     assert.deepEqual(JSON.parse(fs.readFileSync(fixture.paths.projectConfig, "utf8")).unknown_project_key, ["keep", { value: 7 }]);
+    const defaults = JSON.parse(fs.readFileSync(fixture.paths.defaults, "utf8"));
+    const project = JSON.parse(fs.readFileSync(fixture.paths.projectConfig, "utf8"));
+    assert.equal(defaults.dynamic_routing.escalate_on_failure, false);
+    assert.equal(defaults.dynamic_routing.max_escalations, 0);
+    assert.equal(defaults.parallelization.max_concurrent_agents, 3);
+    assert.equal(defaults.parallelization.unrelated_parallel_key, "preserve");
+    assert.equal(project.parallelization.max_concurrent_agents, 3);
     assert.equal(fs.statSync(fixture.paths.config).mode & 0o777, 0o640);
     assert.equal(fs.statSync(fixture.paths.defaults).mode & 0o777, 0o600);
     assert.equal(fs.readFileSync(fixture.paths.globalPolicy, "utf8"), fs.readFileSync(fixture.paths.codexPolicy, "utf8"));

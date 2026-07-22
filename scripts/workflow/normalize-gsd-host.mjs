@@ -231,6 +231,10 @@ function normalizeResolverConfig(input) {
 
   if (isObject(config.dynamic_routing)) {
     const routing = config.dynamic_routing;
+    // A canonical model ladder must not silently become an automatic retry
+    // ladder after an update. Keep the resolver deterministic and bounded.
+    routing.escalate_on_failure = false;
+    routing.max_escalations = 0;
     if (isObject(routing.tier_models)) {
       for (const key of Object.keys(routing.tier_models)) routing.tier_models[key] = CANONICAL_MODEL;
     }
@@ -239,6 +243,12 @@ function normalizeResolverConfig(input) {
         typeof entry === "string" ? CANONICAL_MODEL : entry,
       );
     }
+  }
+
+  if (isObject(config.parallelization) && typeof config.parallelization.max_concurrent_agents === "number") {
+    config.parallelization.max_concurrent_agents = Math.min(config.parallelization.max_concurrent_agents, 3);
+  } else if (typeof config.max_concurrent_agents === "number") {
+    config.max_concurrent_agents = Math.min(config.max_concurrent_agents, 3);
   }
 
   if (isObject(config.model_profile_overrides)) {
