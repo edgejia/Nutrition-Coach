@@ -67,12 +67,16 @@ function createFixture({
   missingRole = false,
   extraRole = false,
   emptyPolicy = false,
+  omitEffort = false,
+  providerPolicy = false,
 }: {
   wrong?: boolean;
   managedDrift?: boolean;
   missingRole?: boolean;
   extraRole?: boolean;
   emptyPolicy?: boolean;
+  omitEffort?: boolean;
+  providerPolicy?: boolean;
 } = {}): Fixture {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "nutrition-gsd-host-normalizer-"));
   const codexHome = path.join(root, "codex");
@@ -148,6 +152,8 @@ function createFixture({
     },
     unknown_fixture_key: { untouched: true },
   };
+  if (omitEffort) delete defaults.effort;
+  if (providerPolicy) defaults.model_policy = { provider: "anthropic", budget: "high" };
   fs.writeFileSync(defaultsPath, JSON.stringify(defaults, null, 2), { mode: 0o600 });
   fs.writeFileSync(path.join(projectRoot, ".planning", "config.json"), JSON.stringify({
     runtime: "codex",
@@ -257,6 +263,42 @@ describe("host GSD normalizer", () => {
     assert.equal(applyResult.ok, false);
     assert.equal(digest(fixture.paths.config), beforeConfig);
     assert.equal(digest(fixture.paths.defaults), beforeDefaults);
+  });
+
+  test("materializes omitted effort and neutralizes provider model policy", async () => {
+    const fixture = createFixture({ wrong: false, omitEffort: true, providerPolicy: true });
+    fixtures.push(fixture);
+    const before = await typedCheckHost(fixture.options);
+    assert.equal(before.ok, false);
+    assert.ok(before.changedPaths.includes(fixture.paths.defaults));
+    const applied = await typedApplyHost(fixture.options);
+    assert.equal(applied.ok, true, JSON.stringify(applied.errors));
+    const defaults = JSON.parse(fs.readFileSync(fixture.paths.defaults, "utf8"));
+    assert.equal(defaults.effort.default, CANONICAL_EFFORT);
+    assert.deepEqual(defaults.effort.routing_tier_defaults, { light: CANONICAL_EFFORT, standard: CANONICAL_EFFORT, heavy: CANONICAL_EFFORT });
+    assert.equal(defaults.model_policy.provider, "custom");
+    assert.equal(defaults.model_policy.budget, undefined);
+    assert.deepEqual({ high: defaults.model_policy.high, medium: defaults.model_policy.medium, low: defaults.model_policy.low }, { high: CANONICAL_MODEL, medium: CANONICAL_MODEL, low: CANONICAL_MODEL });
+    assert.equal((await typedCheckHost(fixture.options)).ok, true);
+  });
+
+  test("rejects a symlinked parent and keeps all files unchanged on publication failure", async () => {
+    const fixture = createFixture();
+    fixtures.push(fixture);
+    const outside = path.join(fixture.root, "outside");
+    fs.mkdirSync(outside);
+    const linked = path.join(fixture.options.codexHome, "linked-codex");
+    fs.symlinkSync(outside, linked, "dir");
+    const linkedConfig = path.join(linked, "config.toml");
+    const symlinkResult = await typedCheckHost({ ...fixture.options, configPath: linkedConfig });
+    assert.equal(symlinkResult.ok, false);
+    assert.ok(symlinkResult.errors.some((error) => error.code.includes("target_parent_unsafe")));
+
+    const before = Object.fromEntries(Object.values(fixture.paths).map((filePath) => [filePath, digest(filePath)]));
+    const injected = await typedApplyHost({ ...fixture.options, __testFailAfterPublication: "1" });
+    assert.equal(injected.ok, false);
+    assert.ok(injected.errors.some((error) => error.code === "injected_publication_failure"));
+    assert.deepEqual(Object.fromEntries(Object.values(fixture.paths).map((filePath) => [filePath, digest(filePath)])), before);
   });
 
   test("the fixture-only contract does not mutate real home or project planning files", async () => {

@@ -157,6 +157,88 @@ async function readJson(filePath, codePrefix) {
   return { ...snapshot, parsed };
 }
 
+function isWithin(root, target) {
+  const relative = path.relative(path.resolve(root), path.resolve(target));
+  return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
+}
+
+function rootEntries(options) {
+  return [
+    { path: options.configPath, root: options.codexHome, code: "codex_config" },
+    { path: options.globalAgentsPath, root: options.agentsHome, code: "global_policy" },
+    { path: options.codexAgentsPath, root: options.codexHome, code: "codex_policy" },
+    { path: options.globalAgentsDir, root: options.codexHome, code: "global_agents" },
+    { path: options.managedManifestPath, root: options.codexHome, code: "managed_manifest" },
+    { path: options.managedSkillsRoot, root: options.agentsHome, code: "managed_skills" },
+    { path: options.projectConfigPath, root: options.projectRoot, code: "project_config" },
+    { path: options.repoAgentsDir, root: options.projectRoot, code: "repo_agents" },
+    { path: options.defaultsPath, root: path.dirname(options.codexHome), code: "gsd_defaults", expected: path.join(path.dirname(options.codexHome), ".gsd", "defaults.json") },
+  ];
+}
+
+function rootForTarget(options, target) {
+  const resolvedTarget = path.resolve(target);
+  const defaultsEntry = rootEntries(options).find((entry) => entry.code === "gsd_defaults");
+  if (defaultsEntry && resolvedTarget === path.resolve(defaultsEntry.expected)) return defaultsEntry.root;
+  const entry = rootEntries(options).find((candidate) => path.resolve(candidate.path) === resolvedTarget || isWithin(candidate.root, resolvedTarget));
+  return entry?.root;
+}
+
+async function assertPhysicalAncestors(target, root) {
+  const resolvedRoot = path.resolve(root);
+  const resolvedTarget = path.resolve(target);
+  if (!isWithin(resolvedRoot, resolvedTarget)) throw new Error(`target_outside_root:${resolvedTarget}`);
+  let rootStat;
+  try {
+    rootStat = await fs.lstat(resolvedRoot);
+  } catch (error) {
+    if (error?.code === "ENOENT") throw new Error(`target_root_missing:${resolvedRoot}`);
+    throw new Error(`target_root_unreadable:${resolvedRoot}`);
+  }
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error(`target_root_unsafe:${resolvedRoot}`);
+
+  const parent = path.dirname(resolvedTarget);
+  const relativeParent = path.relative(resolvedRoot, parent);
+  let current = resolvedRoot;
+  for (const part of relativeParent ? relativeParent.split(path.sep) : []) {
+    current = path.join(current, part);
+    let stat;
+    try {
+      stat = await fs.lstat(current);
+    } catch (error) {
+      if (error?.code === "ENOENT") throw new Error(`target_parent_missing:${current}`);
+      throw new Error(`target_parent_unreadable:${current}`);
+    }
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(`target_parent_unsafe:${current}`);
+  }
+  const parentStat = await fs.lstat(parent);
+  if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) throw new Error(`target_parent_unsafe:${parent}`);
+  return { parent, parentStat };
+}
+
+async function validateConfiguredPaths(options) {
+  const errors = [];
+  for (const entry of rootEntries(options)) {
+    try {
+      if (entry.expected && path.resolve(entry.path) !== path.resolve(entry.expected)) {
+        throw new Error(`target_outside_root:${path.resolve(entry.path)}`);
+      }
+      await assertPhysicalAncestors(entry.path, entry.root);
+    } catch (error) {
+      errors.push(errorRecord(error instanceof Error ? error.message : String(error), entry.path));
+    }
+  }
+  return errors;
+}
+
+function sameIdentity(left, right) {
+  return left && right && left.dev === right.dev && left.ino === right.ino && left.nlink === right.nlink && left.mode === right.mode;
+}
+
+function samePathIdentity(left, right) {
+  return left && right && left.dev === right.dev && left.ino === right.ino;
+}
+
 function parseTomlScalar(raw, key) {
   const match = raw.match(new RegExp(`^\\s*${key.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}\\s*=\\s*([\\\"'])(.*?)\\1\\s*(?:#.*)?$`, "m"));
   return match ? match[2] : undefined;
@@ -262,42 +344,26 @@ function normalizeResolverConfig(input) {
     }
   }
 
-  if (isObject(config.effort)) {
-    config.effort.default = CANONICAL_EFFORT;
-    if (isObject(config.effort.routing_tier_defaults)) {
-      for (const tier of Object.keys(config.effort.routing_tier_defaults)) {
-        config.effort.routing_tier_defaults[tier] = CANONICAL_EFFORT;
-      }
-    } else {
-      config.effort.routing_tier_defaults = {
-        light: CANONICAL_EFFORT,
-        standard: CANONICAL_EFFORT,
-        heavy: CANONICAL_EFFORT,
-      };
-    }
-    if (isObject(config.effort.agent_overrides)) {
-      for (const agent of Object.keys(config.effort.agent_overrides)) {
-        config.effort.agent_overrides[agent] = CANONICAL_EFFORT;
-      }
-    } else {
-      config.effort.agent_overrides = {};
-    }
-  }
+  const effort = isObject(config.effort) ? config.effort : {};
+  effort.default = CANONICAL_EFFORT;
+  const routingTiers = isObject(effort.routing_tier_defaults) ? effort.routing_tier_defaults : {};
+  for (const tier of ["light", "standard", "heavy", ...Object.keys(routingTiers)]) routingTiers[tier] = CANONICAL_EFFORT;
+  effort.routing_tier_defaults = routingTiers;
+  const agentOverrides = isObject(effort.agent_overrides) ? effort.agent_overrides : {};
+  for (const agent of ALL_ROLES) agentOverrides[agent] = CANONICAL_EFFORT;
+  effort.agent_overrides = agentOverrides;
+  config.effort = effort;
 
   // model_policy is an alternate resolver path in the installed GSD model
-  // resolver. Only model-bearing policy fields are changed; provider/budget and
-  // arbitrary policy metadata remain untouched.
+  // resolver. Force a provider-neutral custom policy so a future provider/budget
+  // preset cannot select a non-Luna model before the runtime-tier fallback.
   if (isObject(config.model_policy)) {
-    for (const key of ["high", "medium", "low"]) {
-      if (Object.hasOwn(config.model_policy, key)) config.model_policy[key] = CANONICAL_MODEL;
-    }
-    if (isObject(config.model_policy.runtime_tiers)) {
-      for (const runtime of Object.keys(config.model_policy.runtime_tiers)) {
-        const tiers = config.model_policy.runtime_tiers[runtime];
-        if (!isObject(tiers)) continue;
-        for (const tier of Object.keys(tiers)) tiers[tier] = normalizeModelProfileEntry(tiers[tier]);
-      }
-    }
+    config.model_policy.provider = "custom";
+    config.model_policy.high = CANONICAL_MODEL;
+    config.model_policy.medium = CANONICAL_MODEL;
+    config.model_policy.low = CANONICAL_MODEL;
+    delete config.model_policy.budget;
+    delete config.model_policy.runtime_tiers;
   }
 
   return config;
@@ -485,6 +551,7 @@ async function inspectHost(rawOptions = {}) {
   ];
   const changes = [];
   const errors = [];
+  errors.push(...await validateConfiguredPaths(options));
 
   let configSnapshot;
   try {
@@ -574,24 +641,80 @@ async function inspectHost(rawOptions = {}) {
   return { options, ...resultFor(options, rawOptions.mode || "check", checkedPaths, changes, errors, managed), changes };
 }
 
-async function atomicApply(changes) {
+async function atomicApply(changes, options, testFailAfterPublication = null) {
   const staged = [];
+  const published = [];
   try {
     for (const change of changes) {
-      const current = await readRegular(change.path, "apply_target").catch((error) => {
-        if (change.raw.length === 0 && error.message === "apply_target_missing") return { raw: Buffer.alloc(0), mode: change.mode, digest: sha256(Buffer.alloc(0)) };
-        throw error;
-      });
+      const root = rootForTarget(options, change.path);
+      if (!root) throw new Error(`apply_target_outside_root:${change.path}`);
+      const { parent, parentStat } = await assertPhysicalAncestors(change.path, root);
+      let current = null;
+      let targetStat = null;
+      try {
+        targetStat = await fs.lstat(change.path);
+        if (targetStat.isSymbolicLink() || !targetStat.isFile()) throw new Error(`apply_target_unsafe:${change.path}`);
+        current = await readRegular(change.path, "apply_target");
+      } catch (error) {
+        if (error?.code === "ENOENT" || error?.message === "apply_target_missing") {
+          current = { raw: Buffer.alloc(0), mode: change.mode, digest: sha256(Buffer.alloc(0)) };
+          targetStat = null;
+        } else {
+          throw error;
+        }
+      }
       if (!current.raw.equals(change.raw)) throw new Error(`apply_target_changed:${change.path}`);
-      const parent = path.dirname(change.path);
       const temp = path.join(parent, `.${path.basename(change.path)}.normalize-${process.pid}-${randomUUID()}`);
+      const backup = path.join(parent, `.${path.basename(change.path)}.normalize-backup-${process.pid}-${randomUUID()}`);
       await fs.writeFile(temp, change.next, { mode: change.mode, flag: "wx" });
       await fs.chmod(temp, change.mode);
-      staged.push({ temp, target: change.path });
+      staged.push({ temp, backup, target: change.path, parent, parentStat, targetStat, current, change });
     }
-    for (const item of staged) await fs.rename(item.temp, item.target);
+    for (const item of staged) {
+      const parentNow = await fs.lstat(item.parent);
+      if (!samePathIdentity(parentNow, item.parentStat)) throw new Error(`apply_parent_changed:${item.parent}`);
+      let targetNow = null;
+      try {
+        targetNow = await fs.lstat(item.target);
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
+      }
+      if (item.targetStat ? !sameIdentity(targetNow, item.targetStat) : targetNow) {
+        throw new Error(`apply_target_changed:${item.target}`);
+      }
+      if (item.targetStat) {
+        await fs.copyFile(item.target, item.backup);
+        await fs.chmod(item.backup, item.current.mode);
+      }
+      await fs.rename(item.temp, item.target);
+      published.push(item);
+      if (testFailAfterPublication && published.length >= Number(testFailAfterPublication)) {
+        throw new Error("injected_publication_failure");
+      }
+    }
+  } catch (error) {
+    let rollbackFailed = false;
+    for (const item of [...published].reverse()) {
+      try {
+        const parentNow = await fs.lstat(item.parent);
+        if (!samePathIdentity(parentNow, item.parentStat)) throw new Error(`rollback_parent_changed:${item.parent}`);
+        const targetNow = await fs.lstat(item.target);
+        if (targetNow.isSymbolicLink() || !targetNow.isFile()) throw new Error(`rollback_target_unsafe:${item.target}`);
+        const next = await fs.readFile(item.target);
+        if (!next.equals(item.change.next)) throw new Error(`rollback_target_changed:${item.target}`);
+        if (item.targetStat) {
+          await fs.rename(item.backup, item.target);
+        } else {
+          await fs.unlink(item.target);
+        }
+      } catch {
+        rollbackFailed = true;
+      }
+    }
+    if (rollbackFailed) throw new Error(`apply_reconciliation_required:${error instanceof Error ? error.message : String(error)}`);
+    throw error;
   } finally {
-    await Promise.all(staged.map((item) => fs.unlink(item.temp).catch(() => undefined)));
+    await Promise.all(staged.flatMap((item) => [item.temp, item.backup]).map((filePath) => fs.unlink(filePath).catch(() => undefined)));
   }
 }
 
@@ -605,9 +728,22 @@ async function refreshGlobalAgentBakeMtimes(options) {
   const newestConfigMtime = Math.max(...configStats.map((stat) => stat.mtimeMs));
   const bakedAt = new Date(Math.max(Date.now(), Math.ceil(newestConfigMtime) + 1));
   for (const agentPath of agentPaths) {
+    const root = rootForTarget(options, agentPath);
+    if (!root) throw new Error(`agent_file_outside_root:${agentPath}`);
+    await assertPhysicalAncestors(agentPath, root);
     const stat = await fs.lstat(agentPath);
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`agent_file_unsafe:${agentPath}`);
-    await fs.utimes(agentPath, stat.atime, bakedAt);
+    const noFollow = fs.constants.O_NOFOLLOW ?? 0;
+    const handle = await fs.open(agentPath, fs.constants.O_RDONLY | noFollow);
+    try {
+      const opened = await handle.stat();
+      if (!sameIdentity(opened, stat)) throw new Error(`agent_file_changed:${agentPath}`);
+      await handle.utimes(stat.atime, bakedAt);
+    } finally {
+      await handle.close();
+    }
+    const after = await fs.lstat(agentPath);
+    if (!sameIdentity(after, stat)) throw new Error(`agent_file_changed:${agentPath}`);
   }
   return agentPaths;
 }
@@ -616,7 +752,16 @@ export async function normalizeGsdHost(rawOptions = {}) {
   const mode = rawOptions.mode === "apply" ? "apply" : "check";
   const inspected = await inspectHost({ ...rawOptions, mode });
   if (mode === "apply" && inspected.ok) {
-    if (inspected.changes.length > 0) await atomicApply(inspected.changes);
+    try {
+      if (inspected.changes.length > 0) await atomicApply(inspected.changes, inspected.options, rawOptions.__testFailAfterPublication);
+    } catch (error) {
+      const { changes: _changes, ...failedResult } = inspected;
+      return {
+        ...failedResult,
+        ok: false,
+        errors: [...failedResult.errors, errorRecord(error instanceof Error ? error.message.split(":", 1)[0] : "apply_failed", "publication")],
+      };
+    }
     // Codex uses statically baked agent TOMLs. Refresh every validated global
     // agent after the resolver/config CAS so GSD's stale-bake guard records
     // this normalization as the bake boundary even when an agent's bytes were
@@ -625,7 +770,7 @@ export async function normalizeGsdHost(rawOptions = {}) {
     // Re-read the complete surface, including every manifest-backed managed
     // adapter, after publication. A concurrent update must be reported rather
     // than mistaken for a successful normalization.
-    const postApply = await inspectHost({ ...rawOptions, mode });
+    const postApply = await inspectHost({ ...rawOptions, mode: "check" });
     const { changes: _postChanges, ...postPublicResult } = postApply;
     return {
       ...postPublicResult,
