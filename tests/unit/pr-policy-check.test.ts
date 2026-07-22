@@ -98,8 +98,8 @@ function runPrPolicy(fixture: PolicyFixture, options: PolicyRunOptions = {}) {
   };
 }
 
-function runFileOnlyPolicy(cwd: string) {
-  const result = spawnSync(process.execPath, [policyScriptPath, "--allow-no-pr", "--base=HEAD"], {
+function runFileOnlyPolicy(cwd: string, base = "HEAD") {
+  const result = spawnSync(process.execPath, [policyScriptPath, "--allow-no-pr", `--base=${base}`], {
     cwd,
     env: policyEnvironment(),
     encoding: "utf8",
@@ -153,6 +153,48 @@ describe("pr policy gate", () => {
 
     assert.notEqual(result.status, 0);
     assert.match(result.output, /must link at least one GitHub issue/);
+  });
+
+  test("allows a full issue URL only when it targets the event repository", () => {
+    const result = runPrPolicy({
+      title: "feat: add tracker",
+      body: "Closes https://github.com/edgejia/Nutrition-Coach/issues/123",
+      labels: ["no-changelog"],
+      issues: {
+        123: { title: "Feature tracker", labels: ["feature-request", "approved-feature"] },
+      },
+    });
+
+    assert.equal(result.status, 0, result.output);
+    assert.match(result.output, /Linked issue\(s\): #123/);
+  });
+
+  test("rejects an external issue URL even when its number has an approved local fixture", () => {
+    const result = runPrPolicy({
+      title: "feat: add tracker",
+      body: "Closes https://github.com/another-owner/another-repo/issues/123",
+      labels: ["no-changelog"],
+      issues: {
+        123: { title: "Feature tracker", labels: ["feature-request", "approved-feature"] },
+      },
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.output, /targets an external repository/);
+  });
+
+  test("rejects pull-request URLs as tracker references", () => {
+    const result = runPrPolicy({
+      title: "feat: add tracker",
+      body: "Closes https://github.com/edgejia/Nutrition-Coach/pull/123",
+      labels: ["no-changelog"],
+      issues: {
+        123: { title: "Feature tracker", labels: ["feature-request", "approved-feature"] },
+      },
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.output, /targets a pull request/);
   });
 
   test("allows ignored files that remain untracked in file-only mode", () => {
@@ -213,6 +255,44 @@ describe("pr policy gate", () => {
 
       assert.equal(result.status, 0, result.output);
       assert.match(result.output, /\[pr-policy\] PASS/);
+    });
+  });
+
+  test("fails closed when the merge-base cannot be computed", () => {
+    withTemporaryGitRepo((repoDir) => {
+      const result = runFileOnlyPolicy(repoDir, "missing-base-ref");
+
+      assert.notEqual(result.status, 0);
+      assert.match(result.output, /merge-base|missing-base-ref/);
+      assert.doesNotMatch(result.output, /\[pr-policy\] PASS/);
+    });
+  });
+
+  test("includes deleted paths when checking the complete diff", () => {
+    withTemporaryGitRepo((repoDir) => {
+      const forbiddenPath = path.join(repoDir, ".planning", "deleted.md");
+      fs.mkdirSync(path.dirname(forbiddenPath), { recursive: true });
+      fs.writeFileSync(forbiddenPath, "local planning state\n");
+      runCommand("git", ["add", ".planning/deleted.md"], repoDir);
+      runCommand("git", ["commit", "--quiet", "-m", "add planning fixture"], repoDir);
+      const base = spawnSync("git", ["rev-parse", "HEAD"], { cwd: repoDir, encoding: "utf8" }).stdout.trim();
+
+      fs.rmSync(forbiddenPath);
+      runCommand("git", ["add", "-u", ".planning/deleted.md"], repoDir);
+      runCommand("git", ["commit", "--quiet", "-m", "delete planning fixture"], repoDir);
+
+      const result = runPrPolicy(
+        {
+          title: "chore: remove local planning fixture",
+          body: "Closes #123",
+          labels: ["no-changelog"],
+          issues: { 123: { title: "Maintenance", labels: [] } },
+        },
+        { cwd: repoDir, args: [`--base=${base}`] },
+      );
+
+      assert.notEqual(result.status, 0);
+      assert.match(result.output, /\.planning\/\*\* local GSD state/);
     });
   });
 });

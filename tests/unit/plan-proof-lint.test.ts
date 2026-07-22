@@ -96,6 +96,20 @@ describe("plan proof linter", () => {
     assert.ok(ruleIds(result).has("PPL006"));
   });
 
+  it("registers the DB-query safety suite as an exact negative control", () => {
+    const result = lintPlanProof(`
+<task type="auto">
+  <name>Database query boundary</name>
+  <action>Prove the database read-only boundary.</action>
+  <verify><automated>
+    node --import tsx --test tests/unit/db-query-safety.test.ts
+  </automated></verify>
+</task>
+`);
+    assert.equal(result.status, "pass");
+    assert.deepEqual(result.findings, []);
+  });
+
   it("does not accept verification tags inside Markdown fences or HTML comments", () => {
     assert.deepEqual(ruleIds(lint("bad-fenced-comment-tags.md")), new Set(["PPL008"]));
     assert.deepEqual(ruleIds(lint("bad-short-fence-close.md")), new Set(["PPL008"]));

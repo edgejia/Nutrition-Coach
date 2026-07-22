@@ -55,7 +55,10 @@ function parseRepo(event) {
     throw new Error("Unable to determine GitHub repository.");
   }
 
-  const [owner, repo] = fullName.split("/");
+  const [owner, repo, ...extra] = fullName.split("/");
+  if (!owner || !repo || extra.length > 0) {
+    throw new Error("Unable to determine GitHub repository owner/repository.");
+  }
   return { owner, repo, fullName };
 }
 
@@ -86,29 +89,44 @@ function listTrackedIgnoredFiles() {
 }
 
 function listChangedFilesFromGit(baseRef) {
-  try {
-    const mergeBase = runGit(["merge-base", "HEAD", baseRef]);
-    return runGit(["diff", "--name-only", "--diff-filter=ACMR", `${mergeBase}..HEAD`])
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean);
-  } catch {
-    return [];
-  }
+  const mergeBase = runGit(["merge-base", "HEAD", baseRef]);
+  return runGit(["diff", "--name-only", "--diff-filter=ACMRD", `${mergeBase}..HEAD`])
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
 }
 
-function parseLinkedIssueNumbers(text) {
+function parseLinkedIssueReferences(text, repository) {
   const numbers = new Set();
+  const errors = [];
   const body = text || "";
   const closingPattern =
-    /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+(?:https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/issues\/)?#?(\d+)\b/gi;
+    /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+(?:(https:\/\/github\.com\/([^/\s]+)\/([^/\s]+)\/(issues|pulls?)\/(\d+))|#?(\d+))\b/gi;
 
   let match;
   while ((match = closingPattern.exec(body)) !== null) {
-    numbers.add(Number(match[1]));
+    const [, url, owner, repo, targetType, urlNumber, bareNumber] = match;
+    if (!url) {
+      numbers.add(Number(bareNumber));
+      continue;
+    }
+
+    const sameRepository =
+      repository &&
+      owner.toLowerCase() === repository.owner.toLowerCase() &&
+      repo.toLowerCase() === repository.repo.toLowerCase();
+    if (!sameRepository) {
+      errors.push(`Issue URL ${url} targets an external repository; use ${repository.fullName}.`);
+      continue;
+    }
+    if (targetType.toLowerCase().startsWith("pull")) {
+      errors.push(`${url} targets a pull request; linked references must target an issue.`);
+      continue;
+    }
+    numbers.add(Number(urlNumber));
   }
 
-  return [...numbers].sort((a, b) => a - b);
+  return { numbers: [...numbers].sort((a, b) => a - b), errors };
 }
 
 function offlineIssues() {
@@ -281,7 +299,9 @@ async function main() {
 
   const repo = parseRepo(event);
   const body = pr.body || "";
-  const linkedNumbers = parseLinkedIssueNumbers(`${pr.title || ""}\n${body}`);
+  const linkedReferences = parseLinkedIssueReferences(`${pr.title || ""}\n${body}`, repo);
+  const linkedNumbers = linkedReferences.numbers;
+  errors.push(...linkedReferences.errors);
   if (linkedNumbers.length === 0) {
     errors.push("PR body/title must link at least one GitHub issue (for example: Closes #123).");
   }

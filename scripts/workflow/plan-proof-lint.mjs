@@ -22,6 +22,7 @@ const READ_ONLY_NODE_CHECKERS = new Set([
   "scripts/workflow/state-check.mjs",
 ]);
 const NEGATIVE_CONTROL_TEST_FILES = new Set([
+  "tests/unit/db-query-safety.test.ts",
   "tests/integration/production-recovery-rehearsal.test.ts",
   "tests/unit/plan-proof-lint.test.ts",
   "tests/integration/phase-126-proposal-negative-controls.test.ts",
