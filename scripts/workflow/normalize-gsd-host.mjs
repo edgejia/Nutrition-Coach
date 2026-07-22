@@ -734,14 +734,19 @@ async function refreshGlobalAgentBakeMtimes(options) {
   for (const agentPath of agentPaths) {
     const root = rootForTarget(options, agentPath);
     if (!root) throw new Error(`agent_file_outside_root:${agentPath}`);
-    await assertPhysicalAncestors(agentPath, root);
+    const { parent, parentStat } = await assertPhysicalAncestors(agentPath, root);
     const stat = await fs.lstat(agentPath);
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`agent_file_unsafe:${agentPath}`);
+    const canonicalRoot = await fs.realpath(root);
+    const canonicalAgentPath = await fs.realpath(agentPath);
+    if (!isWithin(canonicalRoot, canonicalAgentPath)) throw new Error(`agent_file_outside_root:${agentPath}`);
     const noFollow = fs.constants.O_NOFOLLOW ?? 0;
-    const handle = await fs.open(agentPath, fs.constants.O_RDONLY | noFollow);
+    const handle = await fs.open(canonicalAgentPath, fs.constants.O_RDONLY | noFollow);
     try {
       const opened = await handle.stat();
       if (!sameIdentity(opened, stat)) throw new Error(`agent_file_changed:${agentPath}`);
+      const parentBefore = await fs.lstat(parent);
+      if (!samePathIdentity(parentBefore, parentStat)) throw new Error(`agent_file_parent_changed:${agentPath}`);
       await handle.utimes(stat.atime, bakedAt);
     } finally {
       await handle.close();
