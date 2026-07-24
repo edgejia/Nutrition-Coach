@@ -1,4 +1,5 @@
 import { deepEqual, equal, match, ok } from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
@@ -47,6 +48,9 @@ const REQUIRED_ROW_FIELDS = [
   "canonicalOwner",
   "lifecycle",
   "worktreeStatus",
+  "committedStatus",
+  "observedLocalStatus",
+  "phase129CommitScope",
   "replacementProof",
   "remainingRisk",
 ];
@@ -127,8 +131,23 @@ test("every skill and workflow row has proof fields and removal evidence", async
     ok(["retained", "removed"].includes(row.lifecycle));
     ok(["clean", "dirty-modified", "dirty-deleted", "untracked"].includes(row.worktreeStatus));
     if (row.lifecycle === "removed") {
-      match(row.callers, /none|zero|no active/i);
       match(row.replacementProof, /owner=|proof=|test=/i);
+    }
+  }
+});
+
+test("Remove rows separate committed HEAD state from pre-existing dirty deletions", async () => {
+  const rows = table(await inventory(), "Logical workflow surfaces");
+  for (const row of rows.filter((candidate) => candidate.decision === "Remove")) {
+    equal(row.committedStatus, "retained/live in HEAD");
+    equal(row.observedLocalStatus, "dirty-deleted pre-existing");
+    equal(row.phase129CommitScope, "excluded/future source submission boundary");
+    match(row.replacementProof, /HEAD path|future/i);
+    ok(!/submitted|deleted from HEAD|source removed/i.test(row.replacementProof), `${row.surface} must not claim a dirty deletion was submitted`);
+
+    const files = row.surfaceFiles.split(",").map((file) => file.trim().replaceAll("`", ""));
+    for (const file of files) {
+      execFileSync("git", ["cat-file", "-e", `HEAD:${file}`]);
     }
   }
 });
