@@ -162,7 +162,7 @@ describe("pr policy gate", () => {
     try {
       const result = await runPrPolicyAsync(
         {
-          title: "chore: large policy fixture",
+          title: "[Chore] large policy fixture",
           body: "Closes #123",
           labels: ["no-changelog"],
           issues: { 123: { title: "Maintenance", labels: [] } },
@@ -184,7 +184,7 @@ describe("pr policy gate", () => {
 
   test("passes when a feature PR closes an approved feature issue", () => {
     const result = runPrPolicy({
-      title: "feat: add tracker",
+      title: "[Feature] add tracker",
       body: "Closes #123",
       labels: ["no-changelog"],
       issues: {
@@ -197,9 +197,39 @@ describe("pr policy gate", () => {
     assert.match(result.output, /\[pr-policy\] PASS/);
   });
 
+  test("rejects a markerless PR even when the linked issue is typed and ready", () => {
+    const result = runPrPolicy({
+      title: "misc docs",
+      body: "Closes #123",
+      labels: ["no-changelog"],
+      issues: {
+        123: { title: "Maintenance", labels: ["type: chore", "ready-for-pr"] },
+      },
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.output, /exactly one request marker/);
+    assert.doesNotMatch(result.output, /\[pr-policy\] PASS/);
+  });
+
+  test("rejects a PR with more than one request marker", () => {
+    const result = runPrPolicy({
+      title: "[Feature] [Bug] mixed request",
+      body: "Closes #123",
+      labels: ["no-changelog"],
+      issues: {
+        123: { title: "Mixed request", labels: ["ready-for-pr", "feature-request", "approved-feature", "bug", "confirmed-bug"] },
+      },
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.output, /exactly one request marker/);
+    assert.doesNotMatch(result.output, /\[pr-policy\] PASS/);
+  });
+
   test("requires issue-side ready-for-pr on the linked issue", () => {
     const result = runPrPolicy({
-      title: "feat: add tracker",
+      title: "[Feature] add tracker",
       body: "Closes #123",
       labels: ["no-changelog"],
       issues: {
@@ -400,7 +430,7 @@ describe("pr policy gate", () => {
 
   test("rejects feature approval labels that are only on the PR", () => {
     const result = runPrPolicy({
-      title: "feat: add tracker",
+      title: "[Feature] add tracker",
       body: "Closes #123",
       labels: ["approved-feature", "no-changelog"],
       issues: {
@@ -414,7 +444,7 @@ describe("pr policy gate", () => {
 
   test("rejects non-closing issue references", () => {
     const result = runPrPolicy({
-      title: "feat: add tracker",
+      title: "[Feature] add tracker",
       body: "Refs #123",
       labels: ["no-changelog"],
       issues: {
@@ -428,7 +458,7 @@ describe("pr policy gate", () => {
 
   test("allows a full issue URL only when it targets the event repository", () => {
     const result = runPrPolicy({
-      title: "feat: add tracker",
+      title: "[Feature] add tracker",
       body: "Closes https://github.com/edgejia/Nutrition-Coach/issues/123",
       labels: ["no-changelog"],
       issues: {
@@ -442,7 +472,7 @@ describe("pr policy gate", () => {
 
   test("rejects an external issue URL even when its number has an approved local fixture", () => {
     const result = runPrPolicy({
-      title: "feat: add tracker",
+      title: "[Feature] add tracker",
       body: "Closes https://github.com/another-owner/another-repo/issues/123",
       labels: ["no-changelog"],
       issues: {
@@ -456,7 +486,7 @@ describe("pr policy gate", () => {
 
   test("rejects pull-request URLs as tracker references", () => {
     const result = runPrPolicy({
-      title: "feat: add tracker",
+      title: "[Feature] add tracker",
       body: "Closes https://github.com/edgejia/Nutrition-Coach/pull/123",
       labels: ["no-changelog"],
       issues: {
@@ -501,7 +531,7 @@ describe("pr policy gate", () => {
 
       const result = runPrPolicy(
         {
-          title: "feat: add tracker",
+          title: "[Feature] add tracker",
           body: "Closes #123",
           labels: ["no-changelog"],
           issues: {
@@ -554,7 +584,7 @@ describe("pr policy gate", () => {
 
       const result = runPrPolicy(
         {
-          title: "chore: remove local planning fixture",
+          title: "[Chore] remove local planning fixture",
           body: "Closes #123",
           labels: ["no-changelog"],
           issues: { 123: { title: "Maintenance", labels: [] } },

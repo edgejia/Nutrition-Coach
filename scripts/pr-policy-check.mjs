@@ -231,37 +231,9 @@ async function fetchIssues(repo, numbers) {
   return issues;
 }
 
-function inferPrKinds({ title, body, issueLabels }) {
+function requestMarkers({ title, body }) {
   const text = `${title || ""}\n${body || ""}`;
-  const kinds = new Set();
-
-  if (/##\s*Feature PR/i.test(text) || /\[Feature\]/i.test(text) || /^\s*feat(?:\(|:|\s)/i.test(title || "")) {
-    kinds.add("feature");
-  }
-  if (/##\s*Enhancement PR/i.test(text) || /\[Enhancement\]/i.test(text)) {
-    kinds.add("enhancement");
-  }
-  if (/##\s*Fix PR/i.test(text) || /\[Bug\]/i.test(text) || /^\s*fix(?:\(|:|\s)/i.test(title || "")) {
-    kinds.add("fix");
-  }
-  if (/##\s*Chore PR/i.test(text) || /\[Chore\]/i.test(text) || /^\s*chore(?:\(|:|\s)/i.test(title || "")) {
-    kinds.add("chore");
-  }
-
-  if (issueLabels.has("feature-request")) {
-    kinds.add("feature");
-  }
-  if (issueLabels.has("enhancement")) {
-    kinds.add("enhancement");
-  }
-  if (issueLabels.has("bug")) {
-    kinds.add("fix");
-  }
-  if (issueLabels.has("type: chore")) {
-    kinds.add("chore");
-  }
-
-  return kinds;
+  return [...text.matchAll(/\[(Feature|Enhancement|Bug|Chore)\]/gi)].map((match) => match[1].toLowerCase() === "bug" ? "fix" : match[1].toLowerCase());
 }
 
 function hasAnyLabel(labels, names) {
@@ -336,8 +308,13 @@ async function main() {
   }
 
   const prLabels = labelsFrom(pr.labels || []);
-  const issueLabels = new Set(issues.flatMap((issue) => issue.labels));
-  const kinds = inferPrKinds({ title: pr.title, body, issueLabels });
+  const markers = requestMarkers({ title: pr.title, body });
+  if (markers.length !== 1) {
+    errors.push("PR title/body must contain exactly one request marker: [Feature], [Enhancement], [Bug], or [Chore].");
+  }
+  // Request kind comes only from the single structured marker. Issue labels
+  // remain same-issue approval evidence and can never silently infer a kind.
+  const kinds = new Set(markers.length === 1 ? markers : []);
 
   const requiredByKind = {
     feature: { type: "feature-request", approval: "approved-feature" },
