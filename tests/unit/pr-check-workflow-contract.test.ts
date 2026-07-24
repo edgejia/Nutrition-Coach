@@ -4,7 +4,6 @@ import fs from "node:fs/promises";
 
 const workflowUrl = new URL("../../.github/workflows/pr-check.yml", import.meta.url);
 const manualWorkflowUrl = new URL("../../.github/workflows/manual-release-diagnostic.yml", import.meta.url);
-const releaseCheckUrl = new URL("../../scripts/release-check.mjs", import.meta.url);
 
 describe("PR Check workflow enforcement contract", () => {
   it("keeps the required PR context unreachable from manual dispatch", async () => {
@@ -30,15 +29,13 @@ describe("PR Check workflow enforcement contract", () => {
     assert.equal(sources.match(/yarn release:check --base="origin\/\$\{RELEASE_BASE_REF\}"/g)?.length, 2);
   });
 
-  it("documents timeout observability without weakening release proof", async () => {
-    const releaseCheck = await fs.readFile(releaseCheckUrl, "utf8");
-    assert.match(releaseCheck, /MAX_RELEASE_DURATION_MS = 18 \* 60 \* 1000/);
-    assert.match(releaseCheck, /signalChildGroup\(child, "SIGTERM"\)/);
-    assert.match(releaseCheck, /signalChildGroup\(child, "SIGKILL"\)/);
-    assert.match(releaseCheck, /completed child left a live process group/);
-    assert.match(releaseCheck, /publishPassedCommandReceipt/);
-    assert.match(releaseCheck, /testHook: \(stage\) => \{\n\s+if \(stage === "before_receipt_commit_cas"\) assertWithinReleaseDeadline\(\);/);
-    assert.match(releaseCheck, /console\.log\("\\n\[release-check\] PASS"\)/);
-
+  it("keeps each workflow's release diagnostics bounded to one gate invocation", async () => {
+    const source = await fs.readFile(workflowUrl, "utf8");
+    const manual = await fs.readFile(manualWorkflowUrl, "utf8");
+    for (const workflow of [source, manual]) {
+      assert.equal(workflow.match(/yarn release:check --base="origin\/\$\{RELEASE_BASE_REF\}"/g)?.length, 1);
+      assert.doesNotMatch(workflow, /\byarn test\b|always\(\)|steps\.release_gate\.outcome/);
+      assert.doesNotMatch(workflow, /publishPassedCommandReceipt|workflow-lease|command-receipt/);
+    }
   });
 });
