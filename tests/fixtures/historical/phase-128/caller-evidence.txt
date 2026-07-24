@@ -25,17 +25,17 @@ boundedReferenceScanScope:
 - tests/harness/scenarios/phase-128-artifact-integrity.ts excluded
 boundedReferenceScanExitCode: 0
 boundedReferenceScanResult: matching authority and loader references found
-boundedReferenceScanOutputSha256: 0c2c3c5e8450ef31a22c9028ef3d785b1e93a43319b680af4eeefe8304aacc28
+boundedReferenceScanOutputSha256: fd54629faca9e629990b7e9c33e482ff71802237c2389ad11ecaec5f6e7ba5a5
 boundedReferenceScanOutputByteLength: 990
 boundedReferenceScanOutput:
+.github/workflows/manual-release-diagnostic.yml:36:        run: yarn release:check --base="origin/${RELEASE_BASE_REF}"
+.github/workflows/pr-check.yml:46:        run: yarn release:check --base="origin/${RELEASE_BASE_REF}"
+package.json:19:    "test": "node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/*.test.ts tests/integration/*.test.ts",
+package.json:21:    "test:integration": "node scripts/run-node-with-tz.mjs --import tsx --test tests/integration/*.test.ts",
 scripts/release-check.mjs:435:  await runStep("Full test suite", "full_test_suite", ["test"], { NODE_ENV: "test" });
 scripts/release-check.mjs:437:    console.log("\n[release-check] Note: server route/service changes detected; yarn test includes integration coverage.");
 tests/harness/run.ts:105:    const scenarioModule = (await import(`./scenarios/${name}.js`)) as {
 tests/harness/run.ts:112:        `Scenario module "./scenarios/${name}.js" must export a default VerificationScenario with a run() method.`,
-package.json:19:    "test": "node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/*.test.ts tests/integration/*.test.ts",
-package.json:21:    "test:integration": "node scripts/run-node-with-tz.mjs --import tsx --test tests/integration/*.test.ts",
-.github/workflows/pr-check.yml:46:        run: yarn release:check --base="origin/${RELEASE_BASE_REF}"
-.github/workflows/manual-release-diagnostic.yml:36:        run: yarn release:check --base="origin/${RELEASE_BASE_REF}"
 
 canonicalEvidencePayloadBegin
 canonicalEvidenceVersion: phase-128-readiness-v1
@@ -45,20 +45,20 @@ packageScriptOutput:
 boundedReferenceScanCommand: rg -n --hidden --glob '!.planning/**' --glob '!.git/**' --glob '!tests/fixtures/historical/**' --glob '!tests/integration/phase-128-readiness-audit-negative-controls.test.ts' --glob '!tests/harness/scenarios/phase-128-artifact-integrity.ts' -e 'tests/integration/\*\.test\.ts|yarn test|yarn release:check|runStep\("Full test suite",|scenarios/\$\{name\}\.js' package.json .github/workflows/pr-check.yml .github/workflows/manual-release-diagnostic.yml scripts/release-check.mjs tests/harness/run.ts
 boundedReferenceScanExitCode: 0
 boundedReferenceScanOutput:
+.github/workflows/manual-release-diagnostic.yml:36:        run: yarn release:check --base="origin/${RELEASE_BASE_REF}"
+.github/workflows/pr-check.yml:46:        run: yarn release:check --base="origin/${RELEASE_BASE_REF}"
+package.json:19:    "test": "node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/*.test.ts tests/integration/*.test.ts",
+package.json:21:    "test:integration": "node scripts/run-node-with-tz.mjs --import tsx --test tests/integration/*.test.ts",
 scripts/release-check.mjs:435:  await runStep("Full test suite", "full_test_suite", ["test"], { NODE_ENV: "test" });
 scripts/release-check.mjs:437:    console.log("\n[release-check] Note: server route/service changes detected; yarn test includes integration coverage.");
 tests/harness/run.ts:105:    const scenarioModule = (await import(`./scenarios/${name}.js`)) as {
 tests/harness/run.ts:112:        `Scenario module "./scenarios/${name}.js" must export a default VerificationScenario with a run() method.`,
-package.json:19:    "test": "node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/*.test.ts tests/integration/*.test.ts",
-package.json:21:    "test:integration": "node scripts/run-node-with-tz.mjs --import tsx --test tests/integration/*.test.ts",
-.github/workflows/pr-check.yml:46:        run: yarn release:check --base="origin/${RELEASE_BASE_REF}"
-.github/workflows/manual-release-diagnostic.yml:36:        run: yarn release:check --base="origin/${RELEASE_BASE_REF}"
 exactReleaseCheckSourceRow: runStep("Full test suite", "full_test_suite", ["test"]
 readinessClassification: live-package-glob-and-release-check-caller
 artifactScenarioClassification: dynamic-name-harness-reachability-only-no-static-invocation
 ciReachability: pull-request-and-manual-release-workflows-reach-yarn-release-check
 canonicalEvidencePayloadEnd
-canonicalEvidencePayloadSha256: 6537771da57c8add4239494ad3dd5414327e81344a31c589a5cd05bbfca2638f
+canonicalEvidencePayloadSha256: e2a43ecacf888aec7b170b3421f58fa442ccc810af681898b178d21ad1eae225
 canonicalEvidencePayloadByteLength: 2500
 exactReleaseCheckSourceRowBytes: runStep("Full test suite", "full_test_suite", ["test"]
 readinessDiscoveryCallers: package.json:test and package.json:test:integration; scripts/release-check.mjs Full test suite ["test"]; .github/workflows/pr-check.yml yarn release:check; .github/workflows/manual-release-diagnostic.yml yarn release:check
