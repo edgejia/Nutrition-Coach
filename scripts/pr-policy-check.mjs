@@ -244,6 +244,9 @@ function inferPrKinds({ title, body, issueLabels }) {
   if (/##\s*Fix PR/i.test(text) || /\[Bug\]/i.test(text) || /^\s*fix(?:\(|:|\s)/i.test(title || "")) {
     kinds.add("fix");
   }
+  if (/##\s*Chore PR/i.test(text) || /\[Chore\]/i.test(text) || /^\s*chore(?:\(|:|\s)/i.test(title || "")) {
+    kinds.add("chore");
+  }
 
   if (issueLabels.has("feature-request")) {
     kinds.add("feature");
@@ -253,6 +256,9 @@ function inferPrKinds({ title, body, issueLabels }) {
   }
   if (issueLabels.has("bug")) {
     kinds.add("fix");
+  }
+  if (issueLabels.has("type: chore")) {
+    kinds.add("chore");
   }
 
   return kinds;
@@ -324,28 +330,43 @@ async function main() {
     if (issue.isPullRequest) {
       errors.push(`#${issue.number} is a pull request, not a tracker issue.`);
     }
+    if (!issue.labels.includes("ready-for-pr")) {
+      errors.push(`Linked issue #${issue.number} must carry the \`ready-for-pr\` label.`);
+    }
   }
 
   const prLabels = labelsFrom(pr.labels || []);
   const issueLabels = new Set(issues.flatMap((issue) => issue.labels));
-  const allLabels = new Set([...prLabels, ...issueLabels]);
   const kinds = inferPrKinds({ title: pr.title, body, issueLabels });
 
   const requiredByKind = {
-    feature: "approved-feature",
-    enhancement: "approved-enhancement",
-    fix: "confirmed-bug",
+    feature: { type: "feature-request", approval: "approved-feature" },
+    enhancement: { type: "enhancement", approval: "approved-enhancement" },
+    fix: { type: "bug", approval: "confirmed-bug" },
   };
 
   for (const kind of kinds) {
+    if (kind === "chore") {
+      if (!issues.some((issue) => issue.labels.includes("type: chore"))) {
+        errors.push("chore PRs require the `type: chore` label on a linked issue.");
+      }
+      continue;
+    }
+
     const required = requiredByKind[kind];
-    if (!issueLabels.has(required)) {
-      errors.push(`${kind} PRs require the \`${required}\` label on a linked issue.`);
+    const hasSameIssueApproval = issues.some((issue) => {
+      const labels = new Set(issue.labels);
+      return labels.has(required.type) && labels.has(required.approval);
+    });
+    if (!hasSameIssueApproval) {
+      errors.push(
+        `${kind} PRs require the \`${required.approval}\` label on a linked issue with \`${required.type}\`; labels cannot be split across issues.`,
+      );
     }
   }
 
   const hasChangelog = changedFiles.includes("CHANGELOG.md");
-  if (!hasChangelog && !hasAnyLabel(allLabels, ["no-changelog"])) {
+  if (!hasChangelog && !hasAnyLabel(prLabels, ["no-changelog"])) {
     errors.push("PR must update CHANGELOG.md or carry the `no-changelog` label.");
   }
 

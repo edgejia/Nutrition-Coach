@@ -295,7 +295,7 @@ describe("pr policy gate", () => {
       body: "Closes https://github.com/edgejia/Nutrition-Coach/issues/123",
       labels: ["no-changelog"],
       issues: {
-        123: { title: "Feature tracker", labels: ["feature-request", "approved-feature"] },
+        123: { title: "Feature tracker", labels: ["feature-request", "approved-feature", "ready-for-pr"] },
       },
     });
 
