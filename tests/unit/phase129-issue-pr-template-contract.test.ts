@@ -125,7 +125,7 @@ describe("phase 129 issue and PR template contract", () => {
     ]) {
       assert.doesNotMatch(contributing, new RegExp(stalePath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     }
-    assert.match(contributing, /ready-for-pr is a manual issue-side gate/);
+    assert.match(contributing, /`ready-for-pr` is a manual issue-side gate/);
     assert.match(contributing, /No workflow creates a new remote label/);
     assert.match(contributing, /no-changelog.*pull request only/i);
   });
