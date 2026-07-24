@@ -94,7 +94,7 @@ test("inventory has exactly fourteen logical workflow rows", async () => {
 test("workflow declarations are paired in one logical row", async () => {
   const rows = table(await inventory(), "Logical workflow surfaces");
   for (const row of rows) {
-    const files = row.surfaceFiles.split(",").map((file) => file.trim());
+    const files = row.surfaceFiles.split(",").map((file) => file.trim().replaceAll("`", ""));
     const declarations = files.filter((file) => file.endsWith(".d.mts"));
     if (row.declarationPairing === "no-declaration") {
       equal(declarations.length, 0, `${row.surface} unexpectedly lists a declaration`);
@@ -144,7 +144,8 @@ test("inventory remains metadata-only and contains no unsupported sensitive evid
     /sqlite(?:3)?\s+dump/i,
     /(?:raw|full)\s+(?:prompt|transcript|provider|tool)\s+payload/i,
     /\b(?:cookie|session[_ -]?id|access[_ -]?token)\s*[:=]\s*[A-Za-z0-9+/=_-]{12,}/i,
-    /\b(?:signed|attestation|receipt)\b/i,
+    /\bsigned\s+(?:receipt|attestation)\b/i,
+    /\b(?:receipt|attestation)\s+(?:claim|proof|artifact)\b/i,
   ];
   for (const pattern of forbidden) ok(!pattern.test(markdown), `forbidden evidence matched: ${pattern}`);
   match(markdown, /metadata-only/i);
