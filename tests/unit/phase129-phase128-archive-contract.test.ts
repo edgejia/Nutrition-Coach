@@ -55,6 +55,8 @@ type ArchiveRow = {
   sourceByteLength: number;
   snapshotSha256: string;
   snapshotByteLength: number;
+  snapshotFileSha256: string;
+  snapshotFileByteLength: number;
   exactTextProof: string;
   callerEvidenceRef: string;
   preRemovalDiscoveryCallers: string[];
@@ -173,6 +175,8 @@ function manifestShape(manifest: ArchiveManifest): void {
     assert.equal(row.exactTextProof, "sourceBytesEqualSnapshotBytes");
     assert.match(row.sourceSha256, /^[0-9a-f]{64}$/);
     assert.match(row.snapshotSha256, /^[0-9a-f]{64}$/);
+    assert.match(row.snapshotFileSha256, /^[0-9a-f]{64}$/);
+    assert.ok(Number.isSafeInteger(row.snapshotFileByteLength) && row.snapshotFileByteLength > 0);
     assert.equal(row.sourceByteLength, row.snapshotByteLength);
     assert.ok(row.preRemovalDiscoveryCallers.length > 0);
     assert.ok(row.supersededBy.trim());
@@ -182,11 +186,19 @@ function manifestShape(manifest: ArchiveManifest): void {
   }
 }
 
-function archiveRowsMatch(manifest: ArchiveManifest): void {
+function archiveRowsMatch(
+  manifest: ArchiveManifest,
+  snapshotReader: (relativePath: string) => Buffer = (relativePath) => Buffer.from(readRepo(relativePath), "utf8"),
+): void {
   for (const row of manifest.rows) {
-    const snapshot = readRepo(row.archivePath);
+    const snapshotBytes = snapshotReader(row.archivePath);
+    const snapshot = snapshotBytes.toString("utf8");
     const begin = `<!-- BEGIN EXACT SOURCE: ${row.originalPath} -->\n`;
     const end = `<!-- END EXACT SOURCE: ${row.originalPath} -->`;
+    assert.equal(snapshot.split(begin).length - 1, 1, `${row.archivePath} must have one begin marker`);
+    assert.equal(snapshot.split(end).length - 1, 1, `${row.archivePath} must have one end marker`);
+    assert.equal(snapshotBytes.byteLength, row.snapshotFileByteLength, `${row.archivePath} outer byte length drift`);
+    assert.equal(sha256(snapshotBytes), row.snapshotFileSha256, `${row.archivePath} outer snapshot hash drift`);
     const exactSource = Buffer.from(sectionBetween(snapshot, begin, end));
     assert.equal(exactSource.byteLength, row.sourceByteLength, `${row.originalPath} byte length drift`);
     assert.equal(sha256(exactSource), row.sourceSha256, `${row.originalPath} source hash drift`);
@@ -298,7 +310,9 @@ describe("Phase 129 WFR-07 Phase 128 archive contract", () => {
   test("archive normalization is idempotent and source evidence precedes deletion", () => {
     const manifestText = readFileSync(MANIFEST_PATH, "utf8");
     const manifest = readManifest();
-    assert.equal(normalizedManifest(manifestText), normalizedManifest(manifestText));
+    const canonicalOnce = normalizedManifest(manifestText);
+    const canonicalTwice = normalizedManifest(canonicalOnce);
+    assert.equal(canonicalTwice, canonicalOnce);
     assert.deepEqual(manifest.archiveOrder, manifest.rows.map((row) => row.archivePath));
     assert.ok(manifest.rows.every((row) => row.archiveStageProof === "archive-before-deletion"));
     assert.equal(valueAfter(readFileSync(EVIDENCE_PATH, "utf8"), "sourcePresentBeforeDelete: "), "true");
@@ -318,6 +332,21 @@ describe("Phase 129 WFR-07 Phase 128 archive contract", () => {
     const hashDrift = structuredClone(manifest);
     hashDrift.rows[0].sourceSha256 = "0".repeat(64);
     assert.throws(() => archiveRowsMatch(hashDrift), /hash drift/);
+    const outerHashDrift = structuredClone(manifest);
+    outerHashDrift.rows[0].snapshotFileSha256 = "0".repeat(64);
+    assert.throws(() => archiveRowsMatch(outerHashDrift), /outer snapshot hash drift/);
+    const duplicateMarker = readFileSync(path.join(REPO_ROOT, manifest.rows[0].archivePath), "utf8");
+    const duplicateBegin = `<!-- BEGIN EXACT SOURCE: ${manifest.rows[0].originalPath} -->\n`;
+    const duplicateSnapshot = duplicateMarker.replace(duplicateBegin, duplicateBegin + duplicateBegin);
+    assert.throws(
+      () => archiveRowsMatch(manifest, (relativePath) => Buffer.from(relativePath === manifest.rows[0].archivePath ? duplicateSnapshot : readRepo(relativePath), "utf8")),
+      /must have one begin marker/,
+    );
+    const missingEndSnapshot = duplicateMarker.replace(`<!-- END EXACT SOURCE: ${manifest.rows[0].originalPath} -->`, "");
+    assert.throws(
+      () => archiveRowsMatch(manifest, (relativePath) => Buffer.from(relativePath === manifest.rows[0].archivePath ? missingEndSnapshot : readRepo(relativePath), "utf8")),
+      /outer byte length drift|outer snapshot hash drift|must have one end marker/,
+    );
     const evidence = readFileSync(EVIDENCE_PATH, "utf8");
     assert.throws(() => callerEvidenceMatches(manifest, evidence.replace(/canonicalEvidencePayloadByteLength: 2500/, "canonicalEvidencePayloadByteLength: 1")), /2500|byte/i);
     assert.throws(() => assertSourcesRemoved(new Set([EXPECTED_ROWS[0].originalPath])), /removed source remains/);

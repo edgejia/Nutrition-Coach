@@ -20,7 +20,7 @@
       "sourceByteLength": 654,
       "snapshotSha256": "090865f4339ba00d0205bc638cc27c77c106dbcedca5e225483d94f13571ba4e",
       "snapshotByteLength": 654,
-      "snapshotFileSha256": "a87049c47e77f88c10aec6b9ca0b5f1a5eab3368fd1d89a5802768133bc9933a",
+      "snapshotFileSha256": "bb7a7631e374c24d5c39712a498b564e29a1302c6877303c004f3e4d78a2eb1b",
       "snapshotFileByteLength": 1049,
       "exactTextProof": "sourceBytesEqualSnapshotBytes",
       "callerEvidenceRef": "caller-evidence.txt#canonicalEvidencePayload",
