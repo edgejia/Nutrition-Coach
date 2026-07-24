@@ -261,6 +261,143 @@ describe("pr policy gate", () => {
     }
   });
 
+  test("requires ready-for-pr on every linked closing issue", () => {
+    const ready = runPrPolicy({
+      title: "[Feature] combine tracker work",
+      body: "Closes #123 and fixes #456",
+      labels: ["ready-for-pr", "no-changelog"],
+      issues: {
+        123: { title: "Feature one", labels: ["feature-request", "approved-feature", "ready-for-pr"] },
+        456: { title: "Feature two", labels: ["feature-request", "approved-feature", "ready-for-pr"] },
+      },
+    });
+
+    assert.equal(ready.status, 0, ready.output);
+
+    const unready = runPrPolicy({
+      title: "[Feature] combine tracker work",
+      body: "Closes #123 and fixes #456",
+      labels: ["ready-for-pr", "no-changelog"],
+      issues: {
+        123: { title: "Feature one", labels: ["feature-request", "approved-feature", "ready-for-pr"] },
+        456: { title: "Feature two", labels: ["feature-request", "approved-feature"] },
+      },
+    });
+
+    assert.notEqual(unready.status, 0);
+    assert.match(unready.output, /#456.*ready-for-pr/);
+  });
+
+  test("does not union typed approval and request labels across linked issues", () => {
+    const result = runPrPolicy({
+      title: "[Feature] split tracker labels",
+      body: "Closes #123 and Closes #456",
+      labels: ["no-changelog"],
+      issues: {
+        123: { title: "Feature request", labels: ["feature-request", "ready-for-pr"] },
+        456: { title: "Feature approval", labels: ["approved-feature", "ready-for-pr"] },
+      },
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.output, /labels cannot be split across issues/);
+  });
+
+  test("accepts no-changelog only from the pull-request label set", () => {
+    const issueOnly = runPrPolicy({
+      title: "[Chore] maintain policy docs",
+      body: "Closes #123",
+      issues: {
+        123: { title: "Maintenance", labels: ["type: chore", "ready-for-pr", "no-changelog"] },
+      },
+    });
+
+    assert.notEqual(issueOnly.status, 0);
+    assert.match(issueOnly.output, /must update CHANGELOG\.md or carry the `no-changelog` label/);
+
+    const prOnly = runPrPolicy({
+      title: "[Chore] maintain policy docs",
+      body: "Closes #123",
+      labels: ["no-changelog"],
+      issues: {
+        123: { title: "Maintenance", labels: ["type: chore", "ready-for-pr"] },
+      },
+    });
+
+    assert.equal(prOnly.status, 0, prOnly.output);
+  });
+
+  test("requires a closing issue even when PR labels claim readiness and approval", () => {
+    const result = runPrPolicy({
+      title: "[Feature] orphan policy change",
+      body: "Documented without a closing tracker reference",
+      labels: ["ready-for-pr", "approved-feature", "no-changelog"],
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.output, /must link at least one GitHub issue/);
+  });
+
+  test("does not count a dirty uncommitted CHANGELOG.md in the policy diff", () => {
+    withTemporaryGitRepo((repoDir) => {
+      fs.writeFileSync(path.join(repoDir, "CHANGELOG.md"), "Base changelog text\n");
+      runCommand("git", ["add", "CHANGELOG.md"], repoDir);
+      runCommand("git", ["commit", "--quiet", "-m", "base changelog"], repoDir);
+      const base = spawnSync("git", ["rev-parse", "HEAD"], { cwd: repoDir, encoding: "utf8" }).stdout.trim();
+      fs.mkdirSync(path.join(repoDir, "src"), { recursive: true });
+      fs.writeFileSync(path.join(repoDir, "src", "policy-change.ts"), "export const policyChange = true;\n");
+      runCommand("git", ["add", "src/policy-change.ts"], repoDir);
+      runCommand("git", ["commit", "--quiet", "-m", "committed policy change"], repoDir);
+      fs.writeFileSync(path.join(repoDir, "CHANGELOG.md"), "Uncommitted changelog text\n");
+
+      const result = runPrPolicy(
+        {
+          title: "[Chore] committed policy change",
+          body: "Closes #123",
+          issues: {
+            123: { title: "Maintenance", labels: ["type: chore", "ready-for-pr"] },
+          },
+        },
+        { cwd: repoDir, args: [`--base=${base}`] },
+      );
+
+      assert.notEqual(result.status, 0);
+      assert.match(result.output, /Changed files considered: 1/);
+      assert.match(result.output, /must update CHANGELOG\.md or carry the `no-changelog` label/);
+    });
+  });
+
+  test("requires same-issue typed labels for every fixed request marker", () => {
+    const typedCases = [
+      { marker: "Feature", typeLabel: "feature-request", approval: "approved-feature" },
+      { marker: "Enhancement", typeLabel: "enhancement", approval: "approved-enhancement" },
+      { marker: "Bug", typeLabel: "bug", approval: "confirmed-bug" },
+    ];
+
+    for (const { marker, typeLabel, approval } of typedCases) {
+      const result = runPrPolicy({
+        title: `[${marker}] missing typed approval`,
+        body: "Closes #123",
+        labels: ["no-changelog"],
+        issues: { 123: { title: "Typed request", labels: [typeLabel, "ready-for-pr"] } },
+      });
+
+      assert.notEqual(result.status, 0, `${marker} unexpectedly passed`);
+      assert.match(result.output, new RegExp(approval));
+    }
+
+    const chore = runPrPolicy({
+      title: "[Chore] missing maintenance type",
+      body: "Closes #123",
+      labels: ["no-changelog"],
+      issues: { 123: { title: "Maintenance", labels: ["ready-for-pr"] } },
+    });
+
+    assert.notEqual(chore.status, 0);
+    assert.match(chore.output, /chore PRs require the `type: chore` label/);
+    assert.doesNotMatch(chore.output, /approved-feature|approved-enhancement|confirmed-bug/);
+  });
+
   test("rejects feature approval labels that are only on the PR", () => {
     const result = runPrPolicy({
       title: "feat: add tracker",
