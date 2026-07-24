@@ -22,9 +22,13 @@ const evidenceFields = [
 const readObservation = () => readFile(observationPath, "utf8");
 
 const cycleBlock = (source: string, cycleId: string): string => {
-  const match = source.match(new RegExp(`^### ${cycleId}\\n([\\s\\S]*?)(?=^### |^## |\\z)`, "m"));
-  assert.ok(match, `missing ${cycleId} block`);
-  return match[1];
+  const heading = `### ${cycleId}`;
+  const start = source.indexOf(`${heading}\n`);
+  assert.notEqual(start, -1, `missing ${cycleId} block`);
+  const bodyStart = start + heading.length + 1;
+  const remainder = source.slice(bodyStart);
+  const nextHeading = remainder.search(/^### |^## /m);
+  return remainder.slice(0, nextHeading === -1 ? remainder.length : nextHeading);
 };
 
 const fieldValue = (block: string, field: string): string => {
