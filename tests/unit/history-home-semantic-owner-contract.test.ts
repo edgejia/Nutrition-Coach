@@ -32,8 +32,7 @@ const {
   shiftHistoryWeek,
 } = await import("../../client/src/lib/history-week.js");
 
-// RED: the canonical id is corrected in the GREEN commit after the owner contract is proven to fail.
-const SEMANTIC_OWNER_ID = "history-home-semantic-owner-red";
+const SEMANTIC_OWNER_ID = "history-home-semantic-owner";
 const SEMANTIC_OWNER_LABEL = "History/Home runtime semantic owner";
 const ownerRegistry = new Map<string, string>([[SEMANTIC_OWNER_ID, SEMANTIC_OWNER_LABEL]]);
 
