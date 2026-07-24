@@ -15,7 +15,7 @@ describe("PR Check no-rerun contract", () => {
     assert.match(workflow, /- name: Prepare CI environment\n\s+run: cp \.env\.example \.env/);
 
     const releaseCommands = workflow.match(/yarn release:check --base="origin\/\$\{RELEASE_BASE_REF\}"/g) ?? [];
-    assert.equal(releaseCommands.length, 2);
+    assert.equal(releaseCommands.length, 1);
   });
 
   it("rejects a post-failure full-suite rerun and caller-controlled base input", async () => {
