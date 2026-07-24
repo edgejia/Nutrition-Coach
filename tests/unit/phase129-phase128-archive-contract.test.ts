@@ -24,6 +24,7 @@ const EXPECTED_ROWS = [
   },
 ] as const;
 const EXACT_RELEASE_CHECK_ROW = 'runStep("Full test suite", "full_test_suite", ["test"]';
+const REFERENCE_SCAN_PATTERN = String.raw`tests/integration/\*\.test\.ts|yarn test|yarn release:check|runStep\("Full test suite",|scenarios/\$\{name\}\.js`;
 const BOUNDED_SCAN_COMMAND = String.raw`rg -n --hidden --glob '!.planning/**' --glob '!.git/**' --glob '!tests/fixtures/historical/**' --glob '!tests/integration/phase-128-readiness-audit-negative-controls.test.ts' --glob '!tests/harness/scenarios/phase-128-artifact-integrity.ts' -e 'tests/integration/\*\.test\.ts|yarn test|yarn release:check|runStep\("Full test suite",|scenarios/\$\{name\}\.js' package.json .github/workflows/pr-check.yml .github/workflows/manual-release-diagnostic.yml scripts/release-check.mjs tests/harness/run.ts`;
 const BOUNDED_SCAN_ARGS = [
   "-n",
@@ -39,13 +40,21 @@ const BOUNDED_SCAN_ARGS = [
   "--glob",
   "!tests/harness/scenarios/phase-128-artifact-integrity.ts",
   "-e",
-  String.raw`tests/integration/\*\.test\.ts|yarn test|yarn release:check|runStep\("Full test suite",|scenarios/\$\{name\}\.js`,
+  REFERENCE_SCAN_PATTERN,
   "package.json",
   ".github/workflows/pr-check.yml",
   ".github/workflows/manual-release-diagnostic.yml",
   "scripts/release-check.mjs",
   "tests/harness/run.ts",
 ];
+const HEAD_SCAN_PATHS = [
+  "package.json",
+  ".github/workflows/pr-check.yml",
+  ".github/workflows/manual-release-diagnostic.yml",
+  "scripts/release-check.mjs",
+  "tests/harness/run.ts",
+] as const;
+const HEAD_SOURCE_COMMAND = HEAD_SCAN_PATHS.map((relativePath) => `git show HEAD:${relativePath}`).join("; ");
 
 type ArchiveRow = {
   originalPath: string;
@@ -76,8 +85,16 @@ type ArchiveManifest = {
   archiveOrder: string[];
   callerEvidenceFile: string;
   canonicalInventory: string;
-  canonicalEvidencePayloadSha256: string;
-  canonicalEvidencePayloadByteLength: number;
+  observedLocalProvenance: string;
+  observedLocalReferenceScanOutputSha256: string;
+  observedLocalReferenceScanOutputByteLength: number;
+  observedLocalCanonicalEvidencePayloadSha256: string;
+  observedLocalCanonicalEvidencePayloadByteLength: number;
+  committedHeadProvenance: string;
+  committedHeadReferenceScanOutputSha256: string;
+  committedHeadReferenceScanOutputByteLength: number;
+  committedHeadCanonicalEvidencePayloadSha256: string;
+  committedHeadCanonicalEvidencePayloadByteLength: number;
   rows: ArchiveRow[];
 };
 
@@ -124,8 +141,29 @@ function runBoundedReferenceScan(): { output: string; exitCode: number } {
   }
 }
 
-function expectedPackageScriptOutput(): string {
-  const packageJson = JSON.parse(readRepo("package.json")) as {
+function runCommittedHeadReferenceScan(): { output: string; exitCode: number } {
+  const rows: string[] = [];
+  for (const relativePath of HEAD_SCAN_PATHS) {
+    const source = execFileSync("git", ["show", `HEAD:${relativePath}`], { cwd: REPO_ROOT, encoding: "utf8" });
+    try {
+      const matches = execFileSync("rg", ["-n", REFERENCE_SCAN_PATTERN], {
+        cwd: REPO_ROOT,
+        input: source,
+        encoding: "utf8",
+      });
+      for (const line of matches.trimEnd().split("\n")) {
+        if (line) rows.push(`${relativePath}:${line}`);
+      }
+    } catch (error) {
+      const failure = error as { status?: number };
+      assert.equal(failure.status, 1, `${relativePath} HEAD scan failed unexpectedly`);
+    }
+  }
+  return { output: canonicalScanOutput(rows.sort().join("\n")), exitCode: 0 };
+}
+
+function packageScriptOutputFromSource(source: string): string {
+  const packageJson = JSON.parse(source) as {
     scripts: { test?: string; "test:integration"?: string; "release:check"?: string };
   };
   return JSON.stringify({
@@ -135,18 +173,16 @@ function expectedPackageScriptOutput(): string {
   });
 }
 
-function expectedCanonicalEvidencePayload(): string {
-  const scan = runBoundedReferenceScan();
-  assert.equal(scan.exitCode, 0, "bounded authority scan must find its expected references");
+function expectedCanonicalEvidencePayload(packageScriptOutput: string, scanOutput: string): string {
   return [
     "canonicalEvidenceVersion: phase-128-readiness-v1",
     `packageScriptCommand: node -e 'const p=require(\"./package.json\"); process.stdout.write(JSON.stringify({test:p.scripts.test,testIntegration:p.scripts[\"test:integration\"],releaseCheck:p.scripts[\"release:check\"]})+\"\\n\")'`,
     "packageScriptOutput:",
-    expectedPackageScriptOutput(),
+    packageScriptOutput,
     `boundedReferenceScanCommand: ${BOUNDED_SCAN_COMMAND}`,
     "boundedReferenceScanExitCode: 0",
     "boundedReferenceScanOutput:",
-    scan.output.trimEnd(),
+    scanOutput.trimEnd(),
     `exactReleaseCheckSourceRow: ${EXACT_RELEASE_CHECK_ROW}`,
     "readinessClassification: live-package-glob-and-release-check-caller",
     "artifactScenarioClassification: dynamic-name-harness-reachability-only-no-static-invocation",
@@ -158,6 +194,26 @@ function manifestShape(manifest: ArchiveManifest): void {
   assert.equal(manifest.archiveStatus, "historical-non-runnable");
   assert.equal(manifest.archiveStage, "deletion-approved");
   assert.equal(manifest.evidenceMode, "metadata-only");
+  assert.equal(manifest.observedLocalProvenance, "dirty-worktree-pre-removal-observation");
+  assert.equal(manifest.committedHeadProvenance, "git-show-head-clean-clone-equivalent");
+  for (const [label, value] of [
+    ["observed local scan", manifest.observedLocalReferenceScanOutputSha256],
+    ["observed local payload", manifest.observedLocalCanonicalEvidencePayloadSha256],
+    ["committed HEAD scan", manifest.committedHeadReferenceScanOutputSha256],
+    ["committed HEAD payload", manifest.committedHeadCanonicalEvidencePayloadSha256],
+  ] as const) {
+    assert.match(value, /^[0-9a-f]{64}$/, `${label} hash shape`);
+  }
+  for (const [label, value] of [
+    ["observed local scan", manifest.observedLocalReferenceScanOutputByteLength],
+    ["observed local payload", manifest.observedLocalCanonicalEvidencePayloadByteLength],
+    ["committed HEAD scan", manifest.committedHeadReferenceScanOutputByteLength],
+    ["committed HEAD payload", manifest.committedHeadCanonicalEvidencePayloadByteLength],
+  ] as const) {
+    assert.ok(Number.isSafeInteger(value) && value > 0, `${label} byte length shape`);
+  }
+  assert.notEqual(manifest.observedLocalReferenceScanOutputSha256, manifest.committedHeadReferenceScanOutputSha256, "observed local and committed HEAD scan hashes must remain distinct");
+  assert.notEqual(manifest.observedLocalReferenceScanOutputByteLength, manifest.committedHeadReferenceScanOutputByteLength, "observed local and committed HEAD scan lengths must remain distinct");
   assert.deepEqual(manifest.archiveOrder, EXPECTED_ROWS.map((row) => row.archivePath));
   assert.equal(manifest.rows.length, EXPECTED_ROWS.length, "manifest must contain exactly two rows");
   assert.equal(new Set(manifest.rows.map((row) => row.originalPath)).size, EXPECTED_ROWS.length, "original paths must be unique");
@@ -209,35 +265,59 @@ function archiveRowsMatch(
 function callerEvidenceMatches(manifest: ArchiveManifest, evidence: string): void {
   assert.equal(valueAfter(evidence, "archiveStage: "), "pre-removal");
   assert.equal(valueAfter(evidence, "sourcePresentBeforeDelete: "), "true");
-  assert.equal(sectionBetween(evidence, "boundedReferenceScanCommand:\n", "boundedReferenceScanScope:"), `${BOUNDED_SCAN_COMMAND}\n`);
-  assert.equal(valueAfter(evidence, "boundedReferenceScanExitCode: "), "0");
-  const scan = runBoundedReferenceScan();
-  assert.equal(scan.exitCode, 0);
-  assert.equal(valueAfter(evidence, "boundedReferenceScanOutputSha256: "), sha256(Buffer.from(scan.output)));
-  assert.equal(valueAfter(evidence, "boundedReferenceScanOutputByteLength: "), String(Buffer.byteLength(scan.output)));
-  const recordedScanOutput = sectionBetween(evidence, "boundedReferenceScanOutput:\n", "\n\ncanonicalEvidencePayloadBegin");
-  assert.equal(canonicalScanOutput(recordedScanOutput), scan.output);
-  assert.match(recordedScanOutput, /package\.json:19:.*tests\/integration\/\*\.test\.ts/);
-  assert.match(recordedScanOutput, /scripts\/release-check\.mjs:435:.*full_test_suite.*\[\"test\"\]/);
-  assert.match(recordedScanOutput, /tests\/harness\/run\.ts:105:.*scenarios\/\$\{name\}\.js/);
-  assert.match(recordedScanOutput, /\.github\/workflows\/pr-check\.yml:46:.*yarn release:check/);
-  assert.match(recordedScanOutput, /\.github\/workflows\/manual-release-diagnostic\.yml:36:.*yarn release:check/);
-  const canonicalPayload = sectionBetween(evidence, "canonicalEvidencePayloadBegin\n", "canonicalEvidencePayloadEnd");
-  const expectedPayload = expectedCanonicalEvidencePayload();
-  assert.equal(canonicalPayload, expectedPayload);
-  assert.equal(sha256(Buffer.from(canonicalPayload)), manifest.canonicalEvidencePayloadSha256);
-  assert.equal(Buffer.byteLength(canonicalPayload), manifest.canonicalEvidencePayloadByteLength);
-  assert.equal(valueAfter(evidence, "canonicalEvidencePayloadSha256: "), sha256(Buffer.from(canonicalPayload)));
-  assert.equal(valueAfter(evidence, "canonicalEvidencePayloadByteLength: "), String(Buffer.byteLength(canonicalPayload)));
-  const releaseSource = readRepo("scripts/release-check.mjs");
-  assert.ok(releaseSource.includes(EXACT_RELEASE_CHECK_ROW), "release-check source row must remain canonical evidence");
-  assert.match(canonicalPayload, new RegExp(EXACT_RELEASE_CHECK_ROW.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.equal(sectionBetween(evidence, "observedLocalReferenceScanCommand:\n", "observedLocalReferenceScanScope:"), `${BOUNDED_SCAN_COMMAND}\n`);
+  assert.equal(valueAfter(evidence, "observedLocalReferenceScanProvenance: "), "dirty-worktree-pre-removal-observation");
+  assert.equal(valueAfter(evidence, "observedLocalReferenceScanExitCode: "), "0");
+  const observedScanOutput = canonicalScanOutput(sectionBetween(evidence, "observedLocalReferenceScanOutput:\n", "\n\nobservedLocalCanonicalEvidencePayloadBegin"));
+  assert.equal(valueAfter(evidence, "observedLocalReferenceScanOutputSha256: "), sha256(Buffer.from(observedScanOutput)), "observed local scan hash mismatch");
+  assert.equal(valueAfter(evidence, "observedLocalReferenceScanOutputByteLength: "), String(Buffer.byteLength(observedScanOutput)), "observed local scan byte length mismatch");
+  assert.equal(valueAfter(evidence, "observedLocalReferenceScanOutputSha256: "), manifest.observedLocalReferenceScanOutputSha256);
+  assert.equal(valueAfter(evidence, "observedLocalReferenceScanOutputByteLength: "), String(manifest.observedLocalReferenceScanOutputByteLength));
+  assert.match(observedScanOutput, /package\.json:19:.*tests\/integration\/\*\.test\.ts/);
+  assert.match(observedScanOutput, /scripts\/release-check\.mjs:435:.*full_test_suite.*\[\"test\"\]/);
+  assert.match(observedScanOutput, /tests\/harness\/run\.ts:105:.*scenarios\/\$\{name\}\.js/);
+  assert.match(observedScanOutput, /\.github\/workflows\/pr-check\.yml:46:.*yarn release:check/);
+  assert.match(observedScanOutput, /\.github\/workflows\/manual-release-diagnostic\.yml:36:.*yarn release:check/);
+
+  const observedPayload = sectionBetween(evidence, "observedLocalCanonicalEvidencePayloadBegin\n", "observedLocalCanonicalEvidencePayloadEnd");
+  const observedPackageOutput = sectionBetween(observedPayload, "packageScriptOutput:\n", "boundedReferenceScanCommand:").trimEnd();
+  assert.equal(observedPayload, expectedCanonicalEvidencePayload(observedPackageOutput, observedScanOutput));
+  assert.equal(sha256(Buffer.from(observedPayload)), manifest.observedLocalCanonicalEvidencePayloadSha256);
+  assert.equal(Buffer.byteLength(observedPayload), manifest.observedLocalCanonicalEvidencePayloadByteLength);
+  assert.equal(valueAfter(evidence, "observedLocalCanonicalEvidencePayloadSha256: "), sha256(Buffer.from(observedPayload)));
+  assert.equal(valueAfter(evidence, "observedLocalCanonicalEvidencePayloadByteLength: "), String(Buffer.byteLength(observedPayload)));
+  assert.equal(valueAfter(evidence, "observedLocalPackageScriptOutputSha256: "), sha256(Buffer.from(observedPackageOutput)));
+  assert.equal(valueAfter(evidence, "observedLocalPackageScriptOutputByteLength: "), String(Buffer.byteLength(observedPackageOutput)));
+  assert.match(observedPayload, new RegExp(EXACT_RELEASE_CHECK_ROW.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+
+  assert.equal(valueAfter(evidence, "committedHeadSourceCommand: "), HEAD_SOURCE_COMMAND);
+  const committedPackageOutput = packageScriptOutputFromSource(execFileSync("git", ["show", "HEAD:package.json"], { cwd: REPO_ROOT, encoding: "utf8" }));
+  assert.equal(valueAfter(evidence, "committedHeadPackageScriptOutputSha256: "), sha256(Buffer.from(committedPackageOutput)));
+  assert.equal(valueAfter(evidence, "committedHeadPackageScriptOutputByteLength: "), String(Buffer.byteLength(committedPackageOutput)));
+  const committedScan = runCommittedHeadReferenceScan();
+  assert.equal(committedScan.exitCode, 0);
+  const committedScanOutput = sectionBetween(evidence, "committedHeadEvidencePayloadBegin\n", "committedHeadEvidencePayloadEnd");
+  const committedPayloadScan = canonicalScanOutput(sectionBetween(committedScanOutput, "boundedReferenceScanOutput:\n", "exactReleaseCheckSourceRow:"));
+  assert.equal(committedPayloadScan, committedScan.output);
+  assert.equal(valueAfter(evidence, "committedHeadReferenceScanOutputSha256: "), sha256(Buffer.from(committedScan.output)), "committed HEAD scan hash mismatch");
+  assert.equal(valueAfter(evidence, "committedHeadReferenceScanOutputByteLength: "), String(Buffer.byteLength(committedScan.output)), "committed HEAD scan byte length mismatch");
+  assert.equal(valueAfter(evidence, "committedHeadReferenceScanOutputSha256: "), manifest.committedHeadReferenceScanOutputSha256);
+  assert.equal(valueAfter(evidence, "committedHeadReferenceScanOutputByteLength: "), String(manifest.committedHeadReferenceScanOutputByteLength));
+  const expectedCommittedPayload = expectedCanonicalEvidencePayload(committedPackageOutput, committedScan.output);
+  assert.equal(committedScanOutput, expectedCommittedPayload);
+  assert.equal(sha256(Buffer.from(committedScanOutput)), manifest.committedHeadCanonicalEvidencePayloadSha256);
+  assert.equal(Buffer.byteLength(committedScanOutput), manifest.committedHeadCanonicalEvidencePayloadByteLength);
+  assert.equal(valueAfter(evidence, "committedHeadCanonicalEvidencePayloadSha256: "), sha256(Buffer.from(committedScanOutput)));
+  assert.equal(valueAfter(evidence, "committedHeadCanonicalEvidencePayloadByteLength: "), String(Buffer.byteLength(committedScanOutput)));
+  assert.notEqual(manifest.observedLocalReferenceScanOutputSha256, manifest.committedHeadReferenceScanOutputSha256, "observed local and committed HEAD scan hashes must remain distinct");
+  assert.notEqual(manifest.observedLocalReferenceScanOutputByteLength, manifest.committedHeadReferenceScanOutputByteLength, "observed local and committed HEAD scan lengths must remain distinct");
+
   assert.match(valueAfter(evidence, "readinessDiscoveryClassification: "), /live package-glob.*release-check\/CI/);
   assert.match(valueAfter(evidence, "artifactScenarioDiscoveryCallers: "), /dynamic import .*no static invocation/);
   assert.match(valueAfter(evidence, "postRemovalActiveCallers: "), /^pending-until-task-2$/);
   assert.deepEqual(manifest.rows.map((row) => row.callerEvidenceRef), [
-    "caller-evidence.txt#canonicalEvidencePayload",
-    "caller-evidence.txt#canonicalEvidencePayload",
+    "caller-evidence.txt#observedLocalCanonicalEvidencePayload",
+    "caller-evidence.txt#observedLocalCanonicalEvidencePayload",
   ]);
 }
 
@@ -273,8 +353,16 @@ function normalizedManifest(text: string): string {
     archiveStage: manifest.archiveStage,
     archiveOrder: manifest.archiveOrder,
     callerEvidenceFile: manifest.callerEvidenceFile,
-    canonicalEvidencePayloadSha256: manifest.canonicalEvidencePayloadSha256,
-    canonicalEvidencePayloadByteLength: manifest.canonicalEvidencePayloadByteLength,
+    observedLocalProvenance: manifest.observedLocalProvenance,
+    observedLocalReferenceScanOutputSha256: manifest.observedLocalReferenceScanOutputSha256,
+    observedLocalReferenceScanOutputByteLength: manifest.observedLocalReferenceScanOutputByteLength,
+    observedLocalCanonicalEvidencePayloadSha256: manifest.observedLocalCanonicalEvidencePayloadSha256,
+    observedLocalCanonicalEvidencePayloadByteLength: manifest.observedLocalCanonicalEvidencePayloadByteLength,
+    committedHeadProvenance: manifest.committedHeadProvenance,
+    committedHeadReferenceScanOutputSha256: manifest.committedHeadReferenceScanOutputSha256,
+    committedHeadReferenceScanOutputByteLength: manifest.committedHeadReferenceScanOutputByteLength,
+    committedHeadCanonicalEvidencePayloadSha256: manifest.committedHeadCanonicalEvidencePayloadSha256,
+    committedHeadCanonicalEvidencePayloadByteLength: manifest.committedHeadCanonicalEvidencePayloadByteLength,
     rows: manifest.rows,
   });
 }
@@ -284,7 +372,7 @@ describe("Phase 129 WFR-07 Phase 128 archive contract", () => {
     manifestShape(readManifest());
   });
 
-  test("caller evidence proves live pre-removal discovery and canonical release row", () => {
+  test("caller evidence separates observed-local history from committed HEAD proof", () => {
     const manifest = readManifest();
     callerEvidenceMatches(manifest, readFileSync(EVIDENCE_PATH, "utf8"));
   });
@@ -348,7 +436,17 @@ describe("Phase 129 WFR-07 Phase 128 archive contract", () => {
       /outer byte length drift|outer snapshot hash drift|must have one end marker/,
     );
     const evidence = readFileSync(EVIDENCE_PATH, "utf8");
-    assert.throws(() => callerEvidenceMatches(manifest, evidence.replace(/canonicalEvidencePayloadByteLength: 2500/, "canonicalEvidencePayloadByteLength: 1")), /2500|byte/i);
+    assert.throws(
+      () => callerEvidenceMatches(manifest, evidence.replace(/observedLocalReferenceScanOutputSha256: [0-9a-f]+/, `observedLocalReferenceScanOutputSha256: ${"0".repeat(64)}`)),
+      /hash|observed local/i,
+    );
+    assert.throws(
+      () => callerEvidenceMatches(manifest, evidence.replace(/committedHeadReferenceScanOutputByteLength: 992/, "committedHeadReferenceScanOutputByteLength: 1")),
+      /byte|committed HEAD/i,
+    );
+    const confusedManifest = structuredClone(manifest);
+    confusedManifest.observedLocalReferenceScanOutputSha256 = manifest.committedHeadReferenceScanOutputSha256;
+    assert.throws(() => manifestShape(confusedManifest), /distinct/);
     assert.throws(() => assertSourcesRemoved(new Set([EXPECTED_ROWS[0].originalPath])), /removed source remains/);
     const readme = readFileSync(README_PATH, "utf8");
     assert.throws(() => metadataOnly(readme.replace(CANONICAL_INVENTORY_LINK, "missing-inventory.md"), readFileSync(MANIFEST_PATH, "utf8")), /Canonical workflow inventory/);
