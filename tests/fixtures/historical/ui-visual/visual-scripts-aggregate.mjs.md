@@ -1,8 +1,8 @@
 # Historical UI Visual Script Archive
 
-This file is a non-runnable historical snapshot. The seven source sections below preserve exact UTF-8 source bytes for recovery and review; the .mjs.md suffix is intentionally not executable.
+This file is a non-runnable historical snapshot. The seven source sections below are sanitized deterministic metadata snapshots; raw image payloads and device/session identifiers are redacted, and the .mjs.md suffix is intentionally not executable.
 
-## Archive index
+## Archive index (original-source metadata only)
 
 1. `tests/harness/scenarios/42.5-ui-fidelity-visual.mjs` — section-01 (5708 bytes, sha256 `a71b02dc6dac0259e8d5cdbaaf965701b0839a5cdcb79ccf3f92cda7fe6dbf6b`).
 2. `tests/harness/scenarios/43-sport-ui-built-smoke.mjs` — section-02 (11747 bytes, sha256 `6b2dc50c4650ee218dd31cf0fe50ae2f7e8a7f824abce91d38452c21037d2f74`).
@@ -14,11 +14,13 @@ This file is a non-runnable historical snapshot. The seven source sections below
 
 ## section-01 — `tests/harness/scenarios/42.5-ui-fidelity-visual.mjs`
 
-sourceSha256: `a71b02dc6dac0259e8d5cdbaaf965701b0839a5cdcb79ccf3f92cda7fe6dbf6b`
-sourceByteLength: 5708
-exactTextProof: sourceBytesEqualAggregateSection
+originalSourceSha256: `a71b02dc6dac0259e8d5cdbaaf965701b0839a5cdcb79ccf3f92cda7fe6dbf6b`
+originalSourceByteLength: 5708
+sanitizationProof: deterministic-redaction-v1
+sanitizedSnapshotSha256: `3274524ac7e8a44809bd6a0b1c9ad5ce1007f3abec7b5f17f47af4500cb81ba1`
+sanitizedSnapshotByteLength: 5726
 
-<!-- BEGIN EXACT SOURCE: tests/harness/scenarios/42.5-ui-fidelity-visual.mjs -->
+<!-- BEGIN SANITIZED SNAPSHOT: tests/harness/scenarios/42.5-ui-fidelity-visual.mjs -->
 #!/usr/bin/env node
 // Visual evidence command:
 // yarn node tests/harness/scenarios/42.5-ui-fidelity-visual.mjs --output-dir tests/harness/artifacts/42.5-ui-fidelity/latest
@@ -63,7 +65,7 @@ export const stateCases = [
 ];
 
 const ONE_PIXEL_PNG = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+  "<REDACTED_IMAGE_PAYLOAD sha256=4b5c5c92cec3b23e6a294fc0eea43234ef5126c5a64f4c6c531ac8430ab0b844 byteLength=68>",
   "base64",
 );
 
@@ -151,15 +153,17 @@ main().catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });
-<!-- END EXACT SOURCE: tests/harness/scenarios/42.5-ui-fidelity-visual.mjs -->
+<!-- END SANITIZED SNAPSHOT: tests/harness/scenarios/42.5-ui-fidelity-visual.mjs -->
 
 ## section-02 — `tests/harness/scenarios/43-sport-ui-built-smoke.mjs`
 
-sourceSha256: `6b2dc50c4650ee218dd31cf0fe50ae2f7e8a7f824abce91d38452c21037d2f74`
-sourceByteLength: 11747
-exactTextProof: sourceBytesEqualAggregateSection
+originalSourceSha256: `6b2dc50c4650ee218dd31cf0fe50ae2f7e8a7f824abce91d38452c21037d2f74`
+originalSourceByteLength: 11747
+sanitizationProof: deterministic-redaction-v1
+sanitizedSnapshotSha256: `6b2dc50c4650ee218dd31cf0fe50ae2f7e8a7f824abce91d38452c21037d2f74`
+sanitizedSnapshotByteLength: 11747
 
-<!-- BEGIN EXACT SOURCE: tests/harness/scenarios/43-sport-ui-built-smoke.mjs -->
+<!-- BEGIN SANITIZED SNAPSHOT: tests/harness/scenarios/43-sport-ui-built-smoke.mjs -->
 #!/usr/bin/env node
 // Visual evidence command:
 // yarn build
@@ -509,15 +513,17 @@ main().catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });
-<!-- END EXACT SOURCE: tests/harness/scenarios/43-sport-ui-built-smoke.mjs -->
+<!-- END SANITIZED SNAPSHOT: tests/harness/scenarios/43-sport-ui-built-smoke.mjs -->
 
 ## section-03 — `tests/harness/scenarios/49-history-dashboard-polish-visual.mjs`
 
-sourceSha256: `17c25a8317b0140ffa05efe5f3349bf118b2d8d32f6455325dc828379db14c0d`
-sourceByteLength: 28191
-exactTextProof: sourceBytesEqualAggregateSection
+originalSourceSha256: `17c25a8317b0140ffa05efe5f3349bf118b2d8d32f6455325dc828379db14c0d`
+originalSourceByteLength: 28191
+sanitizationProof: deterministic-redaction-v1
+sanitizedSnapshotSha256: `d4530516f92fb514389ebd73a33a264ad7bccf00e9cb752844ff07fbcf5d5db0`
+sanitizedSnapshotByteLength: 28277
 
-<!-- BEGIN EXACT SOURCE: tests/harness/scenarios/49-history-dashboard-polish-visual.mjs -->
+<!-- BEGIN SANITIZED SNAPSHOT: tests/harness/scenarios/49-history-dashboard-polish-visual.mjs -->
 #!/usr/bin/env node
 // Visual evidence command:
 // yarn build
@@ -736,7 +742,7 @@ function phase49MockScript() {
     }
     Object.setPrototypeOf(Phase49Date, NativeDate);
     window.Date = Phase49Date;
-    const deviceId = "phase49-visual-device";
+    const deviceId = "<REDACTED_IDENTIFIER sha256=54abb6882f1d2af20ce75b8938a93de0f50e10432b81a8a8f934c10efd229590 byteLength=21>";
     const targets = { calories: 2000, protein: 100, carbs: 250, fat: 70 };
     const startSummary = {
       date: "2026-05-06",
@@ -1182,15 +1188,17 @@ main().catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });
-<!-- END EXACT SOURCE: tests/harness/scenarios/49-history-dashboard-polish-visual.mjs -->
+<!-- END SANITIZED SNAPSHOT: tests/harness/scenarios/49-history-dashboard-polish-visual.mjs -->
 
 ## section-04 — `tests/harness/scenarios/77-history-loading-visual.mjs`
 
-sourceSha256: `c70594d067cee3b9a2da40edf856dd70d9841fc5a872e211d100a5607dd10546`
-sourceByteLength: 36463
-exactTextProof: sourceBytesEqualAggregateSection
+originalSourceSha256: `c70594d067cee3b9a2da40edf856dd70d9841fc5a872e211d100a5607dd10546`
+originalSourceByteLength: 36463
+sanitizationProof: deterministic-redaction-v1
+sanitizedSnapshotSha256: `ddf62785cb0ec4d433bbce202a7fb5131d2137141518bc98bc61740aef5ebe22`
+sanitizedSnapshotByteLength: 36546
 
-<!-- BEGIN EXACT SOURCE: tests/harness/scenarios/77-history-loading-visual.mjs -->
+<!-- BEGIN SANITIZED SNAPSHOT: tests/harness/scenarios/77-history-loading-visual.mjs -->
 #!/usr/bin/env node
 // Visual evidence command:
 // yarn build
@@ -1407,7 +1415,7 @@ function phase77MockScript() {
     Object.setPrototypeOf(Phase77Date, NativeDate);
     window.Date = Phase77Date;
 
-    const deviceId = "phase77-synthetic-device";
+    const deviceId = "<REDACTED_IDENTIFIER sha256=f9de3b107e785084ad38a2702883ac134c3b5a2b6a14ee7e904ebb01cbb56591 byteLength=24>";
     const targets = { calories: 2000, protein: 100, carbs: 250, fat: 70 };
     const currentSummary = {
       date: "2026-05-06",
@@ -2032,15 +2040,17 @@ main().catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });
-<!-- END EXACT SOURCE: tests/harness/scenarios/77-history-loading-visual.mjs -->
+<!-- END SANITIZED SNAPSHOT: tests/harness/scenarios/77-history-loading-visual.mjs -->
 
 ## section-05 — `tests/harness/scenarios/81-mobile-action-safety-visual.mjs`
 
-sourceSha256: `6f61aab8a33bfa211c777872326ebf8824ad7aec65ae8dcff9d36af5427b58af`
-sourceByteLength: 35263
-exactTextProof: sourceBytesEqualAggregateSection
+originalSourceSha256: `6f61aab8a33bfa211c777872326ebf8824ad7aec65ae8dcff9d36af5427b58af`
+originalSourceByteLength: 35263
+sanitizationProof: deterministic-redaction-v1
+sanitizedSnapshotSha256: `b95cea9858cb01779fec49e2f24bbd3e7b07e5a53cdfa2373bd8fce47fab1372`
+sanitizedSnapshotByteLength: 35785
 
-<!-- BEGIN EXACT SOURCE: tests/harness/scenarios/81-mobile-action-safety-visual.mjs -->
+<!-- BEGIN SANITIZED SNAPSHOT: tests/harness/scenarios/81-mobile-action-safety-visual.mjs -->
 #!/usr/bin/env node
 // Visual evidence command:
 // yarn build
@@ -2344,8 +2354,8 @@ function phase81MockScript() {
     };
     const meals = [
       {
-        id: "phase81-single-meal",
-        mealRevisionId: "phase81-single-meal-r1",
+        id: "<REDACTED_IDENTIFIER sha256=6c5b456588ba7c36fc69261719bbcd2579d5d707ad9adf8be2b1b4f5b5ebbcd9 byteLength=19>",
+        mealRevisionId: "<REDACTED_IDENTIFIER sha256=6c5b456588ba7c36fc69261719bbcd2579d5d707ad9adf8be2b1b4f5b5ebbcd9 byteLength=19>-r1",
         foodName: "雞胸便當",
         calories: 620,
         protein: 42,
@@ -2358,8 +2368,8 @@ function phase81MockScript() {
         imageUrl: null
       },
       {
-        id: "phase81-grouped-meal",
-        mealRevisionId: "phase81-grouped-meal-r1",
+        id: "<REDACTED_IDENTIFIER sha256=7bbcbcf26b4b3b32fadf888e8216748ef49e3c91411a1372a1f466b70af2603d byteLength=20>",
+        mealRevisionId: "<REDACTED_IDENTIFIER sha256=7bbcbcf26b4b3b32fadf888e8216748ef49e3c91411a1372a1f466b70af2603d byteLength=20>-r1",
         foodName: "豆腐青菜組合",
         calories: 360,
         protein: 20,
@@ -2381,7 +2391,7 @@ function phase81MockScript() {
 
     localStorage.clear();
     sessionStorage.clear();
-    localStorage.setItem("deviceId", "phase81-visual-device");
+    localStorage.setItem("deviceId", "<REDACTED_IDENTIFIER sha256=938d7807492f995e4c48c4f1881eefbd4ecf62c2bda1a25ba5696bcad454d8b2 byteLength=21>");
     localStorage.setItem("goal", "維持健康飲食");
     localStorage.setItem("dailyTargets", JSON.stringify(targets));
     window.__phase81VisualState = {
@@ -2417,7 +2427,7 @@ function phase81MockScript() {
       }
       if (url.pathname === "/api/device/session") {
         return Promise.resolve(jsonResponse({
-          deviceId: "phase81-visual-device",
+          deviceId: "<REDACTED_IDENTIFIER sha256=938d7807492f995e4c48c4f1881eefbd4ecf62c2bda1a25ba5696bcad454d8b2 byteLength=21>",
           goal: "maintenance",
           dailyTargets: targets,
           establishedBy: "legacy_migration"
@@ -2947,15 +2957,17 @@ main().catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });
-<!-- END EXACT SOURCE: tests/harness/scenarios/81-mobile-action-safety-visual.mjs -->
+<!-- END SANITIZED SNAPSHOT: tests/harness/scenarios/81-mobile-action-safety-visual.mjs -->
 
 ## section-06 — `tests/harness/scenarios/82-history-meal-navigation-visual.mjs`
 
-sourceSha256: `7f9d2092ab9bad4d8719902c278b7ce4d412b6a8337b860834e9e426ee4d1a7f`
-sourceByteLength: 35791
-exactTextProof: sourceBytesEqualAggregateSection
+originalSourceSha256: `7f9d2092ab9bad4d8719902c278b7ce4d412b6a8337b860834e9e426ee4d1a7f`
+originalSourceByteLength: 35791
+sanitizationProof: deterministic-redaction-v1
+sanitizedSnapshotSha256: `4cf7f11867244b6d1eea3cf2fc1fc7b10665ece6f8813a10777a7bc1c04062b0`
+sanitizedSnapshotByteLength: 37031
 
-<!-- BEGIN EXACT SOURCE: tests/harness/scenarios/82-history-meal-navigation-visual.mjs -->
+<!-- BEGIN SANITIZED SNAPSHOT: tests/harness/scenarios/82-history-meal-navigation-visual.mjs -->
 #!/usr/bin/env node
 // Visual evidence command:
 // yarn build
@@ -3206,8 +3218,8 @@ function phase82MockScript() {
       mealCount: 2
     };
     const focusedMeal = {
-      id: "phase82-lunch",
-      mealRevisionId: "phase82-lunch-r1",
+      id: "<REDACTED_IDENTIFIER sha256=1b198984416d2b28ee8290bf04369e3ecd23d804e0cba17101fac614a1a2a263 byteLength=13>",
+      mealRevisionId: "<REDACTED_IDENTIFIER sha256=1b198984416d2b28ee8290bf04369e3ecd23d804e0cba17101fac614a1a2a263 byteLength=13>-r1",
       foodName: "雞胸藜麥便當",
       calories: 640,
       protein: 46,
@@ -3220,8 +3232,8 @@ function phase82MockScript() {
       mealPeriod: "lunch"
     };
     const breakfastMeal = {
-      id: "phase82-breakfast",
-      mealRevisionId: "phase82-breakfast-r1",
+      id: "<REDACTED_IDENTIFIER sha256=ecd1b28098e7edf678c645f4bd17beb2bb64c2846a3267ffaf523679dc9b38b1 byteLength=17>",
+      mealRevisionId: "<REDACTED_IDENTIFIER sha256=ecd1b28098e7edf678c645f4bd17beb2bb64c2846a3267ffaf523679dc9b38b1 byteLength=17>-r1",
       foodName: "燕麥優格杯",
       calories: 420,
       protein: 24,
@@ -3243,16 +3255,16 @@ function phase82MockScript() {
         date: "2026-06-02",
         summary: { date: "2026-06-02", totalCalories: 1510, totalProtein: 84, totalCarbs: 170, totalFat: 45, mealCount: 2 },
         meals: [
-          { ...breakfastMeal, id: "phase82-prev-breakfast", mealRevisionId: "phase82-prev-breakfast-r1", foodName: "地瓜蛋沙拉", loggedAt: "2026-06-02T08:30:00+08:00" },
-          { ...focusedMeal, id: "phase82-prev-lunch", mealRevisionId: "phase82-prev-lunch-r1", foodName: "鮭魚飯盒", loggedAt: "2026-06-02T12:35:00+08:00" }
+          { ...breakfastMeal, id: "<REDACTED_IDENTIFIER sha256=79a254c2c1d7c0172cbbd16d0222ed5376cd52656776f3edb0bca8d126b83a91 byteLength=22>", mealRevisionId: "<REDACTED_IDENTIFIER sha256=79a254c2c1d7c0172cbbd16d0222ed5376cd52656776f3edb0bca8d126b83a91 byteLength=22>-r1", foodName: "地瓜蛋沙拉", loggedAt: "2026-06-02T08:30:00+08:00" },
+          { ...focusedMeal, id: "<REDACTED_IDENTIFIER sha256=6313dfa89cd65597b17b4cb070863c7b94a1bcc915ed6f802f805537fdd8e8f5 byteLength=18>", mealRevisionId: "<REDACTED_IDENTIFIER sha256=6313dfa89cd65597b17b4cb070863c7b94a1bcc915ed6f802f805537fdd8e8f5 byteLength=18>-r1", foodName: "鮭魚飯盒", loggedAt: "2026-06-02T12:35:00+08:00" }
         ]
       },
       "2026-05-26": {
         date: "2026-05-26",
         summary: { date: "2026-05-26", totalCalories: 1390, totalProtein: 70, totalCarbs: 148, totalFat: 42, mealCount: 2 },
         meals: [
-          { ...breakfastMeal, id: "phase82-old-breakfast", mealRevisionId: "phase82-old-breakfast-r1", foodName: "紫米飯糰", loggedAt: "2026-05-26T08:30:00+08:00" },
-          { ...focusedMeal, id: "phase82-old-lunch", mealRevisionId: "phase82-old-lunch-r1", foodName: "番茄牛肉麵", loggedAt: "2026-05-26T12:30:00+08:00" }
+          { ...breakfastMeal, id: "<REDACTED_IDENTIFIER sha256=b8db7dcb05b1676c2dfba3e68503264550a2c22afdff4df25abc16528e3f341a byteLength=21>", mealRevisionId: "<REDACTED_IDENTIFIER sha256=b8db7dcb05b1676c2dfba3e68503264550a2c22afdff4df25abc16528e3f341a byteLength=21>-r1", foodName: "紫米飯糰", loggedAt: "2026-05-26T08:30:00+08:00" },
+          { ...focusedMeal, id: "<REDACTED_IDENTIFIER sha256=54a10ffea82fec206ff419684a3f1c5484541b62d3d9a80e08c2977ca986909b byteLength=17>", mealRevisionId: "<REDACTED_IDENTIFIER sha256=54a10ffea82fec206ff419684a3f1c5484541b62d3d9a80e08c2977ca986909b byteLength=17>-r1", foodName: "番茄牛肉麵", loggedAt: "2026-05-26T12:30:00+08:00" }
         ]
       }
     };
@@ -3297,7 +3309,7 @@ function phase82MockScript() {
 
     localStorage.clear();
     sessionStorage.clear();
-    localStorage.setItem("deviceId", "phase82-visual-device");
+    localStorage.setItem("deviceId", "<REDACTED_IDENTIFIER sha256=9cd1bbac481d4a43bce073d4bb425b9f2871e8f996a1c3ab9e5b3aa1377acbfc byteLength=21>");
     localStorage.setItem("goal", "maintenance");
     localStorage.setItem("dailyTargets", JSON.stringify(targets));
     window.__phase82VisualState = { unsafeCalls: [], interactions: [], mockCategories: ${JSON.stringify(MOCK_CATEGORIES)} };
@@ -3311,7 +3323,7 @@ function phase82MockScript() {
         return Promise.resolve(jsonResponse({ meals: [breakfastMeal, focusedMeal] }));
       }
       if (url.pathname === "/api/device/session") {
-        return Promise.resolve(jsonResponse({ deviceId: "phase82-visual-device", goal: "maintenance", dailyTargets: targets, establishedBy: "legacy_migration" }));
+        return Promise.resolve(jsonResponse({ deviceId: "<REDACTED_IDENTIFIER sha256=9cd1bbac481d4a43bce073d4bb425b9f2871e8f996a1c3ab9e5b3aa1377acbfc byteLength=21>", goal: "maintenance", dailyTargets: targets, establishedBy: "legacy_migration" }));
       }
       if (url.pathname === "/api/history/trends") {
         const trend = trendsByFrom[url.searchParams.get("from") ?? ""] ?? trendsByFrom["2026-06-08"];
@@ -3807,15 +3819,17 @@ main().catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });
-<!-- END EXACT SOURCE: tests/harness/scenarios/82-history-meal-navigation-visual.mjs -->
+<!-- END SANITIZED SNAPSHOT: tests/harness/scenarios/82-history-meal-navigation-visual.mjs -->
 
 ## section-07 — `tests/harness/scenarios/87-onboarding-age-wheel-320px-fix-visual.mjs`
 
-sourceSha256: `c4e98f578966260b5dece78096d27fd74076318a1a1b5b16a3047093983b5ced`
-sourceByteLength: 28851
-exactTextProof: sourceBytesEqualAggregateSection
+originalSourceSha256: `c4e98f578966260b5dece78096d27fd74076318a1a1b5b16a3047093983b5ced`
+originalSourceByteLength: 28851
+sanitizationProof: deterministic-redaction-v1
+sanitizedSnapshotSha256: `8ec0b5c4e7f7911843da8ab858ac115289aecf9a30b92997105db442364f4c5a`
+sanitizedSnapshotByteLength: 28944
 
-<!-- BEGIN EXACT SOURCE: tests/harness/scenarios/87-onboarding-age-wheel-320px-fix-visual.mjs -->
+<!-- BEGIN SANITIZED SNAPSHOT: tests/harness/scenarios/87-onboarding-age-wheel-320px-fix-visual.mjs -->
 #!/usr/bin/env node
 // Visual evidence command:
 // yarn build
@@ -4112,7 +4126,7 @@ function phase87MockScript() {
       if (path === "/api/device" && String(init.method || "GET").toUpperCase() === "POST") {
         window.__phase87VisualState.interceptedCalls.push("device-submit");
         return new Response(JSON.stringify({
-          deviceId: "phase87-device",
+          deviceId: "<REDACTED_IDENTIFIER sha256=8b997f06cf3b4f075d545a63d408b16d4226bd86f909f4a138540daf9febaa74 byteLength=14>",
           dailyTargets: { calories: 2100, protein: 130, carbs: 240, fat: 70 },
           coachExplanation: "metadata-only deterministic target note",
           usedFallback: false
@@ -4555,4 +4569,4 @@ main().catch((error) => {
   console.error(error);
   process.exit(1);
 });
-<!-- END EXACT SOURCE: tests/harness/scenarios/87-onboarding-age-wheel-320px-fix-visual.mjs -->
+<!-- END SANITIZED SNAPSHOT: tests/harness/scenarios/87-onboarding-age-wheel-320px-fix-visual.mjs -->
