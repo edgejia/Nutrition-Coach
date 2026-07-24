@@ -1,0 +1,26 @@
+# Pre-delete caller scan evidence
+
+This evidence was captured before any candidate source was removed.
+
+sourcePresentBeforeDelete: true
+scanScope: repository root with hidden files included; tests/fixtures/historical/**, .planning/**, and .git/** excluded
+excludedCandidatePaths:
+- tests/harness/scenarios/42.5-ui-fidelity-visual.mjs
+- tests/harness/scenarios/43-sport-ui-built-smoke.mjs
+- tests/harness/scenarios/49-history-dashboard-polish-visual.mjs
+- tests/harness/scenarios/77-history-loading-visual.mjs
+- tests/harness/scenarios/81-mobile-action-safety-visual.mjs
+- tests/harness/scenarios/82-history-meal-navigation-visual.mjs
+- tests/harness/scenarios/87-onboarding-age-wheel-320px-fix-visual.mjs
+
+command:
+rg -n --hidden --glob '!tests/fixtures/historical/**' --glob '!.planning/**' --glob '!.git/**' --glob '!tests/harness/scenarios/42.5-ui-fidelity-visual.mjs' --glob '!tests/harness/scenarios/43-sport-ui-built-smoke.mjs' --glob '!tests/harness/scenarios/49-history-dashboard-polish-visual.mjs' --glob '!tests/harness/scenarios/77-history-loading-visual.mjs' --glob '!tests/harness/scenarios/81-mobile-action-safety-visual.mjs' --glob '!tests/harness/scenarios/82-history-meal-navigation-visual.mjs' --glob '!tests/harness/scenarios/87-onboarding-age-wheel-320px-fix-visual.mjs' -e 'tests/harness/scenarios/(42\.5-ui-fidelity-visual|43-sport-ui-built-smoke|49-history-dashboard-polish-visual|77-history-loading-visual|81-mobile-action-safety-visual|82-history-meal-navigation-visual|87-onboarding-age-wheel-320px-fix-visual)\.mjs' .
+
+filteredExternalCallerRows:
+- (none)
+
+result: zero external callers
+exitCode: 1
+filteredResultDefinition: UTF-8 bytes of sorted unique path:line rows joined by newline; empty bytes when no external callers
+filteredResultSha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+filteredResultByteLength: 0

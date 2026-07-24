@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "archiveStatus": "historical-non-runnable",
+  "archiveFile": "tests/fixtures/historical/ui-visual/visual-scripts-aggregate.mjs.md",
+  "callerEvidenceFile": "tests/fixtures/historical/ui-visual/caller-evidence.txt",
+  "sourcePresentBeforeDelete": true,
+  "archiveOrder": [
+    "section-01",
+    "section-02",
+    "section-03",
+    "section-04",
+    "section-05",
+    "section-06",
+    "section-07"
+  ],
+  "retainedActiveScenarios": [
+    "tests/harness/scenarios/110-home-nutrition-animation-visual.mjs"
+  ],
+  "rows": [
+    {
+      "originalPath": "tests/harness/scenarios/42.5-ui-fidelity-visual.mjs",
+      "aggregateSection": "section-01",
+      "sourceSha256": "a71b02dc6dac0259e8d5cdbaaf965701b0839a5cdcb79ccf3f92cda7fe6dbf6b",
+      "sourceByteLength": 5708,
+      "snapshotSha256": "a71b02dc6dac0259e8d5cdbaaf965701b0839a5cdcb79ccf3f92cda7fe6dbf6b",
+      "snapshotByteLength": 5708,
+      "exactTextProof": "sourceBytesEqualAggregateSection",
+      "callerEvidenceRef": "caller-evidence.txt#filteredExternalCallerRows",
+      "archiveOrder": 1,
+      "activeCallers": 0,
+      "replacementProof": "Exact source bytes are preserved in the named non-runnable aggregate section.",
+      "remainingRisk": "Historical UI behavior is not re-executed by this archive; visual judgement remains human-only."
+    },
+    {
+      "originalPath": "tests/harness/scenarios/43-sport-ui-built-smoke.mjs",
+      "aggregateSection": "section-02",
+      "sourceSha256": "6b2dc50c4650ee218dd31cf0fe50ae2f7e8a7f824abce91d38452c21037d2f74",
+      "sourceByteLength": 11747,
+      "snapshotSha256": "6b2dc50c4650ee218dd31cf0fe50ae2f7e8a7f824abce91d38452c21037d2f74",
+      "snapshotByteLength": 11747,
+      "exactTextProof": "sourceBytesEqualAggregateSection",
+      "callerEvidenceRef": "caller-evidence.txt#filteredExternalCallerRows",
+      "archiveOrder": 2,
+      "activeCallers": 0,
+      "replacementProof": "Exact source bytes are preserved in the named non-runnable aggregate section.",
+      "remainingRisk": "Historical UI behavior is not re-executed by this archive; visual judgement remains human-only."
+    },
+    {
+      "originalPath": "tests/harness/scenarios/49-history-dashboard-polish-visual.mjs",
+      "aggregateSection": "section-03",
+      "sourceSha256": "17c25a8317b0140ffa05efe5f3349bf118b2d8d32f6455325dc828379db14c0d",
+      "sourceByteLength": 28191,
+      "snapshotSha256": "17c25a8317b0140ffa05efe5f3349bf118b2d8d32f6455325dc828379db14c0d",
+      "snapshotByteLength": 28191,
+      "exactTextProof": "sourceBytesEqualAggregateSection",
+      "callerEvidenceRef": "caller-evidence.txt#filteredExternalCallerRows",
+      "archiveOrder": 3,
+      "activeCallers": 0,
+      "replacementProof": "Exact source bytes are preserved in the named non-runnable aggregate section.",
+      "remainingRisk": "Historical UI behavior is not re-executed by this archive; visual judgement remains human-only."
+    },
+    {
+      "originalPath": "tests/harness/scenarios/77-history-loading-visual.mjs",
+      "aggregateSection": "section-04",
+      "sourceSha256": "c70594d067cee3b9a2da40edf856dd70d9841fc5a872e211d100a5607dd10546",
+      "sourceByteLength": 36463,
+      "snapshotSha256": "c70594d067cee3b9a2da40edf856dd70d9841fc5a872e211d100a5607dd10546",
+      "snapshotByteLength": 36463,
+      "exactTextProof": "sourceBytesEqualAggregateSection",
+      "callerEvidenceRef": "caller-evidence.txt#filteredExternalCallerRows",
+      "archiveOrder": 4,
+      "activeCallers": 0,
+      "replacementProof": "Exact source bytes are preserved in the named non-runnable aggregate section.",
+      "remainingRisk": "Historical UI behavior is not re-executed by this archive; visual judgement remains human-only."
+    },
+    {
+      "originalPath": "tests/harness/scenarios/81-mobile-action-safety-visual.mjs",
+      "aggregateSection": "section-05",
+      "sourceSha256": "6f61aab8a33bfa211c777872326ebf8824ad7aec65ae8dcff9d36af5427b58af",
+      "sourceByteLength": 35263,
+      "snapshotSha256": "6f61aab8a33bfa211c777872326ebf8824ad7aec65ae8dcff9d36af5427b58af",
+      "snapshotByteLength": 35263,
+      "exactTextProof": "sourceBytesEqualAggregateSection",
+      "callerEvidenceRef": "caller-evidence.txt#filteredExternalCallerRows",
+      "archiveOrder": 5,
+      "activeCallers": 0,
+      "replacementProof": "Exact source bytes are preserved in the named non-runnable aggregate section.",
+      "remainingRisk": "Historical UI behavior is not re-executed by this archive; visual judgement remains human-only."
+    },
+    {
+      "originalPath": "tests/harness/scenarios/82-history-meal-navigation-visual.mjs",
+      "aggregateSection": "section-06",
+      "sourceSha256": "7f9d2092ab9bad4d8719902c278b7ce4d412b6a8337b860834e9e426ee4d1a7f",
+      "sourceByteLength": 35791,
+      "snapshotSha256": "7f9d2092ab9bad4d8719902c278b7ce4d412b6a8337b860834e9e426ee4d1a7f",
+      "snapshotByteLength": 35791,
+      "exactTextProof": "sourceBytesEqualAggregateSection",
+      "callerEvidenceRef": "caller-evidence.txt#filteredExternalCallerRows",
+      "archiveOrder": 6,
+      "activeCallers": 0,
+      "replacementProof": "Exact source bytes are preserved in the named non-runnable aggregate section.",
+      "remainingRisk": "Historical UI behavior is not re-executed by this archive; visual judgement remains human-only."
+    },
+    {
+      "originalPath": "tests/harness/scenarios/87-onboarding-age-wheel-320px-fix-visual.mjs",
+      "aggregateSection": "section-07",
+      "sourceSha256": "c4e98f578966260b5dece78096d27fd74076318a1a1b5b16a3047093983b5ced",
+      "sourceByteLength": 28851,
+      "snapshotSha256": "c4e98f578966260b5dece78096d27fd74076318a1a1b5b16a3047093983b5ced",
+      "snapshotByteLength": 28851,
+      "exactTextProof": "sourceBytesEqualAggregateSection",
+      "callerEvidenceRef": "caller-evidence.txt#filteredExternalCallerRows",
+      "archiveOrder": 7,
+      "activeCallers": 0,
+      "replacementProof": "Exact source bytes are preserved in the named non-runnable aggregate section.",
+      "remainingRisk": "Historical UI behavior is not re-executed by this archive; visual judgement remains human-only."
+    }
+  ]
+}
