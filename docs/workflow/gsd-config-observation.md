@@ -1,7 +1,7 @@
 # GSD Configuration Observation — Phase 129 WFR-06
 
-Status: `human_needed`  
-Scope: metadata-only observation of the installed GSD baseline  
+Status: `human_needed`
+Scope: metadata-only observation of the installed GSD baseline
 Observation date: 2026-07-25 (Asia/Taipei)
 
 ## Decision record
