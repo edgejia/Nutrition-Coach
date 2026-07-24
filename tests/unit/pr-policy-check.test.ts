@@ -188,13 +188,77 @@ describe("pr policy gate", () => {
       body: "Closes #123",
       labels: ["no-changelog"],
       issues: {
-        123: { title: "Feature tracker", labels: ["feature-request", "approved-feature"] },
+        123: { title: "Feature tracker", labels: ["feature-request", "approved-feature", "ready-for-pr"] },
       },
     });
 
     assert.equal(result.status, 0, result.output);
     assert.match(result.output, /Detected PR kind\(s\): feature/);
     assert.match(result.output, /\[pr-policy\] PASS/);
+  });
+
+  test("requires issue-side ready-for-pr on the linked issue", () => {
+    const result = runPrPolicy({
+      title: "feat: add tracker",
+      body: "Closes #123",
+      labels: ["no-changelog"],
+      issues: {
+        123: { title: "Feature tracker", labels: ["feature-request", "approved-feature"] },
+      },
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.output, /#123.*ready-for-pr/);
+  });
+
+  test("does not accept an issue-side no-changelog label", () => {
+    const result = runPrPolicy({
+      title: "[Chore] tidy policy docs",
+      body: "Closes #123",
+      issues: {
+        123: { title: "Maintenance", labels: ["type: chore", "ready-for-pr", "no-changelog"] },
+      },
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.output, /must update CHANGELOG\.md or carry the `no-changelog` label/);
+  });
+
+  test("maps fixed request markers to their stable PR kinds", () => {
+    const cases = [
+      {
+        marker: "Feature",
+        kind: "feature",
+        labels: ["feature-request", "approved-feature", "ready-for-pr"],
+      },
+      {
+        marker: "Enhancement",
+        kind: "enhancement",
+        labels: ["enhancement", "approved-enhancement", "ready-for-pr"],
+      },
+      {
+        marker: "Bug",
+        kind: "fix",
+        labels: ["bug", "confirmed-bug", "ready-for-pr"],
+      },
+      {
+        marker: "Chore",
+        kind: "chore",
+        labels: ["type: chore", "ready-for-pr"],
+      },
+    ];
+
+    for (const { marker, kind, labels } of cases) {
+      const result = runPrPolicy({
+        title: `[${marker}] update policy`,
+        body: "Closes #123",
+        labels: ["no-changelog"],
+        issues: { 123: { title: "Request", labels } },
+      });
+
+      assert.equal(result.status, 0, `${marker} marker failed:\n${result.output}`);
+      assert.match(result.output, new RegExp(`Detected PR kind\\(s\\): ${kind}\\n`));
+    }
   });
 
   test("rejects feature approval labels that are only on the PR", () => {
