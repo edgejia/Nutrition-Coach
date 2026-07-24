@@ -177,9 +177,13 @@ function callerEvidenceMatches(evidence: string, manifest: any) {
   assert.equal(recorded.filteredResultByteLength, String(Buffer.byteLength(payload, "utf8")));
 }
 
-function sourceFilesAbsent(paths: string[]) {
+function sourceFilesAbsent(paths: string[], simulatedPresent = new Set<string>()) {
   for (const originalPath of paths) {
-    assert.equal(existsSync(originalPath), false, "removed source remains: " + originalPath);
+    assert.equal(
+      simulatedPresent.has(originalPath) || existsSync(originalPath),
+      false,
+      "removed source remains: " + originalPath,
+    );
   }
   assert.equal(existsSync(RETAINED_110), true, "retained 110 scenario must remain callable");
 }
@@ -265,16 +269,19 @@ describe("Phase 129 OBS-01 historical UI visual archive contract", () => {
 
     const duplicateSection = structuredClone(manifest);
     duplicateSection.rows[1].aggregateSection = duplicateSection.rows[0].aggregateSection;
-    assert.throws(() => manifestShape(duplicateSection), /unique aggregate sections/);
+    assert.throws(() => manifestShape(duplicateSection), /aggregate sections must be unique/);
 
     const hashDrift = structuredClone(manifest);
     hashDrift.rows[0].sourceSha256 = "0".repeat(64);
     assert.throws(() => archiveRowsMatch(hashDrift, aggregate), /source hash mismatch/);
 
     const callerDrift = evidence.replace("filteredResultByteLength: 0", "filteredResultByteLength: 1");
-    assert.throws(() => callerEvidenceMatches(callerDrift, manifest), /filteredResultByteLength/);
+    assert.throws(() => callerEvidenceMatches(callerDrift, manifest), /strictly equal|1.*0/);
 
-    assert.throws(() => sourceFilesAbsent([expectedPaths()[0]]), /removed source remains/);
+    assert.throws(
+      () => sourceFilesAbsent([expectedPaths()[0]], new Set([expectedPaths()[0]])),
+      /removed source remains/,
+    );
 
     assert.throws(
       () => metadataOnly(readme + "\nvisual approval: passed\n", manifestText),
