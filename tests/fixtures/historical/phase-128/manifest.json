@@ -1,0 +1,66 @@
+{
+  "archiveStatus": "historical-non-runnable",
+  "archiveStage": "pre-removal",
+  "evidenceMode": "metadata-only",
+  "archiveDirectory": "tests/fixtures/historical/phase-128",
+  "callerEvidenceFile": "tests/fixtures/historical/phase-128/caller-evidence.txt",
+  "canonicalInventory": "docs/workflow/gsd-workflow-inventory.md",
+  "canonicalEvidencePayloadSha256": "6537771da57c8add4239494ad3dd5414327e81344a31c589a5cd05bbfca2638f",
+  "canonicalEvidencePayloadByteLength": 2500,
+  "archiveOrder": [
+    "tests/fixtures/historical/phase-128/phase-128-readiness-audit-negative-controls.test.md",
+    "tests/fixtures/historical/phase-128/phase-128-artifact-integrity.ts.md"
+  ],
+  "rows": [
+    {
+      "originalPath": "tests/integration/phase-128-readiness-audit-negative-controls.test.ts",
+      "archivePath": "tests/fixtures/historical/phase-128/phase-128-readiness-audit-negative-controls.test.md",
+      "archiveOrder": 1,
+      "sourceSha256": "090865f4339ba00d0205bc638cc27c77c106dbcedca5e225483d94f13571ba4e",
+      "sourceByteLength": 654,
+      "snapshotSha256": "090865f4339ba00d0205bc638cc27c77c106dbcedca5e225483d94f13571ba4e",
+      "snapshotByteLength": 654,
+      "snapshotFileSha256": "a87049c47e77f88c10aec6b9ca0b5f1a5eab3368fd1d89a5802768133bc9933a",
+      "snapshotFileByteLength": 1049,
+      "exactTextProof": "sourceBytesEqualSnapshotBytes",
+      "callerEvidenceRef": "caller-evidence.txt#canonicalEvidencePayload",
+      "preRemovalDiscoveryCallers": [
+        "package.json:test -> tests/unit/*.test.ts tests/integration/*.test.ts",
+        "package.json:test:integration -> tests/integration/*.test.ts",
+        "scripts/release-check.mjs: Full test suite -> [test]",
+        ".github/workflows/pr-check.yml -> yarn release:check",
+        ".github/workflows/manual-release-diagnostic.yml -> yarn release:check"
+      ],
+      "preRemovalDiscoveryClassification": "live package-glob caller and transitive release-check/CI reachability",
+      "sourcePresentBeforeDelete": true,
+      "postRemovalActiveCallers": "pending-until-task-2",
+      "supersededBy": "tests/unit/phase129-phase128-readiness-replacement-contract.test.ts#PHASE_129_READINESS_REPLACEMENT",
+      "replacementProof": "Named executable replacement asserts source_release_only + deferred + NO-GO and fails closed for scope/status/verdict mutation.",
+      "remainingRisk": "Future package or release-gate changes require another bounded caller scan after source removal.",
+      "archiveStageProof": "archive-before-deletion"
+    },
+    {
+      "originalPath": "tests/harness/scenarios/phase-128-artifact-integrity.ts",
+      "archivePath": "tests/fixtures/historical/phase-128/phase-128-artifact-integrity.ts.md",
+      "archiveOrder": 2,
+      "sourceSha256": "7a8cf81a1fb6e1eb43111455eb084c7a2896bccb3e59c5b9117e0ebfc4d878ff",
+      "sourceByteLength": 1137,
+      "snapshotSha256": "7a8cf81a1fb6e1eb43111455eb084c7a2896bccb3e59c5b9117e0ebfc4d878ff",
+      "snapshotByteLength": 1137,
+      "snapshotFileSha256": "eea0dc36c83546242148969f50f8da1c0b6b0633e0a6d61ca36deb73b78db309",
+      "snapshotFileByteLength": 1493,
+      "exactTextProof": "sourceBytesEqualSnapshotBytes",
+      "callerEvidenceRef": "caller-evidence.txt#canonicalEvidencePayload",
+      "preRemovalDiscoveryCallers": [
+        "tests/harness/run.ts -> dynamic import ./scenarios/${name}.js"
+      ],
+      "preRemovalDiscoveryClassification": "dynamic-name harness reachability only; no static invocation found",
+      "sourcePresentBeforeDelete": true,
+      "postRemovalActiveCallers": "pending-until-task-2",
+      "supersededBy": "tests/harness/run.ts lifecycle/artifact controls",
+      "replacementProof": "Current harness runner owns deterministic lifecycle cleanup and metadata-only artifact policy; no explicit Phase 128 scenario invocation remains.",
+      "remainingRisk": "A future dynamic scenario name could recreate a retired source; rerun bounded discovery when harness names change.",
+      "archiveStageProof": "archive-before-deletion"
+    }
+  ]
+}
