@@ -5,10 +5,6 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, test } from "node:test";
-import {
-  assertDeferredReadinessInvariant,
-  assertDeferredReadinessMutationNegativeControl,
-} from "./phase129-phase128-readiness-replacement-contract.test.ts";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const ARCHIVE_DIR = "tests/fixtures/historical/phase-128";
@@ -16,6 +12,7 @@ const MANIFEST_PATH = path.join(REPO_ROOT, ARCHIVE_DIR, "manifest.json");
 const EVIDENCE_PATH = path.join(REPO_ROOT, ARCHIVE_DIR, "caller-evidence.txt");
 const README_PATH = path.join(REPO_ROOT, ARCHIVE_DIR, "README.md");
 const CANONICAL_INVENTORY_LINK = "../../../docs/workflow/gsd-workflow-inventory.md";
+const REPLACEMENT_CONTRACT_URL = new URL("./phase129-phase128-readiness-replacement-contract.test.ts", import.meta.url);
 const EXPECTED_ROWS = [
   {
     originalPath: "tests/integration/phase-128-readiness-audit-negative-controls.test.ts",
@@ -284,9 +281,10 @@ describe("Phase 129 WFR-07 Phase 128 archive contract", () => {
     archiveRowsMatch(readManifest());
   });
 
-  test("replacement invariant and mutation negative control execute independently", () => {
-    assertDeferredReadinessInvariant();
-    assertDeferredReadinessMutationNegativeControl();
+  test("replacement invariant and mutation negative control execute independently", async () => {
+    const replacement = await import(REPLACEMENT_CONTRACT_URL.href) as typeof import("./phase129-phase128-readiness-replacement-contract.test.js");
+    replacement.assertDeferredReadinessInvariant();
+    replacement.assertDeferredReadinessMutationNegativeControl();
   });
 
   test("original runnable paths and active package/harness references are absent", () => {
