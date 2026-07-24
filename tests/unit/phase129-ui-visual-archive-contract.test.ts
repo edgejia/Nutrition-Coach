@@ -64,10 +64,11 @@ function runCallerScan(paths: string[]) {
     const stdout = execFileSync("rg", spec.args, { encoding: "utf8" });
     return { ...spec, stdout, exitCode: 0 };
   } catch (error) {
+    const failure = error as { stdout?: string | Buffer; status?: number };
     return {
       ...spec,
-      stdout: error.stdout?.toString() ?? "",
-      exitCode: error.status ?? 1,
+      stdout: failure.stdout?.toString() ?? "",
+      exitCode: failure.status ?? 1,
     };
   }
 }
