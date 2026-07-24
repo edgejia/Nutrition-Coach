@@ -31,4 +31,3 @@ contracts, and generated harness artifacts are outside this archive scope.
 This archive does not represent a browser run, a public-origin smoke result, or
 a cryptographic attestation. Historical behavior remains available for source
 recovery; any future visual evaluation must be run and judged separately.
-
