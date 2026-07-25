@@ -35,6 +35,83 @@ class FakeEventTarget {
 }
 
 describe("createDailyRolloverController", () => {
+  it("recomputes the Taipei key when a delayed timer crosses midnight", async () => {
+    let current = new Date("2026-03-25T23:59:59+08:00");
+    const timers: Array<() => void> = [];
+    const delays: number[] = [];
+    let refreshCount = 0;
+    let resolveRefresh: (() => void) | undefined;
+    const refreshComplete = new Promise<void>((resolve) => {
+      resolveRefresh = resolve;
+    });
+    const setTimer: SetRolloverTimer = (callback, delay) => {
+      timers.push(callback);
+      delays.push(delay);
+      return timers.length as unknown as RolloverTimer;
+    };
+
+    const cleanup = createDailyRolloverController({
+      refresh: () => {
+        refreshCount++;
+        return refreshComplete;
+      },
+      now: () => current,
+      setTimer,
+      clearTimer: () => undefined,
+    });
+
+    assert.equal(delays[0], 1000);
+    current = new Date("2026-03-26T00:00:02+08:00");
+    timers[0]?.();
+
+    assert.equal(refreshCount, 1);
+    resolveRefresh?.();
+    await refreshComplete;
+    cleanup();
+  });
+
+  it("keeps timer and natural signals to one in-flight refresh", async () => {
+    let current = new Date("2026-03-25T23:59:59+08:00");
+    const timers: Array<() => void> = [];
+    const documentTarget = new FakeEventTarget();
+    const windowTarget = new FakeEventTarget();
+    let refreshCount = 0;
+    let resolveRefresh: (() => void) | undefined;
+    const refreshPending = new Promise<void>((resolve) => {
+      resolveRefresh = resolve;
+    });
+
+    const cleanup = createDailyRolloverController({
+      refresh: () => {
+        refreshCount++;
+        return refreshPending;
+      },
+      now: () => current,
+      documentTarget: documentTarget as unknown as DailyRolloverDocumentTarget,
+      windowTarget: windowTarget as unknown as DailyRolloverWindowTarget,
+      setTimer: (callback) => {
+        timers.push(callback);
+        return timers.length as unknown as RolloverTimer;
+      },
+      clearTimer: () => undefined,
+    });
+
+    current = new Date("2026-03-26T00:00:01+08:00");
+    timers[0]?.();
+    windowTarget.dispatch("focus");
+    documentTarget.dispatch("visibilitychange");
+
+    assert.equal(refreshCount, 1);
+    resolveRefresh?.();
+    await refreshPending;
+    await Promise.resolve();
+
+    windowTarget.dispatch("focus");
+    documentTarget.dispatch("visibilitychange");
+    assert.equal(refreshCount, 1);
+    cleanup();
+  });
+
   it("refreshes once when the midnight timer fires", () => {
     let current = new Date("2026-03-25T23:59:59+08:00");
     const timers: Array<() => void> = [];
