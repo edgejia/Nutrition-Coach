@@ -1,5 +1,8 @@
 import { useEffect } from "react";
-import { formatLocalDate } from "./lib/time.js";
+import {
+  formatLocalDate,
+  getMillisecondsUntilNextTaipeiMidnight,
+} from "./lib/time.js";
 
 export type RolloverTimer = ReturnType<typeof setTimeout>;
 export type SetRolloverTimer = (callback: () => void, delayMs: number) => RolloverTimer;
@@ -21,20 +24,10 @@ export function createDailyRolloverController(options: DailyRolloverControllerOp
   const documentTarget = options.documentTarget;
   const windowTarget = options.windowTarget;
 
-  let activeDate = formatLocalDate(now());
-  let activeTimer: ReturnType<typeof setTimeout> | undefined;
+  let lastSuccessfulDateKey = formatLocalDate(now());
+  let activeTimer: RolloverTimer | undefined;
   let disposed = false;
-
-  function runRefresh() {
-    try {
-      const result = options.refresh();
-      if (result && typeof result === "object" && "catch" in result) {
-        void result.catch(() => undefined);
-      }
-    } catch {
-      // Rollover refresh should not throw into timer, focus, or visibility callbacks.
-    }
-  }
+  let refreshInFlight = false;
 
   function clearActiveTimer() {
     if (activeTimer !== undefined) {
@@ -48,46 +41,64 @@ export function createDailyRolloverController(options: DailyRolloverControllerOp
 
     clearActiveTimer();
     const current = now();
-    const nextMidnight = new Date(
-      current.getFullYear(),
-      current.getMonth(),
-      current.getDate() + 1,
-    );
-    const delayMs = Math.max(0, nextMidnight.getTime() - current.getTime());
+    const delayMs = getMillisecondsUntilNextTaipeiMidnight(current);
 
     activeTimer = setTimer(() => {
-      const nextDate = formatLocalDate(now());
-      if (nextDate !== activeDate) {
-        activeDate = nextDate;
-        runRefresh();
-      }
+      if (disposed) return;
+      refreshIfDateChanged();
       scheduleNextMidnight();
     }, delayMs);
   }
 
-  function refreshIfDateChanged() {
-    const nextDate = formatLocalDate(now());
-    if (nextDate === activeDate) return;
+  function refreshIfDateChanged(): boolean {
+    if (disposed || refreshInFlight) return false;
 
-    activeDate = nextDate;
-    runRefresh();
-    scheduleNextMidnight();
+    const nextDate = formatLocalDate(now());
+    if (nextDate === lastSuccessfulDateKey) return false;
+
+    refreshInFlight = true;
+    try {
+      const refreshResult = options.refresh();
+      void Promise.resolve(refreshResult).then(
+        () => {
+          if (!disposed) {
+            lastSuccessfulDateKey = nextDate;
+          }
+          refreshInFlight = false;
+        },
+        () => {
+          refreshInFlight = false;
+        },
+      );
+    } catch {
+      refreshInFlight = false;
+    }
+
+    return true;
+  }
+
+  function handleFocus() {
+    if (refreshIfDateChanged()) {
+      scheduleNextMidnight();
+    }
   }
 
   function handleVisibilityChange() {
     if (documentTarget?.visibilityState === "hidden") return;
-    refreshIfDateChanged();
+    if (refreshIfDateChanged()) {
+      scheduleNextMidnight();
+    }
   }
 
   documentTarget?.addEventListener("visibilitychange", handleVisibilityChange);
-  windowTarget?.addEventListener("focus", refreshIfDateChanged);
+  windowTarget?.addEventListener("focus", handleFocus);
   scheduleNextMidnight();
 
   return () => {
     disposed = true;
     clearActiveTimer();
     documentTarget?.removeEventListener("visibilitychange", handleVisibilityChange);
-    windowTarget?.removeEventListener("focus", refreshIfDateChanged);
+    windowTarget?.removeEventListener("focus", handleFocus);
   };
 }
 
