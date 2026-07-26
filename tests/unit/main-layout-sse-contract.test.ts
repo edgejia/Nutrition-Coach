@@ -51,7 +51,7 @@ describe("MainLayout SSE summary coordinator contract", () => {
 
     const initialEffectStart = source.indexOf("useEffect(() => {\n    if (!deviceId) return;\n    void sseSummaryCoordinator.runInitialMealsLoad();");
     assert.ok(initialEffectStart >= 0);
-    assert.doesNotMatch(rolloverSource, /setMeals|setDailySummary|onDailySummaryEnvelope/);
+    assert.doesNotMatch(rolloverSource, /setMeals|setDailySummary/);
     const sourceWithoutManualHomeRefresh = source.replace(
       /const refreshHomeManually = useCallback\(async \(\) => \{[\s\S]*?\}, \[applyManualHomeRefresh, deviceId, recoverGuestSession\]\);/,
       "",

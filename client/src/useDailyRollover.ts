@@ -62,7 +62,7 @@ export function createDailyRolloverController(options: DailyRolloverControllerOp
       void Promise.resolve(refreshResult).then(
         () => {
           if (!disposed) {
-            lastSuccessfulDateKey = nextDate;
+            lastSuccessfulDateKey = formatLocalDate(now());
           }
           refreshInFlight = false;
         },
