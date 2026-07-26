@@ -391,6 +391,60 @@ function hasLikelyFoodReference(query: string): boolean {
     || /[a-z]{2,}/.test(targetText);
 }
 
+function reconcilePatchedResidual(
+  roundedAllocations: number[],
+  sourceValues: number[],
+  currentTotal: number,
+  targetTotal: number,
+): number[] {
+  const reconciled = [...roundedAllocations];
+  const residual = roundPatchValue(
+    targetTotal - reconciled.reduce((sum, value) => sum + value, 0),
+  );
+  let remainingSteps = Math.round(Math.abs(residual) * 1000);
+  if (remainingSteps === 0) {
+    return reconciled;
+  }
+
+  const eligibleIndexes = reconciled
+    .map((value, index) => {
+      if (residual < 0) {
+        return value >= 0.001 ? index : -1;
+      }
+      if (currentTotal > 0) {
+        return sourceValues[index]! > 0 || value > 0 ? index : -1;
+      }
+      return index;
+    })
+    .filter((index) => index >= 0);
+
+  if (eligibleIndexes.length === 0) {
+    return reconciled;
+  }
+
+  let cursor = 0;
+  let idleSteps = 0;
+  while (remainingSteps > 0 && idleSteps < eligibleIndexes.length) {
+    const index = eligibleIndexes[cursor % eligibleIndexes.length]!;
+    if (residual < 0) {
+      if (reconciled[index]! >= 0.001) {
+        reconciled[index] = roundPatchValue(reconciled[index]! - 0.001);
+        remainingSteps -= 1;
+        idleSteps = 0;
+      } else {
+        idleSteps += 1;
+      }
+    } else {
+      reconciled[index] = roundPatchValue(reconciled[index]! + 0.001);
+      remainingSteps -= 1;
+      idleSteps = 0;
+    }
+    cursor += 1;
+  }
+
+  return reconciled;
+}
+
 function distributePatchedTotal(
   items: MealTransactionItemInput[],
   field: NumericItemField,
@@ -401,29 +455,20 @@ function distributePatchedTotal(
   }
 
   const currentTotal = items.reduce((sum, item) => sum + item[field], 0);
-  let remaining = targetTotal;
+  const roundedAllocations = items.map((item) => currentTotal > 0
+    ? roundPatchValue(targetTotal * (item[field] / currentTotal))
+    : roundPatchValue(targetTotal / items.length));
+  const reconciledAllocations = reconcilePatchedResidual(
+    roundedAllocations,
+    items.map((item) => item[field]),
+    currentTotal,
+    targetTotal,
+  );
 
-  return items.map((item, index) => {
-    if (index === items.length - 1) {
-      return {
-        ...item,
-        [field]: roundPatchValue(remaining),
-      };
-    }
-
-    let nextValue: number;
-    if (currentTotal > 0) {
-      nextValue = roundPatchValue(targetTotal * (item[field] / currentTotal));
-    } else {
-      nextValue = roundPatchValue(targetTotal / items.length);
-    }
-
-    remaining -= nextValue;
-    return {
-      ...item,
-      [field]: nextValue,
-    };
-  });
+  return items.map((item, index) => ({
+    ...item,
+    [field]: reconciledAllocations[index]!,
+  }));
 }
 
 function applyMealPatch(
