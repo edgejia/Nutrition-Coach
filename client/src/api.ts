@@ -666,6 +666,12 @@ function assertMealsResponse(value: unknown): asserts value is { meals: MealEntr
   }
 }
 
+function assertHistoryResponse(value: unknown): asserts value is { messages: Message[] } {
+  if (!isDtoRecord(value) || !Array.isArray(value.messages)) {
+    throw new Error("Invalid history payload");
+  }
+}
+
 function assertDaySnapshotResponse(
   value: unknown,
 ): asserts value is { date: string; summary: DailySummary; meals: MealEntry[] } {
@@ -869,7 +875,8 @@ export async function loadHistory(limit = 50): Promise<{ messages: Message[] }> 
   const res = await fetch(`/api/chat/history?limit=${limit}`, { credentials: "same-origin" });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) throw new Error("Failed to load history");
-  const body = await res.json() as { messages: Message[] };
+  const body = await res.json() as unknown;
+  assertHistoryResponse(body);
   return {
     messages: body.messages.map(normalizeMessage),
   };
