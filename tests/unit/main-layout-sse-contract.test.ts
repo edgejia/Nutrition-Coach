@@ -38,6 +38,20 @@ describe("MainLayout SSE summary coordinator contract", () => {
 
     assert.match(source, /sseSummaryCoordinator\.runInitialMealsLoad\(\{ refreshReason: "day_rollover" \}\)/);
     assert.match(source, /sseSummaryCoordinator\.runInitialMealsLoad\(\)/);
+
+    const rolloverStart = source.indexOf("const refreshForRollover = useCallback");
+    const rolloverEnd = source.indexOf("const refreshHomeManually = useCallback", rolloverStart);
+    assert.ok(rolloverStart >= 0 && rolloverEnd > rolloverStart);
+    const rolloverSource = source.slice(rolloverStart, rolloverEnd);
+    assert.match(
+      rolloverSource,
+      /const committed = await sseSummaryCoordinator\.runInitialMealsLoad\(\{ refreshReason: "day_rollover" \}\);/,
+    );
+    assert.match(rolloverSource, /if \(!committed\) \{\s*throw new Error\("ROLLOVER_REFRESH_FAILED"\);/);
+
+    const initialEffectStart = source.indexOf("useEffect(() => {\n    if (!deviceId) return;\n    void sseSummaryCoordinator.runInitialMealsLoad();");
+    assert.ok(initialEffectStart >= 0);
+    assert.doesNotMatch(rolloverSource, /setMeals|setDailySummary|onDailySummaryEnvelope/);
     const sourceWithoutManualHomeRefresh = source.replace(
       /const refreshHomeManually = useCallback\(async \(\) => \{[\s\S]*?\}, \[applyManualHomeRefresh, deviceId, recoverGuestSession\]\);/,
       "",

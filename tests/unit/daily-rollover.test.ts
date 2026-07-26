@@ -6,6 +6,7 @@ import {
   type RolloverTimer,
   type SetRolloverTimer,
 } from "../../client/src/useDailyRollover.js";
+import { createSSESummaryCoordinator } from "../../client/src/sse-summary-coordinator.js";
 
 type Listener = () => void;
 
@@ -430,6 +431,93 @@ describe("createDailyRolloverController", () => {
     assert.doesNotThrow(() => windowTarget.dispatch("focus"));
     assert.doesNotThrow(() => windowTarget.dispatch("focus"));
     assert.equal(attempts, 2);
+    cleanup();
+  });
+
+  it("retries a production-shaped coordinator failure on one later natural signal", async () => {
+    let current = new Date("2026-03-25T23:59:59+08:00");
+    const documentTarget = new FakeEventTarget();
+    let getMealsCalls = 0;
+    let resolveSecond: (() => void) | undefined;
+    const secondLoad = new Promise<void>((resolve) => {
+      resolveSecond = resolve;
+    });
+    const coordinator = createSSESummaryCoordinator<{ id: string }>({
+      getMeals: () => {
+        getMealsCalls++;
+        if (getMealsCalls === 1) {
+          return Promise.reject(new Error("network unavailable"));
+        }
+        return secondLoad.then(() => ({ meals: [{ id: "latest" }] }));
+      },
+      setMeals: () => undefined,
+      applyMealMutationRefresh: () => undefined,
+      setDailySummary: () => undefined,
+      recordMealMutation: () => undefined,
+      todayKey: () => "2026-03-26",
+    });
+    const refreshForRollover = async () => {
+      const committed = await coordinator.runInitialMealsLoad({ refreshReason: "day_rollover" });
+      if (!committed) {
+        throw new Error("ROLLOVER_REFRESH_FAILED");
+      }
+    };
+
+    const cleanup = createDailyRolloverController({
+      refresh: refreshForRollover,
+      now: () => current,
+      documentTarget: documentTarget as unknown as DailyRolloverDocumentTarget,
+      setTimer: (() => 1 as unknown as RolloverTimer),
+      clearTimer: (() => undefined),
+    });
+
+    current = new Date("2026-03-26T00:00:01+08:00");
+    documentTarget.dispatch("visibilitychange");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(getMealsCalls, 1);
+
+    documentTarget.dispatch("visibilitychange");
+    assert.equal(getMealsCalls, 2);
+    resolveSecond?.();
+    await secondLoad;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    documentTarget.dispatch("visibilitychange");
+    assert.equal(getMealsCalls, 2);
+    cleanup();
+  });
+
+  it("recomputes the success date when a refresh settles after the next Taipei midnight", async () => {
+    let current = new Date("2026-03-25T23:59:59+08:00");
+    const windowTarget = new FakeEventTarget();
+    let refreshCount = 0;
+    let resolveRefresh: (() => void) | undefined;
+    const refreshPending = new Promise<void>((resolve) => {
+      resolveRefresh = resolve;
+    });
+
+    const cleanup = createDailyRolloverController({
+      refresh: () => {
+        refreshCount++;
+        return refreshPending;
+      },
+      now: () => current,
+      windowTarget: windowTarget as unknown as DailyRolloverWindowTarget,
+      setTimer: (() => 1 as unknown as RolloverTimer),
+      clearTimer: (() => undefined),
+    });
+
+    current = new Date("2026-03-26T23:59:59+08:00");
+    windowTarget.dispatch("focus");
+    assert.equal(refreshCount, 1);
+
+    current = new Date("2026-03-27T00:00:01+08:00");
+    resolveRefresh?.();
+    await refreshPending;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    windowTarget.dispatch("focus");
+    assert.equal(refreshCount, 1);
     cleanup();
   });
 });
