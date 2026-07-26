@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { describe, it } from "node:test";
+import { afterEach, describe, it } from "node:test";
 
 const storage = new Map<string, string>();
 Object.defineProperty(globalThis, "localStorage", {
@@ -35,6 +35,7 @@ const {
 const SEMANTIC_OWNER_ID = "history-home-semantic-owner";
 const SEMANTIC_OWNER_LABEL = "History/Home runtime semantic owner";
 const ownerRegistry = new Map<string, string>([[SEMANTIC_OWNER_ID, SEMANTIC_OWNER_LABEL]]);
+const originalTz = process.env.TZ;
 
 function registerSemanticOwner(registry: Map<string, string>, ownerId: string, label: string) {
   if (registry.has(ownerId)) {
@@ -58,6 +59,10 @@ async function readSibling(fileName: string) {
 }
 
 describe(`Semantic owner: ${SEMANTIC_OWNER_LABEL}`, () => {
+  afterEach(() => {
+    process.env.TZ = originalTz;
+  });
+
   it("owns Home meal display, nutrition derivation, badges, and coach handoff semantics", () => {
     assertOwnedEqual(getDisplayMealLabel("lunch", "2026-04-29T07:30:00+08:00"), "午餐");
     assertOwnedEqual(getDisplayMealLabel("breakfast", "2026-04-29T12:30:00+08:00"), "早餐");
@@ -239,6 +244,22 @@ describe(`Semantic owner: ${SEMANTIC_OWNER_LABEL}`, () => {
       }),
       "2026-04-30",
     );
+  });
+
+  it("keeps History civil-date navigation identical across host timezones", () => {
+    for (const hostTimezone of [
+      "Asia/Taipei",
+      "UTC",
+      "America/Los_Angeles",
+      "Pacific/Kiritimati",
+    ]) {
+      process.env.TZ = hostTimezone;
+
+      assertOwnedEqual(getMondayWeekStart("2026-04-30"), "2026-04-27");
+      assertOwnedEqual(shiftHistoryWeek("2026-04-27", -1), "2026-04-20");
+      assertOwnedEqual(shiftHistoryWeek("2026-04-27", 1), "2026-05-04");
+      assertOwnedEqual(getMondayWeekStart("2026-01-01"), "2025-12-29");
+    }
   });
 
   it("keeps existing History/Home source suites discoverable as bounded structural guards", async () => {
