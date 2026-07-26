@@ -112,6 +112,10 @@ function assertSummaryDeleteCancellationContract(handlerBody: string, confirmOut
   for (const token of [
     ...summaryDeleteMutationTokens,
     "recordMealMutation",
+    "getDaySnapshot",
+    "setDailySummary",
+    "setMeals",
+    "applyMealMutationRefresh",
     "setError",
     "alert(",
     "recoverGuestSession",
@@ -336,6 +340,19 @@ describe("SummaryDetailScreen disclosure shell", () => {
 
     assertSummaryDeleteCancellationContract(handlerBody, false);
     assertSummaryDeleteCancellationContract(handlerBody, false);
+
+    const reorderedCancelBody = handlerBody.replace(
+      /if \(!window\.confirm\("刪除這筆餐點？系統會保留歷史紀錄。"\)\) \{\s*return;\s*\}/,
+      `if (!${summaryDeleteConfirm}) {
+        setDeletingMealId(mealId);
+        return;
+      }`,
+    );
+    assert.throws(
+      () => assertSummaryDeleteCancellationContract(reorderedCancelBody, false),
+      /must not run on cancellation/,
+      "the executed cancel-side-effect negative control must reject pending mutation before return",
+    );
   });
 
   it("preserves confirmed recovery, validation, and row concurrency backstops", () => {
@@ -350,12 +367,19 @@ describe("SummaryDetailScreen disclosure shell", () => {
     for (const token of [
       "expectedMealRevisionId: meal.mealRevisionId",
       "const previousSnapshot = snapshot",
+      "setDeletingMealId(mealId)",
       "setSnapshot((currentSnapshot)",
+      "await refreshAfterMealMutation({",
+      "const refreshedSnapshot = await getDaySnapshot(selectedDateKey)",
+      "setSnapshot(refreshedSnapshot)",
+      "recordMealMutation(affectedDate)",
       "if (err instanceof MealRevisionConflictError)",
       "mealId: err.mealId",
       "affectedDate: err.affectedDate",
+      "recordMealMutation(err.affectedDate)",
       "setSnapshot(previousSnapshot)",
       "void recoverGuestSession()",
+      "alert(\"刪除失敗，請再試一次。\")",
       "setDeletingMealId(null)",
     ]) {
       assert.match(handlerBody, new RegExp(escapeRegExp(token)), `${token} should remain in confirmed recovery`);
