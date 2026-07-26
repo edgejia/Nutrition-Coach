@@ -7,7 +7,10 @@ import { eq } from "drizzle-orm";
 import { mealRevisions, mealTransactions } from "../../server/db/schema.js";
 import { createDeviceService } from "../../server/services/device.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
-import { createMealCorrectionService } from "../../server/services/meal-correction.js";
+import {
+  createMealCorrectionService,
+  MAX_RECONCILIATION_STEPS,
+} from "../../server/services/meal-correction.js";
 import { DEFAULT_SESSION_ID } from "../../server/services/turn-state.js";
 import { MealRevisionPreconditionError } from "../../server/services/meal-transactions.js";
 
@@ -332,6 +335,86 @@ describe("meal correction service", () => {
     const revisions = await db.select().from(mealRevisions);
     assert.equal(revisions.length, initialRevisions.length);
     assert.equal(transaction?.currentRevisionId, grouped.mealRevisionId);
+  });
+
+  it("fails closed when residual reconciliation would exceed the step ceiling", async () => {
+    const itemCount = 200_003;
+    const targetProtein = 100.001;
+    const mealId = "reconciliation-ceiling-meal";
+    const revisionId = `${mealId}:r1`;
+    const createdAt = FIXED_NOW.toISOString();
+    const loggedAt = "2026-04-19T12:00:00.000Z";
+    const roundedPerItem = Math.round((targetProtein / itemCount) * 1000) / 1000;
+    const expectedResidual = Math.round((targetProtein - roundedPerItem * itemCount) * 1000) / 1000;
+
+    assert.equal(roundedPerItem, 0);
+    assert.equal(expectedResidual, targetProtein);
+    assert.ok(Math.round(Math.abs(expectedResidual) * 1000) > MAX_RECONCILIATION_STEPS);
+
+    const insertFixture = db.$client.transaction(() => {
+      db.$client
+        .prepare(
+          `INSERT INTO meal_transactions
+             (id, device_id, logged_at, meal_period, current_revision_id, current_revision_number, deleted_at, created_at)
+           VALUES (?, ?, ?, NULL, ?, 1, NULL, ?)`,
+        )
+        .run(mealId, deviceId, loggedAt, revisionId, createdAt);
+      db.$client
+        .prepare(
+          `INSERT INTO meal_revisions
+             (id, transaction_id, revision_number, supersedes_revision_id, image_asset_id, change_type, created_at)
+           VALUES (?, ?, 1, NULL, NULL, 'create', ?)`,
+        )
+        .run(revisionId, mealId, createdAt);
+
+      const insertItem = db.$client.prepare(
+        `INSERT INTO meal_revision_items
+           (revision_id, position, food_name, calories, protein, carbs, fat)
+         VALUES (?, ?, ?, 0, 0, 0, 0)`,
+      );
+      for (let position = 0; position < itemCount; position += 1) {
+        insertItem.run(revisionId, position, "ceiling fixture");
+      }
+    });
+    insertFixture();
+
+    const initialRevisions = await db.select().from(mealRevisions);
+    const initialPersistedValues = db.$client
+      .prepare(
+        `SELECT position, food_name AS foodName, protein
+           FROM meal_revision_items
+          WHERE revision_id = ? AND position IN (0, ?)
+          ORDER BY position`,
+      )
+      .all(revisionId, itemCount - 1);
+
+    await assert.rejects(
+      () => mealCorrectionService.updateMeal(
+        deviceId,
+        mealId,
+        { patch: { protein: targetProtein } },
+        revisionId,
+      ),
+      /MEAL_NUMERIC_RECONCILIATION_UNSAFE/,
+    );
+
+    const transaction = (await db
+      .select()
+      .from(mealTransactions)
+      .where(eq(mealTransactions.id, mealId)))[0];
+    const revisions = await db.select().from(mealRevisions);
+    const persistedValues = db.$client
+      .prepare(
+        `SELECT position, food_name AS foodName, protein
+           FROM meal_revision_items
+          WHERE revision_id = ? AND position IN (0, ?)
+          ORDER BY position`,
+      )
+      .all(revisionId, itemCount - 1);
+
+    assert.equal(revisions.length, initialRevisions.length);
+    assert.equal(transaction?.currentRevisionId, revisionId);
+    assert.deepEqual(persistedValues, initialPersistedValues);
   });
 
   it("persists a tiny grouped target without negative residuals or final-slot catch-all", async () => {
