@@ -773,6 +773,42 @@ describe("API Client", () => {
     assert.equal(result.messages[0]?.imageUrl, "/api/assets/asset-1");
   });
 
+  it("loadHistory preserves normalized message order and same-origin transport", async () => {
+    mockFetch(200, {
+      messages: [
+        {
+          id: "msg-first",
+          role: "user",
+          content: "第一筆",
+          imageUrl: "/api/assets/asset-first?deviceId=legacy-device",
+          createdAt: "2026-04-19T00:00:00.000Z",
+        },
+        {
+          id: "msg-second",
+          role: "assistant",
+          content: "第二筆",
+          createdAt: "2026-04-19T00:01:00.000Z",
+        },
+      ],
+    });
+
+    const result = await api.loadHistory();
+
+    assert.deepEqual(
+      result.messages.map((message) => message.id),
+      ["msg-first", "msg-second"],
+    );
+    assert.equal(result.messages[0]?.imageUrl, "/api/assets/asset-first");
+    assert.equal(fetchCalls[0]?.url, "/api/chat/history?limit=50");
+    assert.equal(fetchCalls[0]?.init.credentials, "same-origin");
+  });
+
+  it("loadHistory rejects a null response root before message mapping", async () => {
+    mockFetch(200, null);
+
+    await assert.rejects(() => api.loadHistory(), { message: "Invalid history payload" });
+  });
+
   it("loadHistory normalizes loggedMeal image urls without changing null image receipts", async () => {
     storage.set("deviceId", "d-1");
     mockFetch(200, {
