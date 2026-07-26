@@ -58,22 +58,45 @@ describe("Phase 129 WFR-06 observation record", () => {
     assert.doesNotMatch(observation, /"workflow"\s*:/);
   });
 
-  it("contains exactly three blank future cycle slots that remain human_needed", async () => {
+  it("records one evidence-complete observed cycle and keeps two future slots human_needed", async () => {
     const observation = await readObservation();
     const headings = [...observation.matchAll(/^### (cycle-[1-3])$/gm)].map((match) => match[1]);
     assert.deepEqual(headings, cycleIds);
 
-    for (const cycleId of cycleIds) {
-      const block = cycleBlock(observation, cycleId);
-      for (const field of evidenceFields) {
-        assert.match(block, new RegExp(`^- ${field}: `, "m"));
-      }
-      assert.equal(fieldValue(block, "status"), "`human_needed`");
-      for (const field of evidenceFields.filter((name) => name !== "status")) {
-        assert.equal(fieldValue(block, field), '""', `${cycleId} ${field} must remain blank`);
-      }
-      assert.doesNotMatch(block, /20\\d\\d-\\d\\d-\\d\\d/);
+    const observedBlock = cycleBlock(observation, "cycle-1");
+    for (const field of evidenceFields) {
+      assert.match(observedBlock, new RegExp(`^- ${field}: `, "m"));
     }
+    assert.equal(fieldValue(observedBlock, "status"), "`observed`");
+    assert.match(
+      fieldValue(observedBlock, "observedAt"),
+      /^`2026-07-26T19:45:16\+08:00`$/,
+    );
+    for (const field of evidenceFields.filter(
+      (name) => name !== "status" && name !== "observedAt",
+    )) {
+      assert.notEqual(fieldValue(observedBlock, field), '""', `cycle-1 ${field} must be populated`);
+    }
+    assert.match(fieldValue(observedBlock, "commandFamily"), /discuss.*plan.*execute.*verify.*review/i);
+    assert.match(fieldValue(observedBlock, "targetedVerification"), /181\/181.*32\/32.*18\/18.*21\/21/i);
+    assert.match(fieldValue(observedBlock, "negativeControl"), /100001-step reconciliation overflow/i);
+    assert.match(fieldValue(observedBlock, "authorityBoundary"), /Phase 129-08 and Phase 129 remain human_needed/i);
+    assert.match(fieldValue(observedBlock, "result"), /2012\/2020.*eight environment-only fixture failures/i);
+
+    for (const cycleId of ["cycle-2", "cycle-3"]) {
+      const futureBlock = cycleBlock(observation, cycleId);
+      for (const field of evidenceFields) {
+        assert.match(futureBlock, new RegExp(`^- ${field}: `, "m"));
+      }
+      assert.equal(fieldValue(futureBlock, "status"), "`human_needed`");
+      for (const field of evidenceFields.filter((name) => name !== "status")) {
+        assert.equal(fieldValue(futureBlock, field), '""', `${cycleId} ${field} must remain blank`);
+      }
+      assert.doesNotMatch(futureBlock, /20\d\d-\d\d-\d\d/);
+    }
+
+    assert.match(observation, /^Status: `human_needed`$/m);
+    assert.match(observation, /cycles 2 and 3 remain `human_needed`/i);
   });
 
   it("keeps observation separate from config tuning, new workflow machinery, and operator authority", async () => {

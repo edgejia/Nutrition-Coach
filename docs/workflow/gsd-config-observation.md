@@ -45,25 +45,26 @@ The fingerprint above is a baseline observation only. Do not modify `.planning/c
 | 129-06 | exact historical visual archive and metadata contract | implementation proof only; not an ordinary-cycle result |
 | 129-07 | History/Home semantic owner and bounded guards | implementation proof only; not an ordinary-cycle result |
 
-## Future ordinary-cycle observation window
+## Ordinary-cycle observation window
 
 Each slot must be populated only after a real ordinary
-discuss/plan/execute/verify/review cycle. The evidence fields are deliberately
-blank now; the `human_needed` status cannot be promoted by this contract, a
-passing test, a plan result, PR status, or release status.
+discuss/plan/execute/verify/review cycle. Cycle 1 records the completed Phase
+130 source cycle; the remaining evidence fields stay deliberately blank. A
+`human_needed` slot cannot be promoted by this contract, a passing test, a plan
+result, PR status, or release status.
 
 ### cycle-1
 
-- status: `human_needed`
-- observedAt: ""
-- commandFamily: ""
-- touchedSurface: ""
-- loadedOverlay: ""
-- targetedVerification: ""
-- negativeControl: ""
-- authorityBoundary: ""
-- result: ""
-- observer: ""
+- status: `observed`
+- observedAt: `2026-07-26T19:45:16+08:00`
+- commandFamily: `discuss → plan → execute → verify → review; validate-phase and secure-phase followed as independent post-execution audits`
+- touchedSurface: `Taipei rollover/date identity; yearless historical dates; grouped macro redistribution; Summary Detail destructive-delete confirmation`
+- loadedOverlay: `nutrition-planning-proof during planning; configured executor/verifier/review supplements unavailable in this worktree and skipped without fallback checkout access`
+- targetedVerification: `181/181 phase-focused tests; 32/32 proof-lint; TypeScript check passed; verifier 18/18; review 0 findings; Nyquist 12/12; security 21/21 closed`
+- negativeControl: `explicit-invalid and unsupported dates; rollover failure retry and cross-midnight settlement; old-final-slot and 100001-step reconciliation overflow; repeated delete cancel and reordered-confirmation guard`
+- authorityBoundary: `No config/install/push/merge/tag/release/runtime/Tunnel/public-smoke authority; Phase 129-08 and Phase 129 remain human_needed`
+- result: `Phase 130 source cycle passed its focused gates; full unit suite 2012/2020 with the same eight environment-only fixture failures retained; baseline config hash unchanged`
+- observer: `Codex execute-phase/verify/review with independent Nyquist and ASVS L2 audits`
 
 ### cycle-2
 
@@ -95,8 +96,8 @@ passing test, a plan result, PR status, or release status.
 
 - currentCost: one metadata-only record, one targeted contract test, and no
   additional workflow gate, recurring task, or configuration mutation.
-- observationWindow: retain all three slots until two or three real ordinary
-  cycles provide enough evidence for a separate maintainer decision.
+- observationWindow: retain the remaining slots until two or three real
+  ordinary cycles provide enough evidence for a separate maintainer decision.
 - exitCondition: every populated row names the real command family, touched
   surface, loaded overlay, targeted verification, negative control, authority
   boundary, result, and observer; cycle-specific timestamps remain blank until
@@ -112,5 +113,7 @@ This record does not create a new orchestrator, checker, receipt, gate, or paral
 Keep this record metadata-only: do not store credentials, cookies, tokens, raw prompts, provider/tool payloads, image bytes, database dumps, or private host paths. This record makes no provenance claim and carries no receipt, seal, or attestation. Quick metadata must never be described as stronger evidence.
 
 The maintainer checkpoint is intentionally blocking: confirm that the config
-and installed GSD remain unchanged and that all three rows are still
-`human_needed`. Do not report a future cycle as passed without real evidence.
+and installed GSD remain unchanged, cycle 1 is backed by the cited Phase 130
+evidence, and cycles 2 and 3 remain `human_needed`. The record and Phase 129
+remain `human_needed`; do not report another cycle as observed without real
+evidence.
