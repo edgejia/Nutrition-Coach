@@ -3349,7 +3349,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     const initialRevisions = await db.select().from(mealRevisions);
 
     for (const [index, value] of [["huge", Number.MAX_VALUE], ["negative", -1]] as const) {
-      const outcome = await runContract(contract, {
+      const outcome: ToolExecuteResult<unknown> = await runContract(contract, {
         id: `call_update_boundary_${index}`,
         type: "function",
         function: {
