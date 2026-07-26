@@ -273,6 +273,67 @@ describe("meal correction service", () => {
     assert.equal(result.updatedMeal.fat, 6);
   });
 
+  it("rejects non-finite, negative, and finite-huge numeric patches before revision writes", async () => {
+    const grouped = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T12:00:00.000Z",
+      items: [
+        { foodName: "數值邊界一", calories: 220, protein: 30, carbs: 40, fat: 5 },
+        { foodName: "數值邊界二", calories: 180, protein: 4, carbs: 8, fat: 1 },
+      ],
+    });
+    const initialRevisions = await db.select().from(mealRevisions);
+
+    for (const value of [Number.MAX_VALUE, Infinity, NaN, -1]) {
+      await assert.rejects(
+        () => mealCorrectionService.updateMeal(
+          deviceId,
+          grouped.id,
+          { patch: { protein: value } },
+          grouped.mealRevisionId,
+        ),
+        /MEAL_NUMERIC_PATCH_OUT_OF_RANGE/,
+        `numeric patch ${String(value)} must fail closed`,
+      );
+    }
+
+    const transaction = (await db
+      .select()
+      .from(mealTransactions)
+      .where(eq(mealTransactions.id, grouped.id)))[0];
+    const revisions = await db.select().from(mealRevisions);
+    assert.equal(revisions.length, initialRevisions.length);
+    assert.equal(transaction?.currentRevisionId, grouped.mealRevisionId);
+  });
+
+  it("rejects unsafe residual arithmetic before reconciliation can persist non-finite values", async () => {
+    const grouped = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T12:00:00.000Z",
+      items: [
+        { foodName: "極大來源一", calories: 220, protein: Number.MAX_VALUE, carbs: 40, fat: 5 },
+        { foodName: "極大來源二", calories: 180, protein: Number.MAX_VALUE, carbs: 8, fat: 1 },
+      ],
+    });
+    const initialRevisions = await db.select().from(mealRevisions);
+
+    await assert.rejects(
+      () => mealCorrectionService.updateMeal(
+        deviceId,
+        grouped.id,
+        { patch: { protein: 48 } },
+        grouped.mealRevisionId,
+      ),
+      /MEAL_NUMERIC_RECONCILIATION_UNSAFE/,
+    );
+
+    const transaction = (await db
+      .select()
+      .from(mealTransactions)
+      .where(eq(mealTransactions.id, grouped.id)))[0];
+    const revisions = await db.select().from(mealRevisions);
+    assert.equal(revisions.length, initialRevisions.length);
+    assert.equal(transaction?.currentRevisionId, grouped.mealRevisionId);
+  });
+
   it("persists a tiny grouped target without negative residuals or final-slot catch-all", async () => {
     const grouped = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T12:00:00.000Z",
