@@ -28,6 +28,10 @@ describe("history week structural and algorithm guards", () => {
     assert.equal(shiftHistoryWeek("2026-04-27", 1), "2026-05-04");
     assert.equal(shiftHistoryWeek("2026-01-05", -1), "2025-12-29");
     assert.equal(shiftHistoryWeek("2025-12-29", 1), "2026-01-05");
+    assert.throws(
+      () => shiftHistoryWeek("9999-12-27", 1),
+      { message: "INVALID_DATE_KEY" },
+    );
   });
 
   it("builds a Monday-through-Sunday leap week with stable day numbers", () => {
