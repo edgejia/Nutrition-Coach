@@ -520,6 +520,51 @@ describe("createDailyRolloverController", () => {
     assert.equal(refreshCount, 1);
     cleanup();
   });
+
+  it("keeps the fixed-zone timer bounded after a cross-midnight settlement", async () => {
+    let current = new Date("2026-03-25T23:59:59+08:00");
+    const timers: Array<() => void> = [];
+    const delays: number[] = [];
+    const windowTarget = new FakeEventTarget();
+    let refreshCount = 0;
+    let resolveRefresh: (() => void) | undefined;
+    const refreshPending = new Promise<void>((resolve) => {
+      resolveRefresh = resolve;
+    });
+
+    const cleanup = createDailyRolloverController({
+      refresh: () => {
+        refreshCount++;
+        return refreshPending;
+      },
+      now: () => current,
+      windowTarget: windowTarget as unknown as DailyRolloverWindowTarget,
+      setTimer: (callback, delay) => {
+        timers.push(callback);
+        delays.push(delay);
+        return timers.length as unknown as RolloverTimer;
+      },
+      clearTimer: () => undefined,
+    });
+
+    assert.equal(delays[0], 1000);
+    current = new Date("2026-03-26T23:59:59+08:00");
+    windowTarget.dispatch("focus");
+    assert.equal(refreshCount, 1);
+    assert.equal(delays[1], 1000);
+
+    current = new Date("2026-03-27T00:00:01+08:00");
+    resolveRefresh?.();
+    await refreshPending;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    timers[1]?.();
+    assert.equal(refreshCount, 1);
+    assert.equal(delays[2], 86_399_000);
+    windowTarget.dispatch("focus");
+    assert.equal(refreshCount, 1);
+    cleanup();
+  });
 });
 
 type DailyRolloverDocumentTarget = Pick<Document, "addEventListener" | "removeEventListener" | "visibilityState">;
