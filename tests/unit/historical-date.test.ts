@@ -113,6 +113,91 @@ describe("historical-date resolver", () => {
     }
   });
 
+  it("fails closed for an explicitly invalid leap date without falling through to a prior year", () => {
+    const resolved = resolveHistoricalDateIntent({
+      input: "2025/2/29 吃了火鍋",
+      currentDate: new Date("2028-02-28T12:00:00+08:00"),
+      mode: "mutation",
+    });
+
+    assert.deepEqual(resolved, {
+      status: "needs_clarification",
+      reason: "unparseable",
+      prompt: "我還不能確定是哪一天，請再說一次日期。",
+      matchedText: ["2025/2/29"],
+    });
+
+    const incorrectPriorLeapInterpretation = {
+      status: "resolved" as const,
+      dateKey: "2024-02-29",
+      isHistorical: true,
+      source: "explicit" as const,
+      matchedText: ["2025/2/29"],
+    };
+    assert.notDeepEqual(resolved, incorrectPriorLeapInterpretation);
+  });
+
+  it("keeps unsupported yearless hyphen input on the default-today path", () => {
+    const resolved = resolveHistoricalDateIntent({
+      input: "02-29 吃了火鍋",
+      currentDate: new Date("2028-03-01T12:00:00+08:00"),
+      mode: "mutation",
+    });
+
+    assert.deepEqual(resolved, {
+      status: "resolved",
+      dateKey: "2028-03-01",
+      isHistorical: false,
+      source: "default_today",
+      matchedText: [],
+    });
+  });
+
+  it("keeps empty, single-mention, and equal-date mention outcomes exact and ordered", () => {
+    const currentDate = new Date("2028-03-01T12:00:00+08:00");
+
+    assert.deepEqual(
+      resolveHistoricalDateIntent({ input: "", currentDate, mode: "mutation" }),
+      {
+        status: "resolved",
+        dateKey: "2028-03-01",
+        isHistorical: false,
+        source: "default_today",
+        matchedText: [],
+      },
+    );
+
+    assert.deepEqual(
+      resolveHistoricalDateIntent({
+        input: "2/29 吃了火鍋",
+        currentDate,
+        mode: "mutation",
+      }),
+      {
+        status: "resolved",
+        dateKey: "2028-02-29",
+        isHistorical: true,
+        source: "explicit",
+        matchedText: ["2/29"],
+      },
+    );
+
+    assert.deepEqual(
+      resolveHistoricalDateIntent({
+        input: "2月29日和 02/29 都吃了火鍋",
+        currentDate,
+        mode: "mutation",
+      }),
+      {
+        status: "resolved",
+        dateKey: "2028-02-29",
+        isHistorical: true,
+        source: "explicit",
+        matchedText: ["2月29日", "02/29"],
+      },
+    );
+  });
+
   it("returns clarification for unsupported or ambiguous mutation phrases", () => {
     const unsupported = resolveHistoricalDateIntent({
       input: "上週吃了什麼",
