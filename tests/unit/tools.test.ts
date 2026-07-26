@@ -5,7 +5,10 @@ import { eq } from "drizzle-orm";
 import { createDb } from "../../server/db/client.js";
 import { mealRevisionItems, mealRevisions, mealTransactions } from "../../server/db/schema.js";
 import { createDeviceService } from "../../server/services/device.js";
-import { createMealCorrectionService } from "../../server/services/meal-correction.js";
+import {
+  createMealCorrectionService,
+  MEAL_PATCH_TOTAL_LIMIT,
+} from "../../server/services/meal-correction.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
 import { createGoalProposalService } from "../../server/services/goal-proposals.js";
 import { createMealDeleteProposalService } from "../../server/services/meal-delete-proposals.js";
@@ -3270,6 +3273,122 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(result.summary, "成功");
     assert.equal(result.loggedMeal?.protein, 28);
     assert.deepEqual(calls, [`${deviceId}:${created.id}:${created.mealRevisionId}`]);
+  });
+
+  it("keeps update_meal numeric bounds in lockstep across Zod, JSON metadata, and execution", async () => {
+    const created = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "邊界雞腿", calories: 220, protein: 24, carbs: 0, fat: 9 },
+      ],
+    });
+    const contract = toolRegistry.get("update_meal");
+    assert.ok(contract, "update_meal contract must be registered");
+    const numericFields = ["calories", "protein", "carbs", "fat"] as const;
+    const parameters = contract.parameters as {
+      properties: Record<string, Record<string, unknown>>;
+    };
+    const publicDefinition = getToolDefinitions().find(
+      (definition) => definition.function.name === "update_meal",
+    );
+    assert.ok(publicDefinition, "update_meal definition must be public");
+
+    for (const field of numericFields) {
+      assert.deepEqual(parameters.properties[field], {
+        type: "number",
+        minimum: 0,
+        maximum: MEAL_PATCH_TOTAL_LIMIT,
+      });
+      assert.deepEqual(
+        (publicDefinition.function.parameters as typeof parameters).properties[field],
+        parameters.properties[field],
+      );
+    }
+
+    assert.equal(contract.zodSchema.safeParse({
+      meal_id: created.id,
+      protein: 48,
+    }).success, true);
+    assert.equal(contract.zodSchema.safeParse({
+      meal_id: created.id,
+      protein: Number.MAX_VALUE,
+    }).success, false);
+    assert.equal(contract.zodSchema.safeParse({
+      meal_id: created.id,
+      protein: -1,
+    }).success, false);
+    assert.equal(contract.zodSchema.safeParse({
+      meal_id: created.id,
+      items: [{
+        food_name: "替換雞腿",
+        calories: 220,
+        protein: 24,
+        carbs: 0,
+        fat: 9,
+      }],
+    }).success, true);
+
+    const wrappedMealCorrectionService = {
+      ...createMealCorrectionService(db),
+      updateCalls: 0,
+    } as ReturnType<typeof createMealCorrectionService> & { updateCalls: number };
+    const originalUpdateMeal = wrappedMealCorrectionService.updateMeal.bind(wrappedMealCorrectionService);
+    wrappedMealCorrectionService.updateMeal = async (...args) => {
+      wrappedMealCorrectionService.updateCalls += 1;
+      return originalUpdateMeal(...args);
+    };
+    const dependencies = {
+      foodLoggingService,
+      summaryService,
+      mealCorrectionService: wrappedMealCorrectionService,
+      toolSessionState: {
+        resolvedMealTargets: [{ mealId: created.id, mealRevisionId: created.mealRevisionId }],
+      },
+    } as ToolDeps;
+    const invalidRevision = created.mealRevisionId;
+    const initialRevisions = await db.select().from(mealRevisions);
+
+    for (const [index, value] of [["huge", Number.MAX_VALUE], ["negative", -1]] as const) {
+      const outcome = await runContract(contract, {
+        id: `call_update_boundary_${index}`,
+        type: "function",
+        function: {
+          name: "update_meal",
+          arguments: JSON.stringify({ meal_id: created.id, protein: value }),
+        },
+      }, {
+        currentUserMessage: "蛋白質改成 48g",
+        deps: { toolDeps: dependencies, deviceId },
+      });
+
+      assert.equal(outcome.success, false);
+      assert.equal(outcome.executed, false);
+      assert.equal(outcome.failureReason, "validation");
+      assert.equal(JSON.parse(outcome.result).reason, "schema_validation");
+    }
+
+    assert.equal(wrappedMealCorrectionService.updateCalls, 0);
+    assert.equal((await db.select().from(mealRevisions)).length, initialRevisions.length);
+    assert.equal(
+      (await db.select().from(mealTransactions).where(eq(mealTransactions.id, created.id)))[0]?.currentRevisionId,
+      invalidRevision,
+    );
+
+    const success = await runContract(contract, {
+      id: "call_update_boundary_success",
+      type: "function",
+      function: {
+        name: "update_meal",
+        arguments: JSON.stringify({ meal_id: created.id, protein: 48 }),
+      },
+    }, {
+      currentUserMessage: "蛋白質改成 48g",
+      deps: { toolDeps: dependencies, deviceId },
+    });
+    assert.equal(success.success, true);
+    assert.equal(success.executed, true);
+    assert.equal(wrappedMealCorrectionService.updateCalls, 1);
+    assert.equal((success.contractResult as { updatedMeal?: { protein?: number } }).updatedMeal?.protein, 48);
   });
 
   it("blocks vague model-estimated update_meal numeric patches before service writes", async () => {
