@@ -3,13 +3,77 @@ import assert from "node:assert/strict";
 import {
   buildHistoryWeek,
   buildHistoryWeekStats,
+  getMondayWeekStart,
   getHistorySportStatusMeta,
+  isRealDateKey,
+  selectSameWeekdayOrClosestAvailable,
+  shiftHistoryWeek,
   type HistoryWeekDay,
 } from "../../client/src/lib/history-week.js";
 
 // Runtime semantic authority: history-home-semantic-owner-contract.test.ts.
 // These remaining tests are bounded History algorithm guards for weekly aggregation and sport metadata.
 describe("history week structural and algorithm guards", () => {
+  it("keeps strict date validity and Monday arithmetic across calendar boundaries", () => {
+    assert.equal(isRealDateKey("2024-02-29"), true);
+    assert.equal(isRealDateKey("2025-02-29"), false);
+    assert.throws(
+      () => getMondayWeekStart("2025-02-29"),
+      { message: "INVALID_DATE_KEY" },
+    );
+
+    assert.equal(getMondayWeekStart("2026-04-27"), "2026-04-27");
+    assert.equal(getMondayWeekStart("2026-04-29"), "2026-04-27");
+    assert.equal(getMondayWeekStart("2026-05-03"), "2026-04-27");
+    assert.equal(shiftHistoryWeek("2026-04-27", 1), "2026-05-04");
+    assert.equal(shiftHistoryWeek("2026-01-05", -1), "2025-12-29");
+    assert.equal(shiftHistoryWeek("2025-12-29", 1), "2026-01-05");
+  });
+
+  it("builds a Monday-through-Sunday leap week with stable day numbers", () => {
+    const days = buildHistoryWeek({
+      weekStartKey: "2024-02-26",
+      selectedDateKey: "2024-02-29",
+      todayKey: "2024-03-03",
+      trends: [],
+      targets: { calories: 2000, protein: 100, carbs: 250, fat: 70 },
+    });
+
+    assert.deepEqual(
+      days.map((day) => day.dateKey),
+      [
+        "2024-02-26",
+        "2024-02-27",
+        "2024-02-28",
+        "2024-02-29",
+        "2024-03-01",
+        "2024-03-02",
+        "2024-03-03",
+      ],
+    );
+    assert.deepEqual(days.map((day) => day.dayNumber), [26, 27, 28, 29, 1, 2, 3]);
+    assert.deepEqual(days.map((day) => day.weekday), ["一", "二", "三", "四", "五", "六", "日"]);
+  });
+
+  it("preserves exact-weekday selection and the closest available fallback", () => {
+    assert.equal(
+      selectSameWeekdayOrClosestAvailable({
+        nextWeekStartKey: "2026-04-20",
+        previousSelectedDateKey: "2026-04-30",
+        todayKey: "2026-04-30",
+      }),
+      "2026-04-23",
+    );
+    assert.equal(
+      selectSameWeekdayOrClosestAvailable({
+        nextWeekStartKey: "2026-05-04",
+        previousSelectedDateKey: "2026-04-30",
+        todayKey: "2026-05-06",
+      }),
+      "2026-05-06",
+    );
+  });
+
   it("builds Phase 41 weekly stats from real week days without demo metric labels", () => {
     const baseDay: HistoryWeekDay = {
       dateKey: "2026-04-27",
