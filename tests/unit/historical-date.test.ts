@@ -46,6 +46,73 @@ describe("historical-date resolver", () => {
     assert.equal(resolved.dateKey, "2025-12-30");
   });
 
+  it("resolves leap-day yearless dates on the nearest valid past occurrence", () => {
+    const cases = [
+      {
+        currentDate: new Date("2028-02-29T12:00:00+08:00"),
+        input: "2/29 吃了火鍋",
+        expectedDateKey: "2028-02-29",
+        expectedHistorical: false,
+        expectedMatchedText: ["2/29"],
+      },
+      {
+        currentDate: new Date("2028-02-28T12:00:00+08:00"),
+        input: "02/29 吃了火鍋",
+        expectedDateKey: "2024-02-29",
+        expectedHistorical: true,
+        expectedMatchedText: ["02/29"],
+      },
+      {
+        currentDate: new Date("2028-02-28T12:00:00+08:00"),
+        input: "2月29日 吃了火鍋",
+        expectedDateKey: "2024-02-29",
+        expectedHistorical: true,
+        expectedMatchedText: ["2月29日"],
+      },
+      {
+        currentDate: new Date("2028-03-01T12:00:00+08:00"),
+        input: "2/29 吃了火鍋",
+        expectedDateKey: "2028-02-29",
+        expectedHistorical: true,
+        expectedMatchedText: ["2/29"],
+      },
+    ];
+
+    for (const testCase of cases) {
+      const resolved = resolveHistoricalDateIntent({
+        input: testCase.input,
+        currentDate: testCase.currentDate,
+        mode: "mutation",
+      });
+
+      assert.equal(resolved.status, "resolved", testCase.input);
+      assert.equal(resolved.dateKey, testCase.expectedDateKey, testCase.input);
+      assert.equal(resolved.isHistorical, testCase.expectedHistorical, testCase.input);
+      assert.deepEqual(resolved.matchedText, testCase.expectedMatchedText, testCase.input);
+    }
+  });
+
+  it("keeps supported yearless forms aligned in a non-leap year", () => {
+    const cases = [
+      { input: "2/29 吃了火鍋", expectedDateKey: "2024-02-29", expectedMatchedText: ["2/29"] },
+      { input: "02/29 吃了火鍋", expectedDateKey: "2024-02-29", expectedMatchedText: ["02/29"] },
+      { input: "2月29日 吃了火鍋", expectedDateKey: "2024-02-29", expectedMatchedText: ["2月29日"] },
+    ];
+
+    for (const testCase of cases) {
+      const resolved = resolveHistoricalDateIntent({
+        input: testCase.input,
+        currentDate: new Date("2027-03-01T12:00:00+08:00"),
+        mode: "mutation",
+      });
+
+      assert.equal(resolved.status, "resolved", testCase.input);
+      assert.equal(resolved.dateKey, testCase.expectedDateKey, testCase.input);
+      assert.equal(resolved.isHistorical, true, testCase.input);
+      assert.deepEqual(resolved.matchedText, testCase.expectedMatchedText, testCase.input);
+    }
+  });
+
   it("returns clarification for unsupported or ambiguous mutation phrases", () => {
     const unsupported = resolveHistoricalDateIntent({
       input: "上週吃了什麼",
