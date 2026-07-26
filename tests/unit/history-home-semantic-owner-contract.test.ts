@@ -60,7 +60,11 @@ async function readSibling(fileName: string) {
 
 describe(`Semantic owner: ${SEMANTIC_OWNER_LABEL}`, () => {
   afterEach(() => {
-    process.env.TZ = originalTz;
+    if (originalTz === undefined) {
+      delete process.env.TZ;
+    } else {
+      process.env.TZ = originalTz;
+    }
   });
 
   it("owns Home meal display, nutrition derivation, badges, and coach handoff semantics", () => {
