@@ -13,6 +13,7 @@ import { MealRevisionPreconditionError } from "../../server/services/meal-transa
 
 const REAL_DATE = Date;
 const FIXED_NOW = new REAL_DATE("2026-04-19T12:00:00+08:00");
+const MACRO_ROUNDING_TOLERANCE = 0.001;
 
 class FixedDate extends REAL_DATE {
   constructor(...args: any[]) {
@@ -270,6 +271,92 @@ describe("meal correction service", () => {
     assert.equal(result.updatedMeal.protein, 22);
     assert.equal(result.updatedMeal.carbs, 48);
     assert.equal(result.updatedMeal.fat, 6);
+  });
+
+  it("persists a tiny grouped target without negative residuals or final-slot catch-all", async () => {
+    const grouped = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T12:00:00.000Z",
+      items: [
+        { foodName: "雞胸肉", calories: 100, protein: 1, carbs: 10, fat: 1 },
+        { foodName: "白飯", calories: 100, protein: 1, carbs: 10, fat: 1 },
+        { foodName: "花椰菜", calories: 100, protein: 1, carbs: 10, fat: 1 },
+        { foodName: "滷蛋", calories: 100, protein: 1, carbs: 10, fat: 1 },
+        { foodName: "豆腐", calories: 100, protein: 1, carbs: 10, fat: 1 },
+        { foodName: "海帶", calories: 100, protein: 1, carbs: 10, fat: 1 },
+      ],
+    });
+
+    const result = await mealCorrectionService.updateMeal(
+      deviceId,
+      grouped.id,
+      { patch: { protein: 0.003 } },
+      grouped.mealRevisionId,
+    );
+    const proteins = result.updatedMeal.items.map((item) => item.protein);
+
+    assert.deepEqual(result.updatedMeal.items.map((item) => item.name), [
+      "雞胸肉",
+      "白飯",
+      "花椰菜",
+      "滷蛋",
+      "豆腐",
+      "海帶",
+    ]);
+    assert.ok(proteins.every((value) => Number.isFinite(value) && value >= 0));
+    assert.ok(Math.abs(proteins.reduce((sum, value) => sum + value, 0) - 0.003) <= MACRO_ROUNDING_TOLERANCE);
+    assert.ok(proteins.filter((value) => value > 0).length >= 2);
+    assert.notEqual(proteins.at(-1), 0.003);
+    assert.equal(result.updatedMeal.protein, 0.003);
+  });
+
+  it("keeps exact zero grouped targets finite and non-negative", async () => {
+    const grouped = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T12:00:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 220, protein: 24, carbs: 0, fat: 9 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+        { foodName: "滷蛋", calories: 90, protein: 7, carbs: 2, fat: 6 },
+      ],
+    });
+
+    const result = await mealCorrectionService.updateMeal(
+      deviceId,
+      grouped.id,
+      { patch: { protein: 0 } },
+      grouped.mealRevisionId,
+    );
+
+    assert.deepEqual(result.updatedMeal.items.map((item) => item.protein), [0, 0, 0]);
+    assert.equal(result.updatedMeal.protein, 0);
+  });
+
+  it("keeps a mixed-zero source item at zero while reconciling positive weights", async () => {
+    const grouped = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T12:00:00.000Z",
+      items: [
+        { foodName: "零蛋白菜", calories: 50, protein: 0, carbs: 8, fat: 1 },
+        { foodName: "豆腐", calories: 100, protein: 1, carbs: 4, fat: 3 },
+        { foodName: "雞胸肉", calories: 200, protein: 3, carbs: 0, fat: 5 },
+      ],
+    });
+
+    const result = await mealCorrectionService.updateMeal(
+      deviceId,
+      grouped.id,
+      { patch: { protein: 1.01 } },
+      grouped.mealRevisionId,
+    );
+    const proteins = result.updatedMeal.items.map((item) => item.protein);
+
+    assert.deepEqual(result.updatedMeal.items.map((item) => item.name), [
+      "零蛋白菜",
+      "豆腐",
+      "雞胸肉",
+    ]);
+    assert.equal(proteins[0], 0);
+    assert.ok(proteins.slice(1).every((value) => value >= 0));
+    assert.ok(Math.abs(proteins.reduce((sum, value) => sum + value, 0) - 1.01) <= MACRO_ROUNDING_TOLERANCE);
+    assert.equal(result.updatedMeal.protein, 1.01);
   });
 
   it("resolves a named grouped item instead of an unrelated meal-period-only candidate", async () => {
