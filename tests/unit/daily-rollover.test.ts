@@ -243,6 +243,195 @@ describe("createDailyRolloverController", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     cleanup();
   });
+
+  it("recomputes a delayed timer after more than one wall-clock second", () => {
+    let current = new Date("2026-03-25T23:59:59.999+08:00");
+    const timers: Array<() => void> = [];
+    const delays: number[] = [];
+    let refreshCount = 0;
+
+    const cleanup = createDailyRolloverController({
+      refresh: () => {
+        refreshCount++;
+      },
+      now: () => current,
+      setTimer: (callback, delay) => {
+        timers.push(callback);
+        delays.push(delay);
+        return timers.length as unknown as RolloverTimer;
+      },
+      clearTimer: () => undefined,
+    });
+
+    assert.equal(delays[0], 1);
+    current = new Date("2026-03-26T00:00:05.123+08:00");
+    timers[0]?.();
+
+    assert.equal(refreshCount, 1);
+    cleanup();
+  });
+
+  it("dedupes every supported signal ordering after one successful refresh", async () => {
+    const signalOrders: Array<Array<"timer" | "focus" | "visible">> = [
+      ["timer", "focus", "visible"],
+      ["focus", "visible", "timer"],
+      ["visible", "timer", "focus"],
+    ];
+
+    for (const signalOrder of signalOrders) {
+      let current = new Date("2026-03-25T23:59:59+08:00");
+      const timers: Array<() => void> = [];
+      const documentTarget = new FakeEventTarget();
+      const windowTarget = new FakeEventTarget();
+      let refreshCount = 0;
+      let resolveRefresh: (() => void) | undefined;
+      const refreshPending = new Promise<void>((resolve) => {
+        resolveRefresh = resolve;
+      });
+
+      const cleanup = createDailyRolloverController({
+        refresh: () => {
+          refreshCount++;
+          return refreshPending;
+        },
+        now: () => current,
+        documentTarget: documentTarget as unknown as DailyRolloverDocumentTarget,
+        windowTarget: windowTarget as unknown as DailyRolloverWindowTarget,
+        setTimer: (callback) => {
+          timers.push(callback);
+          return timers.length as unknown as RolloverTimer;
+        },
+        clearTimer: () => undefined,
+      });
+
+      current = new Date("2026-03-26T00:00:01+08:00");
+      for (const signal of signalOrder) {
+        if (signal === "timer") {
+          timers[timers.length - 1]?.();
+        } else if (signal === "focus") {
+          windowTarget.dispatch("focus");
+        } else {
+          documentTarget.dispatch("visibilitychange");
+        }
+      }
+
+      assert.equal(refreshCount, 1);
+      resolveRefresh?.();
+      await refreshPending;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      windowTarget.dispatch("focus");
+      documentTarget.dispatch("visibilitychange");
+      timers[timers.length - 1]?.();
+      assert.equal(refreshCount, 1);
+      cleanup();
+    }
+  });
+
+  it("suppresses hidden visibility, then handles visible visibility and omitted targets", () => {
+    let current = new Date("2026-03-25T23:59:59+08:00");
+    const documentTarget = new FakeEventTarget();
+    let refreshCount = 0;
+
+    const cleanup = createDailyRolloverController({
+      refresh: () => {
+        refreshCount++;
+      },
+      now: () => current,
+      documentTarget: documentTarget as unknown as DailyRolloverDocumentTarget,
+      setTimer: (() => 1 as unknown as RolloverTimer),
+      clearTimer: () => undefined,
+    });
+
+    current = new Date("2026-03-26T00:00:01+08:00");
+    documentTarget.visibilityState = "hidden";
+    documentTarget.dispatch("visibilitychange");
+    assert.equal(refreshCount, 0);
+
+    documentTarget.visibilityState = "visible";
+    documentTarget.dispatch("visibilitychange");
+    assert.equal(refreshCount, 1);
+    cleanup();
+
+    let omittedTargetRefreshes = 0;
+    let omittedTargetTimer: (() => void) | undefined;
+    current = new Date("2026-03-25T23:59:59+08:00");
+    const omittedTargetCleanup = createDailyRolloverController({
+      refresh: () => {
+        omittedTargetRefreshes++;
+      },
+      now: () => current,
+      setTimer: (callback) => {
+        omittedTargetTimer = callback;
+        return 2 as unknown as RolloverTimer;
+      },
+      clearTimer: () => undefined,
+    });
+
+    current = new Date("2026-03-26T00:00:01+08:00");
+    assert.doesNotThrow(() => omittedTargetTimer?.());
+    assert.equal(omittedTargetRefreshes, 1);
+    omittedTargetCleanup();
+  });
+
+  it("retries after a rejected refresh and dedupes after the later success", async () => {
+    let current = new Date("2026-03-25T23:59:59+08:00");
+    const documentTarget = new FakeEventTarget();
+    let attempts = 0;
+    let resolveSecond: (() => void) | undefined;
+    const secondRefresh = new Promise<void>((resolve) => {
+      resolveSecond = resolve;
+    });
+
+    const cleanup = createDailyRolloverController({
+      refresh: () => {
+        attempts++;
+        return attempts === 1 ? Promise.reject(new Error("refresh rejected")) : secondRefresh;
+      },
+      now: () => current,
+      documentTarget: documentTarget as unknown as DailyRolloverDocumentTarget,
+      setTimer: (() => 1 as unknown as RolloverTimer),
+      clearTimer: (() => undefined),
+    });
+
+    current = new Date("2026-03-26T00:00:01+08:00");
+    documentTarget.dispatch("visibilitychange");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(attempts, 1);
+
+    documentTarget.dispatch("visibilitychange");
+    assert.equal(attempts, 2);
+    resolveSecond?.();
+    await secondRefresh;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    documentTarget.dispatch("visibilitychange");
+    assert.equal(attempts, 2);
+    cleanup();
+  });
+
+  it("releases the in-flight guard after a synchronous throw for natural retry", () => {
+    let current = new Date("2026-03-25T23:59:59+08:00");
+    const windowTarget = new FakeEventTarget();
+    let attempts = 0;
+
+    const cleanup = createDailyRolloverController({
+      refresh: () => {
+        attempts++;
+        if (attempts === 1) throw new Error("refresh failed");
+      },
+      now: () => current,
+      windowTarget: windowTarget as unknown as DailyRolloverWindowTarget,
+      setTimer: (() => 1 as unknown as RolloverTimer),
+      clearTimer: (() => undefined),
+    });
+
+    current = new Date("2026-03-26T00:00:01+08:00");
+    assert.doesNotThrow(() => windowTarget.dispatch("focus"));
+    assert.doesNotThrow(() => windowTarget.dispatch("focus"));
+    assert.equal(attempts, 2);
+    cleanup();
+  });
 });
 
 type DailyRolloverDocumentTarget = Pick<Document, "addEventListener" | "removeEventListener" | "visibilityState">;
