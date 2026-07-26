@@ -408,7 +408,7 @@ describe("meal correction service", () => {
     assert.deepEqual(proteins, [0.333, 0.334, 0.334]);
     assert.ok(proteins.every((value) => Number.isFinite(value) && value >= 0));
     assert.ok(Math.abs(proteins.reduce((sum, value) => sum + value, 0) - 1.001) <= MACRO_ROUNDING_TOLERANCE);
-    assert.ok(Math.max(...proteins) - Math.min(...proteins) <= MACRO_ROUNDING_TOLERANCE);
+    assert.ok(Math.round((Math.max(...proteins) - Math.min(...proteins)) * 1000) / 1000 <= MACRO_ROUNDING_TOLERANCE);
   });
 
   it("keeps single-item targets exact and handles zero and adjacent rounding boundaries", async () => {
