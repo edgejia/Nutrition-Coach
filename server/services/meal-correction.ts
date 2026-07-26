@@ -36,6 +36,9 @@ import { projectPublicMealItems } from "../lib/public-meal-items.js";
 const PENDING_SELECTION_KIND = "meal_target_selection";
 const PENDING_SELECTION_TTL_MS = 15 * 60 * 1000;
 
+export const MEAL_PATCH_TOTAL_LIMIT = 1_000_000;
+export const MAX_RECONCILIATION_STEPS = 100_000;
+
 export interface MealCorrectionCandidate {
   mealId: string;
   mealRevisionId: string;
@@ -398,10 +401,28 @@ function reconcilePatchedResidual(
   targetTotal: number,
 ): number[] {
   const reconciled = [...roundedAllocations];
+  if (
+    !Number.isFinite(currentTotal)
+    || currentTotal < 0
+    || !Number.isFinite(targetTotal)
+    || targetTotal < 0
+    || !reconciled.every((value) => Number.isFinite(value) && value >= 0)
+  ) {
+    throw new Error("MEAL_NUMERIC_RECONCILIATION_UNSAFE");
+  }
+
   const residual = roundPatchValue(
     targetTotal - reconciled.reduce((sum, value) => sum + value, 0),
   );
-  let remainingSteps = Math.round(Math.abs(residual) * 1000);
+  if (!Number.isFinite(residual)) {
+    throw new Error("MEAL_NUMERIC_RECONCILIATION_UNSAFE");
+  }
+
+  const remainingSteps = Math.round(Math.abs(residual) * 1000);
+  if (!Number.isSafeInteger(remainingSteps) || remainingSteps > MAX_RECONCILIATION_STEPS) {
+    throw new Error("MEAL_NUMERIC_RECONCILIATION_UNSAFE");
+  }
+  let stepsLeft = remainingSteps;
   if (remainingSteps === 0) {
     return reconciled;
   }
@@ -419,27 +440,39 @@ function reconcilePatchedResidual(
     .filter((index) => index >= 0);
 
   if (eligibleIndexes.length === 0) {
-    return reconciled;
+    throw new Error("MEAL_NUMERIC_RECONCILIATION_UNSAFE");
   }
 
   let cursor = 0;
   let idleSteps = 0;
-  while (remainingSteps > 0 && idleSteps < eligibleIndexes.length) {
+  while (stepsLeft > 0 && idleSteps < eligibleIndexes.length) {
     const index = eligibleIndexes[cursor % eligibleIndexes.length]!;
     if (residual < 0) {
       if (reconciled[index]! >= 0.001) {
-        reconciled[index] = roundPatchValue(reconciled[index]! - 0.001);
-        remainingSteps -= 1;
+        const nextValue = roundPatchValue(reconciled[index]! - 0.001);
+        if (!Number.isFinite(nextValue) || nextValue < 0) {
+          throw new Error("MEAL_NUMERIC_RECONCILIATION_UNSAFE");
+        }
+        reconciled[index] = nextValue;
+        stepsLeft -= 1;
         idleSteps = 0;
       } else {
         idleSteps += 1;
       }
     } else {
-      reconciled[index] = roundPatchValue(reconciled[index]! + 0.001);
-      remainingSteps -= 1;
+      const nextValue = roundPatchValue(reconciled[index]! + 0.001);
+      if (!Number.isFinite(nextValue) || nextValue < 0) {
+        throw new Error("MEAL_NUMERIC_RECONCILIATION_UNSAFE");
+      }
+      reconciled[index] = nextValue;
+      stepsLeft -= 1;
       idleSteps = 0;
     }
     cursor += 1;
+  }
+
+  if (stepsLeft !== 0 || !reconciled.every((value) => Number.isFinite(value) && value >= 0)) {
+    throw new Error("MEAL_NUMERIC_RECONCILIATION_UNSAFE");
   }
 
   return reconciled;
@@ -454,6 +487,9 @@ function distributePatchedTotal(
     return [{ ...items[0]!, [field]: targetTotal }];
   }
 
+  if (!items.every((item) => Number.isFinite(item[field]) && item[field] >= 0)) {
+    throw new Error("MEAL_NUMERIC_RECONCILIATION_UNSAFE");
+  }
   const currentTotal = items.reduce((sum, item) => sum + item[field], 0);
   const roundedAllocations = items.map((item) => currentTotal > 0
     ? roundPatchValue(targetTotal * (item[field] / currentTotal))
@@ -491,6 +527,13 @@ function applyMealPatch(
     const nextValue = patch[field];
     if (nextValue === undefined) {
       continue;
+    }
+    if (
+      !Number.isFinite(nextValue)
+      || nextValue < 0
+      || nextValue > MEAL_PATCH_TOTAL_LIMIT
+    ) {
+      throw new Error("MEAL_NUMERIC_PATCH_OUT_OF_RANGE");
     }
     nextItems = distributePatchedTotal(nextItems, field, nextValue);
   }
