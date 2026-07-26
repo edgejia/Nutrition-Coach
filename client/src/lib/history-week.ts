@@ -94,7 +94,7 @@ function parseDateKey(dateKey: string): Date {
 
 function formatDateKey(date: Date): string {
   const dateKey = date.toISOString().slice(0, 10);
-  if (!DATE_KEY_PATTERN.test(dateKey)) {
+  if (!isRealDateKey(dateKey)) {
     throw new Error("INVALID_DATE_KEY");
   }
   return dateKey;

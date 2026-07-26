@@ -32,6 +32,14 @@ describe("history week structural and algorithm guards", () => {
       () => shiftHistoryWeek("9999-12-27", 1),
       { message: "INVALID_DATE_KEY" },
     );
+    assert.throws(
+      () => getMondayWeekStart("0100-01-01"),
+      { message: "INVALID_DATE_KEY" },
+    );
+    assert.throws(
+      () => shiftHistoryWeek("0100-01-03", -1),
+      { message: "INVALID_DATE_KEY" },
+    );
   });
 
   it("builds a Monday-through-Sunday leap week with stable day numbers", () => {
