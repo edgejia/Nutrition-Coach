@@ -803,8 +803,36 @@ describe("API Client", () => {
     assert.equal(fetchCalls[0]?.init.credentials, "same-origin");
   });
 
+  it("loadHistory accepts an empty messages array", async () => {
+    mockFetch(200, { messages: [] });
+
+    const result = await api.loadHistory();
+
+    assert.deepEqual(result.messages, []);
+    assert.equal(fetchCalls[0]?.url, "/api/chat/history?limit=50");
+    assert.equal(fetchCalls[0]?.init.credentials, "same-origin");
+  });
+
   it("loadHistory rejects a null response root before message mapping", async () => {
     mockFetch(200, null);
+
+    await assert.rejects(() => api.loadHistory(), { message: "Invalid history payload" });
+  });
+
+  it("loadHistory rejects an array response root before message mapping", async () => {
+    mockFetch(200, []);
+
+    await assert.rejects(() => api.loadHistory(), { message: "Invalid history payload" });
+  });
+
+  it("loadHistory rejects an object missing messages before message mapping", async () => {
+    mockFetch(200, {});
+
+    await assert.rejects(() => api.loadHistory(), { message: "Invalid history payload" });
+  });
+
+  it("loadHistory rejects a non-array messages property before message mapping", async () => {
+    mockFetch(200, { messages: {} });
 
     await assert.rejects(() => api.loadHistory(), { message: "Invalid history payload" });
   });
@@ -1697,6 +1725,14 @@ describe("API Client", () => {
     storage.set("deviceId", "d-1");
     mockFetch(401, { error: "Invalid" });
     await assert.rejects(() => api.loadHistory(), { message: "UNAUTHORIZED" });
+  });
+
+  it("loadHistory preserves generic transport failure before validating an invalid body", async () => {
+    mockFetch(500, null);
+
+    await assert.rejects(() => api.loadHistory(), { message: "Failed to load history" });
+    assert.equal(fetchCalls[0]?.url, "/api/chat/history?limit=50");
+    assert.equal(fetchCalls[0]?.init.credentials, "same-origin");
   });
 
   it("updateGoals throws UNAUTHORIZED on 401", async () => {
