@@ -84,12 +84,15 @@ function choosePastYearlessDateKey(
 ): string | undefined {
   const currentYear = currentDate.getFullYear();
   const todayKey = formatLocalDate(currentDate);
-  const currentYearKey = createDateKey(currentYear, month, day);
-  if (currentYearKey && currentYearKey <= todayKey) {
-    return currentYearKey;
+
+  for (let yearOffset = 0; yearOffset < 400; yearOffset += 1) {
+    const candidateKey = createDateKey(currentYear - yearOffset, month, day);
+    if (candidateKey && candidateKey <= todayKey) {
+      return candidateKey;
+    }
   }
 
-  return createDateKey(currentYear - 1, month, day);
+  return undefined;
 }
 
 function pushMention(

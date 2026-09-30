@@ -33,6 +33,10 @@ const summaryDetailSource = await readFile(
   fileURLToPath(new URL("../../client/src/components/SummaryDetailScreen.tsx", import.meta.url)),
   "utf8",
 );
+const mealEditSource = await readFile(
+  fileURLToPath(new URL("../../client/src/components/MealEditScreen.tsx", import.meta.url)),
+  "utf8",
+);
 
 function formatSummaryDateLabel(dateKey: string) {
   const [year, month, day] = dateKey.split("-").map(Number);
@@ -45,6 +49,80 @@ function formatSummaryDateLabel(dateKey: string) {
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function functionBody(source: string, functionName: string) {
+  const startToken = `function ${functionName}`;
+  const startIndex = source.indexOf(startToken);
+  assert.notEqual(startIndex, -1, `${functionName} should exist`);
+  const bodyStart = source.indexOf("{", startIndex);
+  assert.notEqual(bodyStart, -1, `${functionName} should have a body`);
+
+  let depth = 0;
+  for (let index = bodyStart; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === "{") depth += 1;
+    if (char === "}") depth -= 1;
+    if (depth === 0) {
+      return source.slice(bodyStart + 1, index);
+    }
+  }
+
+  assert.fail(`${functionName} body should be closed`);
+}
+
+const summaryDeleteConfirm = 'window.confirm("刪除這筆餐點？系統會保留歷史紀錄。")';
+const summaryDeleteMutationTokens = [
+  "const previousSnapshot",
+  "setDeletingMealId",
+  "setSnapshot",
+  "await deleteMeal",
+  "await refreshAfterMealMutation",
+];
+
+function assertSummaryDeleteConfirmationOrder(handlerBody: string) {
+  const confirmIndex = handlerBody.indexOf(summaryDeleteConfirm);
+  assert.notEqual(confirmIndex, -1, "Summary Detail should use the exact native delete confirmation copy");
+
+  const confirmGuardIndex = handlerBody.indexOf(`if (!${summaryDeleteConfirm})`);
+  assert.notEqual(confirmGuardIndex, -1, "Summary Detail should return immediately when confirmation is cancelled");
+
+  const cancelReturnIndex = handlerBody.indexOf("return;", confirmGuardIndex);
+  assert.ok(cancelReturnIndex > confirmGuardIndex, "cancel branch should return after confirmation without side effects");
+
+  const cancelBranch = handlerBody.slice(confirmGuardIndex, cancelReturnIndex);
+  for (const token of summaryDeleteMutationTokens) {
+    assert.doesNotMatch(cancelBranch, new RegExp(escapeRegExp(token)), `${token} must not run on cancellation`);
+  }
+
+  for (const token of summaryDeleteMutationTokens) {
+    const tokenIndex = handlerBody.indexOf(token);
+    assert.notEqual(tokenIndex, -1, `${token} should remain in the confirmed delete path`);
+    assert.ok(confirmIndex < tokenIndex, `${token} must remain after native confirmation`);
+  }
+}
+
+function assertSummaryDeleteCancellationContract(handlerBody: string, confirmOutcome: boolean) {
+  assert.equal(confirmOutcome, false, "this contract models the native confirmation cancel outcome");
+  assertSummaryDeleteConfirmationOrder(handlerBody);
+
+  const confirmGuardIndex = handlerBody.indexOf(`if (!${summaryDeleteConfirm})`);
+  const cancelReturnIndex = handlerBody.indexOf("return;", confirmGuardIndex);
+  const cancelBranch = handlerBody.slice(confirmGuardIndex, cancelReturnIndex);
+  for (const token of [
+    ...summaryDeleteMutationTokens,
+    "recordMealMutation",
+    "getDaySnapshot",
+    "setDailySummary",
+    "setMeals",
+    "applyMealMutationRefresh",
+    "setError",
+    "alert(",
+    "recoverGuestSession",
+    "setSnapshot(previousSnapshot)",
+  ]) {
+    assert.doesNotMatch(cancelBranch, new RegExp(escapeRegExp(token)), `${token} must not be reachable on cancel`);
+  }
 }
 
 describe("SummaryDetailScreen disclosure shell", () => {
@@ -236,5 +314,79 @@ describe("SummaryDetailScreen disclosure shell", () => {
       summaryDetailSource,
       /if \(dailySummary\?\.date === todayKey\) \{\s*setDailySummary\(dailySummary\);\s*const \{ meals \} = await getMeals\(\{ refreshReason: "meal_mutation" \}\);\s*setMeals\(meals\);\s*\}/,
     );
+  });
+
+  it("traces Summary Detail delete confirmation before every destructive side effect", () => {
+    const handlerBody = functionBody(summaryDetailSource, "handleDelete");
+    assertSummaryDeleteConfirmationOrder(handlerBody);
+
+    const reorderedBody = `
+      const previousSnapshot = snapshot;
+      if (!${summaryDeleteConfirm}) {
+        return;
+      }
+      setDeletingMealId(mealId);
+      await deleteMeal(mealId);
+    `;
+    assert.throws(
+      () => assertSummaryDeleteConfirmationOrder(reorderedBody),
+      /must remain after native confirmation/,
+      "the executed reordered-body negative control must reject mutation before confirmation",
+    );
+  });
+
+  it("keeps cancellation idempotent and side-effect free", () => {
+    const handlerBody = functionBody(summaryDetailSource, "handleDelete");
+
+    assertSummaryDeleteCancellationContract(handlerBody, false);
+    assertSummaryDeleteCancellationContract(handlerBody, false);
+
+    const reorderedCancelBody = handlerBody.replace(
+      /if \(!window\.confirm\("刪除這筆餐點？系統會保留歷史紀錄。"\)\) \{\s*return;\s*\}/,
+      `if (!${summaryDeleteConfirm}) {
+        setDeletingMealId(mealId);
+        return;
+      }`,
+    );
+    assert.throws(
+      () => assertSummaryDeleteCancellationContract(reorderedCancelBody, false),
+      /must not run on cancellation/,
+      "the executed cancel-side-effect negative control must reject pending mutation before return",
+    );
+  });
+
+  it("preserves confirmed recovery, validation, and row concurrency backstops", () => {
+    const handlerBody = functionBody(summaryDetailSource, "handleDelete");
+    const missingRevisionIndex = handlerBody.indexOf("if (!meal.mealRevisionId)");
+    const missingRevisionReturnIndex = handlerBody.indexOf("return;", missingRevisionIndex);
+    const confirmIndex = handlerBody.indexOf(summaryDeleteConfirm);
+    assert.ok(missingRevisionIndex >= 0, "missing/empty revision should keep the existing validation branch");
+    assert.ok(missingRevisionReturnIndex > missingRevisionIndex, "missing/empty revision should return early");
+    assert.ok(missingRevisionReturnIndex < confirmIndex, "missing/empty revision should alert before confirmation");
+
+    for (const token of [
+      "expectedMealRevisionId: meal.mealRevisionId",
+      "const previousSnapshot = snapshot",
+      "setDeletingMealId(mealId)",
+      "setSnapshot((currentSnapshot)",
+      "await refreshAfterMealMutation({",
+      "const refreshedSnapshot = await getDaySnapshot(selectedDateKey)",
+      "setSnapshot(refreshedSnapshot)",
+      "recordMealMutation(affectedDate)",
+      "if (err instanceof MealRevisionConflictError)",
+      "mealId: err.mealId",
+      "affectedDate: err.affectedDate",
+      "recordMealMutation(err.affectedDate)",
+      "setSnapshot(previousSnapshot)",
+      "void recoverGuestSession()",
+      "alert(\"刪除失敗，請再試一次。\")",
+      "setDeletingMealId(null)",
+    ]) {
+      assert.match(handlerBody, new RegExp(escapeRegExp(token)), `${token} should remain in confirmed recovery`);
+    }
+
+    assert.match(summaryDetailSource, /disabled=\{deletingMealId === meal\.id\}/);
+    assert.match(mealEditSource, /window\.confirm\("刪除這筆餐點？系統會保留歷史紀錄。"\)/);
+    assert.match(mealEditSource, /disabled=\{pending \|\| staleBlocked\}/);
   });
 });

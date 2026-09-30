@@ -1,5 +1,21 @@
 # 更新日誌
 
+## v3.6 - Unreleased
+
+### 變更
+
+- 完成 workflow slimming：GSD 回復為唯一 development lifecycle，local overlay 只保留薄的 planning evidence guidance、planning-tree safety、harness/security/verification delta、SQLite safety/recovery 與 runtime approval 邊界；移除 side-project 日常路徑不需要的 plan-proof parser、exact wiring checker、lease、command receipt、artifact provenance、verification seal、repo-native closeout transaction、tree fingerprint、host normalization、四個 legacy skill binding shims 與重複 routing 文件。
+- 修正 workflow contract 的 clean-clone reproducibility：DB-query safety test 直接呼叫 tracked helper，worktree sync test 在 disposable fixture 生成 hook shim並恢復 stale-parent、重複執行與 primary regular-file negative controls，不再依賴 ignored 本機檔案。
+- 將 workflow inventory 的 Remove 列與 Phase 128 archive contract 更新為退役後的現況：已退役的 workflow scripts 改以「不存在於 HEAD」守護，committed-HEAD 證據改驗證記錄本身的一致性，不再依賴 live HEAD 與本機 `rg` binary。
+- 修正每日正確性問題（Phase 130）：無年份日期跨閏年解析（#31）、分組 macro 修正的 rounding 殘差不再寫入負值（#37）、Summary Detail 刪除餐點前需確認（#44）、午夜換日 timer 固定以 Asia/Taipei 排程並在載入失敗時正確結算（#47），並限制 meal patch reconciliation 的數值邊界。
+- `loadHistory` 在 `.map` 前先驗證 history response container（Phase 131，#35）；History 週導覽改以驗證過的 `YYYY-MM-DD` 日曆運算，避免宿主時區漂移（Phase 132，#48）。
+- PR policy 的 changelog negative-control 測試改在臨時 git repo 執行，不再受當前分支是否修改 `CHANGELOG.md` 影響。
+
+### 驗證
+
+- Workflow slimming 以 Luna xhigh 子代理完成 callers/bindings/guards/negative-controls 盤點與 scoped implementation；唯一 `.planning` 變更透過 GSD 官方 config interface 遷移 `agent_skills`，沒有建立、推進或修復 planning artifacts。Planning guidance、planning evidence、release/PR、worktree、DB、harness targeted suites、clean-clone reproduction 與 reference scan 驗證替代承接。
+- 整合分支以 `yarn release:check --base=origin/main` 驗證；Phase 130–132 各自的 GSD verification 為 passed。
+
 ## v3.5 - Unreleased
 
 ### 變更
@@ -15,7 +31,7 @@
 
 - Runtime advisory refresh：frozen install 與 dependency-path review 通過；`yarn native:check` 6/6、Fastify static／chat upload targeted integration 97/97 通過；`yarn deps:audit` 從 12 個 high rows 收斂至 ADR 0009 既有的 Drizzle／`form-data` 2 個 high defer。
 - Phase 126：6/6 requirements verified；Phase 127：15/15 success criteria passed；Phase 128：16/16 executed-scope criteria passed，25-entry disposition map 為 20 CLOSED / 3 DEFERRED / 2 OUT-OF-SCOPE。
-- `yarn workflow:state-check`、active planning artifact provenance/seal checks，以及 source wrap 後重新執行的 `yarn release:check` 共同綁定最終 committed source SHA；測試僅使用 mocked 或 harness providers，不宣稱 live-provider、Docker、production 或主觀視覺品質 readiness。
+- `yarn workflow:state-check` 與 source wrap 後重新執行的 `yarn release:check` 共同綁定最終 committed source SHA；測試僅使用 mocked 或 harness providers，不宣稱 live-provider、Docker、production 或主觀視覺品質 readiness。
 - Drizzle 升級驗證通過 frozen install、無高風險／跨 minor API surface 使用的 source scan、`drizzle-kit@0.31.10` 與 ORM compatibility API version `10` 配對、`yarn native:check` `6/6` file-backed migration/persistence roundtrip、`yarn db:generate` `13` tables／no schema drift，以及 `yarn release:check --base=origin/main`；fresh `yarn deps:audit` 已不再回報 Drizzle advisory，且只剩 `form-data` 一個 high finding，因此尚不宣稱 audit clean。
 - `form-data` 升級驗證通過 frozen install、唯一 lock path、OpenAI files/audio multipart negative scan、provider `22/22`、`yarn native:check` `6/6` 與 `yarn release:check --base=origin/main`；fresh `yarn deps:audit` 回報 `Clean: yes`、所有 severity 均為 `0`。
 

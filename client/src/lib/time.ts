@@ -17,3 +17,22 @@ export function formatLocalDate(date: Date): string {
 
   return `${year}-${month}-${day}`;
 }
+
+/**
+ * Return the number of milliseconds from `date` until the next midnight in
+ * the product's fixed Asia/Taipei calendar.  The calendar parts come from
+ * the fixed-zone formatter, so host/browser timezone settings cannot affect
+ * the boundary arithmetic.
+ */
+export function getMillisecondsUntilNextTaipeiMidnight(date: Date): number {
+  const parts = appDateFormatter.formatToParts(date);
+  const year = Number(parts.find((part) => part.type === "year")?.value);
+  const month = Number(parts.find((part) => part.type === "month")?.value);
+  const day = Number(parts.find((part) => part.type === "day")?.value);
+  const nextCalendarDay = new Date(Date.UTC(year, month - 1, day + 1))
+    .toISOString()
+    .slice(0, 10);
+  const nextMidnightEpoch = Date.parse(`${nextCalendarDay}T00:00:00+08:00`);
+
+  return nextMidnightEpoch - date.getTime();
+}

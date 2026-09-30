@@ -1,6 +1,6 @@
 # Cloudflare Tunnel Production Runtime
 
-This is the current production runtime path while Railway is unavailable. The deployed user path is a local production-mode Fastify server exposed through a Cloudflare Tunnel public hostname.
+This is the current production runtime path. Railway is retired; the deployed user path is a local production-mode Fastify server exposed through a Cloudflare Tunnel public hostname.
 
 The original v3.4.1 five-phase runtime/demo plan is terminated; its one-page
 postmortem is [archived here](archive/v3.4.1-postmortem.md). The deployment
@@ -9,7 +9,7 @@ authority now has three gates:
 Source release and runtime refresh are separate gates within this three-gate
 model:
 
-1. **Source release:** Work reaches PR-ready source state on a non-`main` branch. A PR targets `main`, and repository policy plus the required `Release Check` report source readiness. The maintainer separately decides whether to merge the PR into `main`. After merge, local post-merge planning archive/closeout runs from updated `main` when the GSD workflow is active. If that workflow is paused, stop instead of inventing or skipping the archive.
+1. **Source release:** Work reaches PR-ready source state on a non-`main` branch. A PR targets `main`, and repository policy plus the required `Release Check` report source readiness. The maintainer separately decides whether to merge the PR into `main`. After merge, an explicitly approved local post-merge planning archive/closeout runs from updated `main`; do not invent or skip that archive.
 2. **Runtime safety and refresh:** The maintainer separately selects the merged source SHA and explicitly approves production runtime refresh. The approved B01 recovery gate quiesces writes, creates an off-checkout storage backup, and proves restore readiness before migration. Separately approved R05 migration and R06 build/start gates refresh the local production-mode server.
 3. **Public validation:** Any Cloudflare Tunnel change and the public-domain smoke retain their own separate approvals.
 

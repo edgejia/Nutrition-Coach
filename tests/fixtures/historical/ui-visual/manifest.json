@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 2,
+  "archiveStatus": "historical-non-runnable",
+  "archiveFile": "tests/fixtures/historical/ui-visual/visual-scripts-aggregate.mjs.md",
+  "callerEvidenceFile": "tests/fixtures/historical/ui-visual/caller-evidence.txt",
+  "sourcePresentBeforeDelete": true,
+  "archiveOrder": [
+    "section-01",
+    "section-02",
+    "section-03",
+    "section-04",
+    "section-05",
+    "section-06",
+    "section-07"
+  ],
+  "retainedActiveScenarios": [
+    "tests/harness/scenarios/110-home-nutrition-animation-visual.mjs"
+  ],
+  "rows": [
+    {
+      "originalPath": "tests/harness/scenarios/42.5-ui-fidelity-visual.mjs",
+      "aggregateSection": "section-01",
+      "callerEvidenceRef": "caller-evidence.txt#filteredExternalCallerRows",
+      "archiveOrder": 1,
+      "activeCallers": 0,
+      "replacementProof": "Sanitized non-runnable aggregate section with deterministic redaction markers; original source hash/byte metadata retained only.",
+      "remainingRisk": "Historical UI behavior is not re-executed by this archive; visual judgement remains human-only.",
+      "originalSourceSha256": "a71b02dc6dac0259e8d5cdbaaf965701b0839a5cdcb79ccf3f92cda7fe6dbf6b",
+      "originalSourceByteLength": 5708,
+      "sanitizedSnapshotSha256": "3274524ac7e8a44809bd6a0b1c9ad5ce1007f3abec7b5f17f47af4500cb81ba1",
+      "sanitizedSnapshotByteLength": 5726,
+      "sanitizationProof": "deterministic-redaction-v1; non-reconstructive hash and byte metadata"
+    },
+    {
+      "originalPath": "tests/harness/scenarios/43-sport-ui-built-smoke.mjs",
+      "aggregateSection": "section-02",
+      "callerEvidenceRef": "caller-evidence.txt#filteredExternalCallerRows",
+      "archiveOrder": 2,
+      "activeCallers": 0,
+      "replacementProof": "Sanitized non-runnable aggregate section with deterministic redaction markers; original source hash/byte metadata retained only.",
+      "remainingRisk": "Historical UI behavior is not re-executed by this archive; visual judgement remains human-only.",
+      "originalSourceSha256": "6b2dc50c4650ee218dd31cf0fe50ae2f7e8a7f824abce91d38452c21037d2f74",
+      "originalSourceByteLength": 11747,
+      "sanitizedSnapshotSha256": "6b2dc50c4650ee218dd31cf0fe50ae2f7e8a7f824abce91d38452c21037d2f74",
+      "sanitizedSnapshotByteLength": 11747,
+      "sanitizationProof": "deterministic-redaction-v1; non-reconstructive hash and byte metadata"
+    },
+    {
+      "originalPath": "tests/harness/scenarios/49-history-dashboard-polish-visual.mjs",
+      "aggregateSection": "section-03",
+      "callerEvidenceRef": "caller-evidence.txt#filteredExternalCallerRows",
+      "archiveOrder": 3,
+      "activeCallers": 0,
+      "replacementProof": "Sanitized non-runnable aggregate section with deterministic redaction markers; original source hash/byte metadata retained only.",
+      "remainingRisk": "Historical UI behavior is not re-executed by this archive; visual judgement remains human-only.",
+      "originalSourceSha256": "17c25a8317b0140ffa05efe5f3349bf118b2d8d32f6455325dc828379db14c0d",
+      "originalSourceByteLength": 28191,
+      "sanitizedSnapshotSha256": "d4530516f92fb514389ebd73a33a264ad7bccf00e9cb752844ff07fbcf5d5db0",
+      "sanitizedSnapshotByteLength": 28277,
+      "sanitizationProof": "deterministic-redaction-v1; non-reconstructive hash and byte metadata"
+    },
+    {
+      "originalPath": "tests/harness/scenarios/77-history-loading-visual.mjs",
+      "aggregateSection": "section-04",
+      "callerEvidenceRef": "caller-evidence.txt#filteredExternalCallerRows",
+      "archiveOrder": 4,
+      "activeCallers": 0,
+      "replacementProof": "Sanitized non-runnable aggregate section with deterministic redaction markers; original source hash/byte metadata retained only.",
+      "remainingRisk": "Historical UI behavior is not re-executed by this archive; visual judgement remains human-only.",
+      "originalSourceSha256": "c70594d067cee3b9a2da40edf856dd70d9841fc5a872e211d100a5607dd10546",
+      "originalSourceByteLength": 36463,
+      "sanitizedSnapshotSha256": "ddf62785cb0ec4d433bbce202a7fb5131d2137141518bc98bc61740aef5ebe22",
+      "sanitizedSnapshotByteLength": 36546,
+      "sanitizationProof": "deterministic-redaction-v1; non-reconstructive hash and byte metadata"
+    },
+    {
+      "originalPath": "tests/harness/scenarios/81-mobile-action-safety-visual.mjs",
+      "aggregateSection": "section-05",
+      "callerEvidenceRef": "caller-evidence.txt#filteredExternalCallerRows",
+      "archiveOrder": 5,
+      "activeCallers": 0,
+      "replacementProof": "Sanitized non-runnable aggregate section with deterministic redaction markers; original source hash/byte metadata retained only.",
+      "remainingRisk": "Historical UI behavior is not re-executed by this archive; visual judgement remains human-only.",
+      "originalSourceSha256": "6f61aab8a33bfa211c777872326ebf8824ad7aec65ae8dcff9d36af5427b58af",
+      "originalSourceByteLength": 35263,
+      "sanitizedSnapshotSha256": "b95cea9858cb01779fec49e2f24bbd3e7b07e5a53cdfa2373bd8fce47fab1372",
+      "sanitizedSnapshotByteLength": 35785,
+      "sanitizationProof": "deterministic-redaction-v1; non-reconstructive hash and byte metadata"
+    },
+    {
+      "originalPath": "tests/harness/scenarios/82-history-meal-navigation-visual.mjs",
+      "aggregateSection": "section-06",
+      "callerEvidenceRef": "caller-evidence.txt#filteredExternalCallerRows",
+      "archiveOrder": 6,
+      "activeCallers": 0,
+      "replacementProof": "Sanitized non-runnable aggregate section with deterministic redaction markers; original source hash/byte metadata retained only.",
+      "remainingRisk": "Historical UI behavior is not re-executed by this archive; visual judgement remains human-only.",
+      "originalSourceSha256": "7f9d2092ab9bad4d8719902c278b7ce4d412b6a8337b860834e9e426ee4d1a7f",
+      "originalSourceByteLength": 35791,
+      "sanitizedSnapshotSha256": "4cf7f11867244b6d1eea3cf2fc1fc7b10665ece6f8813a10777a7bc1c04062b0",
+      "sanitizedSnapshotByteLength": 37031,
+      "sanitizationProof": "deterministic-redaction-v1; non-reconstructive hash and byte metadata"
+    },
+    {
+      "originalPath": "tests/harness/scenarios/87-onboarding-age-wheel-320px-fix-visual.mjs",
+      "aggregateSection": "section-07",
+      "callerEvidenceRef": "caller-evidence.txt#filteredExternalCallerRows",
+      "archiveOrder": 7,
+      "activeCallers": 0,
+      "replacementProof": "Sanitized non-runnable aggregate section with deterministic redaction markers; original source hash/byte metadata retained only.",
+      "remainingRisk": "Historical UI behavior is not re-executed by this archive; visual judgement remains human-only.",
+      "originalSourceSha256": "c4e98f578966260b5dece78096d27fd74076318a1a1b5b16a3047093983b5ced",
+      "originalSourceByteLength": 28851,
+      "sanitizedSnapshotSha256": "8ec0b5c4e7f7911843da8ab858ac115289aecf9a30b92997105db442364f4c5a",
+      "sanitizedSnapshotByteLength": 28944,
+      "sanitizationProof": "deterministic-redaction-v1; non-reconstructive hash and byte metadata"
+    }
+  ],
+  "sanitizationPolicy": "deterministic-redaction-v1",
+  "sourceEvidence": "originalSourceSha256/originalSourceByteLength retain pre-sanitization metadata only; raw source bytes and runtime identifiers are not retained",
+  "snapshotEvidence": "sanitizedSnapshotSha256/sanitizedSnapshotByteLength describe the current aggregate sections"
+}

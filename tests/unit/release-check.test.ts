@@ -79,11 +79,9 @@ describe("release:check timezone contract", () => {
     assert.match(script, /await runStep\("Capability matrix generated doc drift", "capability_matrix", \["matrix:gen:check"\]\);/);
     assert.match(script, /await runStep\("Behavior matrix generated doc drift", "behavior_matrix", \["behavior-matrix:gen:check"\]\);/);
     assert.match(script, /await runStep\("Frontend build", "frontend_build", \["build"\]\);/);
-    assert.match(script, /publishFailedCommandReceipt/);
-    assert.match(script, /publishPassedCommandReceipt/);
-    assert.match(script, /--workflow-token=/);
-    assert.match(script, /--workflow-runtime=/);
-    assert.match(script, /signed receipts require both/);
+    assert.match(script, /stableWorkspaceFingerprint/);
+    assert.match(script, /workspaceAfterSha256 !== workspaceBeforeSha256/);
+    assert.doesNotMatch(script, /command-receipt|workflow-lease|--workflow-token|--receipt=/);
     assert.match(script, /MAX_RELEASE_DURATION_MS = 18 \* 60 \* 1000/);
     assert.match(script, /spawn\(YARN_BIN, args/);
     assert.match(script, /function releaseChildEnvironment\(envOverrides = \{\}\)/);

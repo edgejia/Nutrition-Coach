@@ -14,7 +14,7 @@ export interface SSESummaryCoordinatorDeps<Meal> {
 
 export interface SSESummaryCoordinator<Meal> {
   handleSummary: (payload: DailySummarySSEPayload) => Promise<void>;
-  runInitialMealsLoad: (options?: { refreshReason?: MealRowRefreshReason }) => Promise<void>;
+  runInitialMealsLoad: (options?: { refreshReason?: MealRowRefreshReason }) => Promise<boolean>;
 }
 
 function isUnauthorized(error: unknown): boolean {
@@ -104,9 +104,12 @@ export function createSSESummaryCoordinator<Meal>(
         const { meals } = await deps.getMeals(options);
         if (commitRowsIfLatest(token, meals)) {
           sameDayCommitSeen = true;
+          return true;
         }
+        return false;
       } catch (error) {
         handleLoadError(error);
+        return false;
       }
     },
   };

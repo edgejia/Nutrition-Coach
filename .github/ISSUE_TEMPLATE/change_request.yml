@@ -1,0 +1,133 @@
+name: Change request
+description: Propose a feature, enhancement, or maintenance change.
+title: "[Change]: "
+labels: ["change-request", "needs-review"]
+body:
+  - type: dropdown
+    id: request-type
+    attributes:
+      label: Request type
+      description: Choose the stable request kind used by the PR policy contract.
+      options:
+        - Feature
+        - Enhancement
+        - Maintenance
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem-current-state
+    attributes:
+      label: Problem / current state
+      description: Describe the user or operator problem and the current behavior before proposing a solution.
+      placeholder: Today...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-change
+    attributes:
+      label: Proposed change
+      description: Describe the desired behavior with concrete examples and user-visible outcomes.
+      placeholder: After this change...
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Complete scope of changes
+      description: List likely files, systems, APIs, data, migrations, prompts, tests, harness scenarios, and docs.
+      placeholder: |
+        - client/src/...
+        - server/routes/...
+        - tests/...
+    validations:
+      required: true
+
+  - type: textarea
+    id: user-operator-impact
+    attributes:
+      label: User / operator impact
+      description: Explain who is affected, what changes for them, and any operational or support implications.
+      placeholder: Users and operators will...
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance criteria
+      description: List testable conditions that must be true before the issue can close.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: runtimes
+    attributes:
+      label: Applicable runtimes and surfaces
+      options:
+        - label: Local development
+        - label: Cloudflare Tunnel public-domain
+        - label: Production-equivalent local runtime
+        - label: Main source branch
+        - label: Browser/mobile viewport
+        - label: Server/API
+        - label: LLM provider path
+    validations:
+      required: true
+
+  - type: textarea
+    id: breaking-change-assessment
+    attributes:
+      label: Breaking-change assessment
+      description: State whether public APIs, persisted data, deploy settings, user workflows, or existing tests are affected.
+      placeholder: No breaking changes expected because...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: risk
+    attributes:
+      label: Risk
+      description: Choose the highest expected correctness, security, privacy, or operational risk.
+      options:
+        - Low
+        - Medium
+        - High
+    validations:
+      required: true
+
+  - type: textarea
+    id: maintenance-burden
+    attributes:
+      label: Maintenance burden
+      description: Describe new ongoing ownership, data shape, test, prompt, dependency, or operational burden.
+      placeholder: This adds...
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Name at least one alternative and why it is not preferred.
+      placeholder: We considered...
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: privacy-sanitization
+    attributes:
+      label: Privacy and sanitization checklist
+      description: If reproduction evidence is supplied, keep it metadata-only and sanitized.
+      options:
+        - label: I removed or anonymized personal data, images, tokens, cookies, secrets, prompts, and private logs.
+          required: true
+        - label: I included only the minimum metadata needed to evaluate this request.
+          required: true
+    validations:
+      required: true

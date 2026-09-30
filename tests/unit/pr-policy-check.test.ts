@@ -2,7 +2,8 @@ process.env.TZ = "Asia/Taipei";
 
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { createServer } from "node:http";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -24,6 +25,7 @@ type PolicyFixture = {
 type PolicyRunOptions = {
   cwd?: string;
   args?: string[];
+  env?: NodeJS.ProcessEnv;
 };
 
 const policyScriptPath = path.resolve("scripts/pr-policy-check.mjs");
@@ -56,6 +58,8 @@ function policyEnvironment() {
     GITHUB_TOKEN: "",
   };
   delete env.PR_POLICY_OFFLINE_ISSUES;
+  // CI sets RELEASE_BASE_REF to the bare base branch name, which has no local ref in a PR checkout.
+  delete env.RELEASE_BASE_REF;
   return env;
 }
 
@@ -85,7 +89,7 @@ function runPrPolicy(fixture: PolicyFixture, options: PolicyRunOptions = {}) {
     [policyScriptPath, `--event=${eventPath}`, ...(options.args || [])],
     {
       cwd: options.cwd || process.cwd(),
-      env,
+      env: { ...env, ...(options.env || {}) },
       encoding: "utf8",
     },
   );
@@ -98,8 +102,39 @@ function runPrPolicy(fixture: PolicyFixture, options: PolicyRunOptions = {}) {
   };
 }
 
-function runFileOnlyPolicy(cwd: string) {
-  const result = spawnSync(process.execPath, [policyScriptPath, "--allow-no-pr", "--base=HEAD"], {
+async function runPrPolicyAsync(fixture: PolicyFixture, options: PolicyRunOptions = {}) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nutrition-pr-policy-"));
+  const eventPath = path.join(tempDir, "event.json");
+  fs.writeFileSync(eventPath, JSON.stringify({
+    repository: { full_name: "edgejia/Nutrition-Coach" },
+    pull_request: {
+      number: 999,
+      title: fixture.title,
+      body: fixture.body,
+      labels: (fixture.labels || []).map((name) => ({ name })),
+    },
+  }));
+  const env = policyEnvironment();
+  if (fixture.issues) env.PR_POLICY_OFFLINE_ISSUES = JSON.stringify(fixture.issues);
+  const child = spawn(process.execPath, [policyScriptPath, `--event=${eventPath}`, ...(options.args || [])], {
+    cwd: options.cwd || process.cwd(),
+    env: { ...env, ...(options.env || {}) },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+  child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+  const status = await new Promise<number | null>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("exit", (code) => resolve(code));
+  });
+  fs.rmSync(tempDir, { recursive: true, force: true });
+  return { status, stdout, stderr, output: `${stdout}${stderr}` };
+}
+
+function runFileOnlyPolicy(cwd: string, base = "HEAD") {
+  const result = spawnSync(process.execPath, [policyScriptPath, "--allow-no-pr", `--base=${base}`], {
     cwd,
     env: policyEnvironment(),
     encoding: "utf8",
@@ -112,13 +147,50 @@ function runFileOnlyPolicy(cwd: string) {
 }
 
 describe("pr policy gate", () => {
+  test("fails closed when GitHub file pagination reaches the hard page limit", async () => {
+    const server = createServer((request, response) => {
+      const url = new URL(request.url || "/", "http://127.0.0.1");
+      if (url.pathname.endsWith("/files")) {
+        response.setHeader("content-type", "application/json");
+        response.end(JSON.stringify(Array.from({ length: 100 }, (_, index) => ({ filename: `src/file-${url.searchParams.get("page")}-${index}.ts` }))));
+        return;
+      }
+      response.statusCode = 404;
+      response.end("not found");
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    assert.equal(typeof address, "object");
+    try {
+      const result = await runPrPolicyAsync(
+        {
+          title: "[Chore] large policy fixture",
+          body: "Closes #123",
+          labels: ["no-changelog"],
+          issues: { 123: { title: "Maintenance", labels: [] } },
+        },
+        {
+          env: {
+            GITHUB_TOKEN: "fixture-token",
+            GITHUB_API_URL: `http://127.0.0.1:${(address as { port: number }).port}`,
+          },
+        },
+      );
+      assert.notEqual(result.status, 0);
+      assert.match(result.output, /file list .*incomplete/i);
+      assert.doesNotMatch(result.output, /\[pr-policy\] PASS/);
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+    }
+  });
+
   test("passes when a feature PR closes an approved feature issue", () => {
     const result = runPrPolicy({
-      title: "feat: add tracker",
+      title: "[Feature] add tracker",
       body: "Closes #123",
       labels: ["no-changelog"],
       issues: {
-        123: { title: "Feature tracker", labels: ["feature-request", "approved-feature"] },
+        123: { title: "Feature tracker", labels: ["feature-request", "approved-feature", "ready-for-pr"] },
       },
     });
 
@@ -127,9 +199,254 @@ describe("pr policy gate", () => {
     assert.match(result.output, /\[pr-policy\] PASS/);
   });
 
+  test("rejects a markerless PR even when the linked issue is typed and ready", () => {
+    const result = runPrPolicy({
+      title: "misc docs",
+      body: "Closes #123",
+      labels: ["no-changelog"],
+      issues: {
+        123: { title: "Maintenance", labels: ["type: chore", "ready-for-pr"] },
+      },
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.output, /exactly one request marker/);
+    assert.doesNotMatch(result.output, /\[pr-policy\] PASS/);
+  });
+
+  test("rejects a PR with more than one request marker", () => {
+    const result = runPrPolicy({
+      title: "[Feature] [Bug] mixed request",
+      body: "Closes #123",
+      labels: ["no-changelog"],
+      issues: {
+        123: { title: "Mixed request", labels: ["ready-for-pr", "feature-request", "approved-feature", "bug", "confirmed-bug"] },
+      },
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.output, /exactly one request marker/);
+    assert.doesNotMatch(result.output, /\[pr-policy\] PASS/);
+  });
+
+  test("requires issue-side ready-for-pr on the linked issue", () => {
+    const result = runPrPolicy({
+      title: "[Feature] add tracker",
+      body: "Closes #123",
+      labels: ["no-changelog"],
+      issues: {
+        123: { title: "Feature tracker", labels: ["feature-request", "approved-feature"] },
+      },
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.output, /#123.*ready-for-pr/);
+  });
+
+  test("does not accept an issue-side no-changelog label", () => {
+    withTemporaryGitRepo((repoDir) => {
+      const result = runPrPolicy(
+        {
+          title: "[Chore] tidy policy docs",
+          body: "Closes #123",
+          issues: {
+            123: { title: "Maintenance", labels: ["type: chore", "ready-for-pr", "no-changelog"] },
+          },
+        },
+        { cwd: repoDir, args: ["--base=HEAD"] },
+      );
+
+      assert.notEqual(result.status, 0);
+      assert.match(result.output, /must update CHANGELOG\.md or carry the `no-changelog` label/);
+    });
+  });
+
+  test("maps fixed request markers to their stable PR kinds", () => {
+    const cases = [
+      {
+        marker: "Feature",
+        kind: "feature",
+        labels: ["feature-request", "approved-feature", "ready-for-pr"],
+      },
+      {
+        marker: "Enhancement",
+        kind: "enhancement",
+        labels: ["enhancement", "approved-enhancement", "ready-for-pr"],
+      },
+      {
+        marker: "Bug",
+        kind: "fix",
+        labels: ["bug", "confirmed-bug", "ready-for-pr"],
+      },
+      {
+        marker: "Chore",
+        kind: "chore",
+        labels: ["type: chore", "ready-for-pr"],
+      },
+    ];
+
+    for (const { marker, kind, labels } of cases) {
+      const result = runPrPolicy({
+        title: `[${marker}] update policy`,
+        body: "Closes #123",
+        labels: ["no-changelog"],
+        issues: { 123: { title: "Request", labels } },
+      });
+
+      assert.equal(result.status, 0, `${marker} marker failed:\n${result.output}`);
+      assert.match(result.output, new RegExp(`Detected PR kind\\(s\\): ${kind}\\n`));
+    }
+  });
+
+  test("requires ready-for-pr on every linked closing issue", () => {
+    const ready = runPrPolicy({
+      title: "[Feature] combine tracker work",
+      body: "Closes #123 and fixes #456",
+      labels: ["ready-for-pr", "no-changelog"],
+      issues: {
+        123: { title: "Feature one", labels: ["feature-request", "approved-feature", "ready-for-pr"] },
+        456: { title: "Feature two", labels: ["feature-request", "approved-feature", "ready-for-pr"] },
+      },
+    });
+
+    assert.equal(ready.status, 0, ready.output);
+
+    const unready = runPrPolicy({
+      title: "[Feature] combine tracker work",
+      body: "Closes #123 and fixes #456",
+      labels: ["ready-for-pr", "no-changelog"],
+      issues: {
+        123: { title: "Feature one", labels: ["feature-request", "approved-feature", "ready-for-pr"] },
+        456: { title: "Feature two", labels: ["feature-request", "approved-feature"] },
+      },
+    });
+
+    assert.notEqual(unready.status, 0);
+    assert.match(unready.output, /#456.*ready-for-pr/);
+  });
+
+  test("does not union typed approval and request labels across linked issues", () => {
+    const result = runPrPolicy({
+      title: "[Feature] split tracker labels",
+      body: "Closes #123 and Closes #456",
+      labels: ["no-changelog"],
+      issues: {
+        123: { title: "Feature request", labels: ["feature-request", "ready-for-pr"] },
+        456: { title: "Feature approval", labels: ["approved-feature", "ready-for-pr"] },
+      },
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.output, /labels cannot be split across issues/);
+  });
+
+  test("accepts no-changelog only from the pull-request label set", () => {
+    withTemporaryGitRepo((repoDir) => {
+      const fixtureRun = { cwd: repoDir, args: ["--base=HEAD"] };
+      const issueOnly = runPrPolicy(
+        {
+          title: "[Chore] maintain policy docs",
+          body: "Closes #123",
+          issues: {
+            123: { title: "Maintenance", labels: ["type: chore", "ready-for-pr", "no-changelog"] },
+          },
+        },
+        fixtureRun,
+      );
+
+      assert.notEqual(issueOnly.status, 0);
+      assert.match(issueOnly.output, /must update CHANGELOG\.md or carry the `no-changelog` label/);
+
+      const prOnly = runPrPolicy(
+        {
+          title: "[Chore] maintain policy docs",
+          body: "Closes #123",
+          labels: ["no-changelog"],
+          issues: {
+            123: { title: "Maintenance", labels: ["type: chore", "ready-for-pr"] },
+          },
+        },
+        fixtureRun,
+      );
+
+      assert.equal(prOnly.status, 0, prOnly.output);
+    });
+  });
+
+  test("requires a closing issue even when PR labels claim readiness and approval", () => {
+    const result = runPrPolicy({
+      title: "[Feature] orphan policy change",
+      body: "Documented without a closing tracker reference",
+      labels: ["ready-for-pr", "approved-feature", "no-changelog"],
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.output, /must link at least one GitHub issue/);
+  });
+
+  test("does not count a dirty uncommitted CHANGELOG.md in the policy diff", () => {
+    withTemporaryGitRepo((repoDir) => {
+      fs.writeFileSync(path.join(repoDir, "CHANGELOG.md"), "Base changelog text\n");
+      runCommand("git", ["add", "CHANGELOG.md"], repoDir);
+      runCommand("git", ["commit", "--quiet", "-m", "base changelog"], repoDir);
+      const base = spawnSync("git", ["rev-parse", "HEAD"], { cwd: repoDir, encoding: "utf8" }).stdout.trim();
+      fs.mkdirSync(path.join(repoDir, "src"), { recursive: true });
+      fs.writeFileSync(path.join(repoDir, "src", "policy-change.ts"), "export const policyChange = true;\n");
+      runCommand("git", ["add", "src/policy-change.ts"], repoDir);
+      runCommand("git", ["commit", "--quiet", "-m", "committed policy change"], repoDir);
+      fs.writeFileSync(path.join(repoDir, "CHANGELOG.md"), "Uncommitted changelog text\n");
+
+      const result = runPrPolicy(
+        {
+          title: "[Chore] committed policy change",
+          body: "Closes #123",
+          issues: {
+            123: { title: "Maintenance", labels: ["type: chore", "ready-for-pr"] },
+          },
+        },
+        { cwd: repoDir, args: [`--base=${base}`] },
+      );
+
+      assert.notEqual(result.status, 0);
+      assert.match(result.output, /Changed files considered: 1/);
+      assert.match(result.output, /must update CHANGELOG\.md or carry the `no-changelog` label/);
+    });
+  });
+
+  test("requires same-issue typed labels for every fixed request marker", () => {
+    const typedCases = [
+      { marker: "Feature", typeLabel: "feature-request", approval: "approved-feature" },
+      { marker: "Enhancement", typeLabel: "enhancement", approval: "approved-enhancement" },
+      { marker: "Bug", typeLabel: "bug", approval: "confirmed-bug" },
+    ];
+
+    for (const { marker, typeLabel, approval } of typedCases) {
+      const result = runPrPolicy({
+        title: `[${marker}] missing typed approval`,
+        body: "Closes #123",
+        labels: ["no-changelog"],
+        issues: { 123: { title: "Typed request", labels: [typeLabel, "ready-for-pr"] } },
+      });
+
+      assert.notEqual(result.status, 0, `${marker} unexpectedly passed`);
+      assert.match(result.output, new RegExp(approval));
+    }
+
+    const chore = runPrPolicy({
+      title: "[Chore] missing maintenance type",
+      body: "Closes #123",
+      labels: ["no-changelog"],
+      issues: { 123: { title: "Maintenance", labels: ["ready-for-pr"] } },
+    });
+
+    assert.notEqual(chore.status, 0);
+    assert.match(chore.output, /chore PRs require the `type: chore` label/);
+    assert.doesNotMatch(chore.output, /approved-feature|approved-enhancement|confirmed-bug/);
+  });
+
   test("rejects feature approval labels that are only on the PR", () => {
     const result = runPrPolicy({
-      title: "feat: add tracker",
+      title: "[Feature] add tracker",
       body: "Closes #123",
       labels: ["approved-feature", "no-changelog"],
       issues: {
@@ -143,7 +460,7 @@ describe("pr policy gate", () => {
 
   test("rejects non-closing issue references", () => {
     const result = runPrPolicy({
-      title: "feat: add tracker",
+      title: "[Feature] add tracker",
       body: "Refs #123",
       labels: ["no-changelog"],
       issues: {
@@ -153,6 +470,48 @@ describe("pr policy gate", () => {
 
     assert.notEqual(result.status, 0);
     assert.match(result.output, /must link at least one GitHub issue/);
+  });
+
+  test("allows a full issue URL only when it targets the event repository", () => {
+    const result = runPrPolicy({
+      title: "[Feature] add tracker",
+      body: "Closes https://github.com/edgejia/Nutrition-Coach/issues/123",
+      labels: ["no-changelog"],
+      issues: {
+        123: { title: "Feature tracker", labels: ["feature-request", "approved-feature", "ready-for-pr"] },
+      },
+    });
+
+    assert.equal(result.status, 0, result.output);
+    assert.match(result.output, /Linked issue\(s\): #123/);
+  });
+
+  test("rejects an external issue URL even when its number has an approved local fixture", () => {
+    const result = runPrPolicy({
+      title: "[Feature] add tracker",
+      body: "Closes https://github.com/another-owner/another-repo/issues/123",
+      labels: ["no-changelog"],
+      issues: {
+        123: { title: "Feature tracker", labels: ["feature-request", "approved-feature"] },
+      },
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.output, /targets an external repository/);
+  });
+
+  test("rejects pull-request URLs as tracker references", () => {
+    const result = runPrPolicy({
+      title: "[Feature] add tracker",
+      body: "Closes https://github.com/edgejia/Nutrition-Coach/pull/123",
+      labels: ["no-changelog"],
+      issues: {
+        123: { title: "Feature tracker", labels: ["feature-request", "approved-feature"] },
+      },
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.output, /targets a pull request/);
   });
 
   test("allows ignored files that remain untracked in file-only mode", () => {
@@ -188,7 +547,7 @@ describe("pr policy gate", () => {
 
       const result = runPrPolicy(
         {
-          title: "feat: add tracker",
+          title: "[Feature] add tracker",
           body: "Closes #123",
           labels: ["no-changelog"],
           issues: {
@@ -213,6 +572,44 @@ describe("pr policy gate", () => {
 
       assert.equal(result.status, 0, result.output);
       assert.match(result.output, /\[pr-policy\] PASS/);
+    });
+  });
+
+  test("fails closed when the merge-base cannot be computed", () => {
+    withTemporaryGitRepo((repoDir) => {
+      const result = runFileOnlyPolicy(repoDir, "missing-base-ref");
+
+      assert.notEqual(result.status, 0);
+      assert.match(result.output, /merge-base|missing-base-ref/);
+      assert.doesNotMatch(result.output, /\[pr-policy\] PASS/);
+    });
+  });
+
+  test("includes deleted paths when checking the complete diff", () => {
+    withTemporaryGitRepo((repoDir) => {
+      const forbiddenPath = path.join(repoDir, ".planning", "deleted.md");
+      fs.mkdirSync(path.dirname(forbiddenPath), { recursive: true });
+      fs.writeFileSync(forbiddenPath, "local planning state\n");
+      runCommand("git", ["add", ".planning/deleted.md"], repoDir);
+      runCommand("git", ["commit", "--quiet", "-m", "add planning fixture"], repoDir);
+      const base = spawnSync("git", ["rev-parse", "HEAD"], { cwd: repoDir, encoding: "utf8" }).stdout.trim();
+
+      fs.rmSync(forbiddenPath);
+      runCommand("git", ["add", "-u", ".planning/deleted.md"], repoDir);
+      runCommand("git", ["commit", "--quiet", "-m", "delete planning fixture"], repoDir);
+
+      const result = runPrPolicy(
+        {
+          title: "[Chore] remove local planning fixture",
+          body: "Closes #123",
+          labels: ["no-changelog"],
+          issues: { 123: { title: "Maintenance", labels: [] } },
+        },
+        { cwd: repoDir, args: [`--base=${base}`] },
+      );
+
+      assert.notEqual(result.status, 0);
+      assert.match(result.output, /\.planning\/\*\* local GSD state/);
     });
   });
 });

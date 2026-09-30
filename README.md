@@ -149,7 +149,7 @@ yarn verify:harness -- provider-auth-failure-localization
 
 `yarn release:check` 會驗證 `TZ=Asia/Taipei` runtime contract、TypeScript、Node test suite、capability / behavior matrix generated-doc drift 與前端 build。測試使用 mocked 或 harness LLM providers；CI 不會呼叫 live OpenAI API。
 
-v3.5 的 source/release 證據以 committed source SHA 為唯一來源；`workflow:state-check`、active planning artifact provenance/seal 與 `yarn release:check` 都不會推導 production/runtime、Cloudflare Tunnel、public smoke 或 subjective visual readiness。
+v3.5 的 source/release 證據以 committed source SHA 為唯一來源；planning evidence check 與 `yarn release:check` 都不會推導 production/runtime、Cloudflare Tunnel、public smoke 或 subjective visual readiness。
 
 `yarn native:check` 是 Sharp 與 `better-sqlite3` 升級、以及 v3.1 source-release review 的專用 native dependency evidence；它不是 `yarn release:check` 的替代，也不授權 production runtime refresh、Cloudflare Tunnel 變更、public smoke、tag movement 或 `main` promotion。
 
@@ -208,7 +208,6 @@ Cloudflare Tunnel 流程：[docs/deploy/production-runtime.md](docs/deploy/produ
 
 - 將 CI 拆成更清楚的 typecheck、tests、build、migration checks 和 release policy jobs。
 - 加入 manually triggered provider smoke checks，使用 scoped secrets 和 sanitized artifacts。
-- 將 `release:check` 已採用的 allowlisted structured receipt 模式擴展到其他高風險流程；仍不記錄 raw prompts、child output 或 provider payloads。
 
 ## 相關文件
 

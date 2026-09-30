@@ -55,7 +55,10 @@ function parseRepo(event) {
     throw new Error("Unable to determine GitHub repository.");
   }
 
-  const [owner, repo] = fullName.split("/");
+  const [owner, repo, ...extra] = fullName.split("/");
+  if (!owner || !repo || extra.length > 0) {
+    throw new Error("Unable to determine GitHub repository owner/repository.");
+  }
   return { owner, repo, fullName };
 }
 
@@ -86,29 +89,44 @@ function listTrackedIgnoredFiles() {
 }
 
 function listChangedFilesFromGit(baseRef) {
-  try {
-    const mergeBase = runGit(["merge-base", "HEAD", baseRef]);
-    return runGit(["diff", "--name-only", "--diff-filter=ACMR", `${mergeBase}..HEAD`])
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean);
-  } catch {
-    return [];
-  }
+  const mergeBase = runGit(["merge-base", "HEAD", baseRef]);
+  return runGit(["diff", "--name-only", "--diff-filter=ACMRD", `${mergeBase}..HEAD`])
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
 }
 
-function parseLinkedIssueNumbers(text) {
+function parseLinkedIssueReferences(text, repository) {
   const numbers = new Set();
+  const errors = [];
   const body = text || "";
   const closingPattern =
-    /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+(?:https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/issues\/)?#?(\d+)\b/gi;
+    /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+(?:(https:\/\/github\.com\/([^/\s]+)\/([^/\s]+)\/(issues|pulls?)\/(\d+))|#?(\d+))\b/gi;
 
   let match;
   while ((match = closingPattern.exec(body)) !== null) {
-    numbers.add(Number(match[1]));
+    const [, url, owner, repo, targetType, urlNumber, bareNumber] = match;
+    if (!url) {
+      numbers.add(Number(bareNumber));
+      continue;
+    }
+
+    const sameRepository =
+      repository &&
+      owner.toLowerCase() === repository.owner.toLowerCase() &&
+      repo.toLowerCase() === repository.repo.toLowerCase();
+    if (!sameRepository) {
+      errors.push(`Issue URL ${url} targets an external repository; use ${repository.fullName}.`);
+      continue;
+    }
+    if (targetType.toLowerCase().startsWith("pull")) {
+      errors.push(`${url} targets a pull request; linked references must target an issue.`);
+      continue;
+    }
+    numbers.add(Number(urlNumber));
   }
 
-  return [...numbers].sort((a, b) => a - b);
+  return { numbers: [...numbers].sort((a, b) => a - b), errors };
 }
 
 function offlineIssues() {
@@ -162,11 +180,14 @@ async function fetchPaginated(path, token) {
     }
     results.push(...batch);
     if (batch.length < 100) {
-      break;
+      return results;
+    }
+    if (page === 10) {
+      throw new Error(`GitHub file list for ${path} is incomplete after 1,000 entries; refusing to make a policy decision.`);
     }
   }
 
-  return results;
+  throw new Error(`GitHub file list for ${path} is incomplete; refusing to make a policy decision.`);
 }
 
 async function listChangedFiles({ event, repo, prNumber, baseRef }) {
@@ -210,31 +231,9 @@ async function fetchIssues(repo, numbers) {
   return issues;
 }
 
-function inferPrKinds({ title, body, issueLabels }) {
+function requestMarkers({ title, body }) {
   const text = `${title || ""}\n${body || ""}`;
-  const kinds = new Set();
-
-  if (/##\s*Feature PR/i.test(text) || /\[Feature\]/i.test(text) || /^\s*feat(?:\(|:|\s)/i.test(title || "")) {
-    kinds.add("feature");
-  }
-  if (/##\s*Enhancement PR/i.test(text) || /\[Enhancement\]/i.test(text)) {
-    kinds.add("enhancement");
-  }
-  if (/##\s*Fix PR/i.test(text) || /\[Bug\]/i.test(text) || /^\s*fix(?:\(|:|\s)/i.test(title || "")) {
-    kinds.add("fix");
-  }
-
-  if (issueLabels.has("feature-request")) {
-    kinds.add("feature");
-  }
-  if (issueLabels.has("enhancement")) {
-    kinds.add("enhancement");
-  }
-  if (issueLabels.has("bug")) {
-    kinds.add("fix");
-  }
-
-  return kinds;
+  return [...text.matchAll(/\[(Feature|Enhancement|Bug|Chore)\]/gi)].map((match) => match[1].toLowerCase() === "bug" ? "fix" : match[1].toLowerCase());
 }
 
 function hasAnyLabel(labels, names) {
@@ -281,7 +280,9 @@ async function main() {
 
   const repo = parseRepo(event);
   const body = pr.body || "";
-  const linkedNumbers = parseLinkedIssueNumbers(`${pr.title || ""}\n${body}`);
+  const linkedReferences = parseLinkedIssueReferences(`${pr.title || ""}\n${body}`, repo);
+  const linkedNumbers = linkedReferences.numbers;
+  errors.push(...linkedReferences.errors);
   if (linkedNumbers.length === 0) {
     errors.push("PR body/title must link at least one GitHub issue (for example: Closes #123).");
   }
@@ -301,28 +302,48 @@ async function main() {
     if (issue.isPullRequest) {
       errors.push(`#${issue.number} is a pull request, not a tracker issue.`);
     }
+    if (!issue.labels.includes("ready-for-pr")) {
+      errors.push(`Linked issue #${issue.number} must carry the \`ready-for-pr\` label.`);
+    }
   }
 
   const prLabels = labelsFrom(pr.labels || []);
-  const issueLabels = new Set(issues.flatMap((issue) => issue.labels));
-  const allLabels = new Set([...prLabels, ...issueLabels]);
-  const kinds = inferPrKinds({ title: pr.title, body, issueLabels });
+  const markers = requestMarkers({ title: pr.title, body });
+  if (markers.length !== 1) {
+    errors.push("PR title/body must contain exactly one request marker: [Feature], [Enhancement], [Bug], or [Chore].");
+  }
+  // Request kind comes only from the single structured marker. Issue labels
+  // remain same-issue approval evidence and can never silently infer a kind.
+  const kinds = new Set(markers.length === 1 ? markers : []);
 
   const requiredByKind = {
-    feature: "approved-feature",
-    enhancement: "approved-enhancement",
-    fix: "confirmed-bug",
+    feature: { type: "feature-request", approval: "approved-feature" },
+    enhancement: { type: "enhancement", approval: "approved-enhancement" },
+    fix: { type: "bug", approval: "confirmed-bug" },
   };
 
   for (const kind of kinds) {
+    if (kind === "chore") {
+      if (!issues.some((issue) => issue.labels.includes("type: chore"))) {
+        errors.push("chore PRs require the `type: chore` label on a linked issue.");
+      }
+      continue;
+    }
+
     const required = requiredByKind[kind];
-    if (!issueLabels.has(required)) {
-      errors.push(`${kind} PRs require the \`${required}\` label on a linked issue.`);
+    const hasSameIssueApproval = issues.some((issue) => {
+      const labels = new Set(issue.labels);
+      return labels.has(required.type) && labels.has(required.approval);
+    });
+    if (!hasSameIssueApproval) {
+      errors.push(
+        `${kind} PRs require the \`${required.approval}\` label on a linked issue with \`${required.type}\`; labels cannot be split across issues.`,
+      );
     }
   }
 
   const hasChangelog = changedFiles.includes("CHANGELOG.md");
-  if (!hasChangelog && !hasAnyLabel(allLabels, ["no-changelog"])) {
+  if (!hasChangelog && !hasAnyLabel(prLabels, ["no-changelog"])) {
     errors.push("PR must update CHANGELOG.md or carry the `no-changelog` label.");
   }
 

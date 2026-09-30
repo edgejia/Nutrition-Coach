@@ -8,10 +8,11 @@ import {
   type SummaryOutcome,
 } from "../services/summary-outcome.js";
 import type { createDeviceService, DailyTargets } from "../services/device.js";
-import type {
-  createMealCorrectionService,
-  FindMealsResult,
-  MealCorrectionCandidate,
+import {
+  MEAL_PATCH_TOTAL_LIMIT,
+  type createMealCorrectionService,
+  type FindMealsResult,
+  type MealCorrectionCandidate,
 } from "../services/meal-correction.js";
 import type { createMealDeleteProposalService } from "../services/meal-delete-proposals.js";
 import {
@@ -587,6 +588,11 @@ const finiteNumber = z.number().refine(Number.isFinite, "must be finite");
 const nonNegativeFiniteNumber = z
   .number()
   .refine((value) => Number.isFinite(value) && value >= 0, "must be non-negative");
+const boundedMealPatchNumber = z
+  .number()
+  .min(0, "must be non-negative")
+  .max(MEAL_PATCH_TOTAL_LIMIT, `must be at most ${MEAL_PATCH_TOTAL_LIMIT}`)
+  .refine(Number.isFinite, "must be finite");
 const quantityToolProperties = {
   quantity: { type: "number" },
   quantity_g: { type: "number" },
@@ -691,10 +697,10 @@ const updateMealSchema = z.union([
     .object({
       meal_id: z.string().uuid("meal_id must be a uuid"),
       food_name: z.string().min(1, "food_name must be non-empty").optional(),
-      calories: finiteNumber.optional(),
-      protein: finiteNumber.optional(),
-      carbs: finiteNumber.optional(),
-      fat: finiteNumber.optional(),
+      calories: boundedMealPatchNumber.optional(),
+      protein: boundedMealPatchNumber.optional(),
+      carbs: boundedMealPatchNumber.optional(),
+      fat: boundedMealPatchNumber.optional(),
     })
     .strict()
     .refine(
@@ -2184,10 +2190,10 @@ const updateMealContract: ToolContract<UpdateMealArgs, UpdateMealContractResult>
     properties: {
       meal_id: { type: "string" },
       food_name: { type: "string" },
-      calories: { type: "number" },
-      protein: { type: "number" },
-      carbs: { type: "number" },
-      fat: { type: "number" },
+      calories: { type: "number", minimum: 0, maximum: MEAL_PATCH_TOTAL_LIMIT },
+      protein: { type: "number", minimum: 0, maximum: MEAL_PATCH_TOTAL_LIMIT },
+      carbs: { type: "number", minimum: 0, maximum: MEAL_PATCH_TOTAL_LIMIT },
+      fat: { type: "number", minimum: 0, maximum: MEAL_PATCH_TOTAL_LIMIT },
       items: {
         type: "array",
         items: {

@@ -149,7 +149,7 @@ yarn verify:harness -- provider-auth-failure-localization
 
 `yarn release:check` verifies the `TZ=Asia/Taipei` runtime contract, TypeScript, the Node test suite, capability / behavior matrix generated-doc drift, and the frontend build. Tests use mocked or harness LLM providers; CI does not call the live OpenAI API.
 
-For v3.5, source/release evidence is bound to the committed source SHA; `workflow:state-check`, active planning artifact provenance/seals, and `yarn release:check` do not imply production/runtime, Cloudflare Tunnel, public-smoke, or subjective visual readiness.
+For v3.5, source/release evidence is bound to the committed source SHA; the planning evidence check and `yarn release:check` do not imply production/runtime, Cloudflare Tunnel, public-smoke, or subjective visual readiness.
 
 `yarn native:check` is specialized native dependency evidence for Sharp upgrades, `better-sqlite3` upgrades, and v3.1 source-release review; it is not a replacement for `yarn release:check` and does not authorize production runtime refresh, Cloudflare Tunnel changes, public smoke, tag movement, or `main` promotion.
 
@@ -208,7 +208,6 @@ Cloudflare Tunnel procedure: [docs/deploy/production-runtime.md](docs/deploy/pro
 
 - Split CI into clearer typecheck, tests, build, migration checks, and release policy jobs.
 - Add manually triggered provider smoke checks with scoped secrets and sanitized artifacts.
-- Extend the allowlisted structured-receipt pattern already used by `release:check` to other high-risk workflows without logging raw prompts, child output, or provider payloads.
 
 ## Related Docs
 

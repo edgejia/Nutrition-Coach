@@ -14,40 +14,30 @@ Nutrition Coach uses the GSD issue-first contribution flow.
 
 Open an issue before opening a pull request.
 
-- Feature work uses the `Feature request` template and must receive `approved-feature` before a feature PR opens.
-- Enhancement work uses the `Enhancement` template and must receive `approved-enhancement` before an enhancement PR opens.
-- Bug fixes use the `Bug report` template and must receive `confirmed-bug` before a fix PR opens.
-- Maintenance work uses the `Chore` template and must be triaged before implementation starts.
+- Feature, enhancement, and maintenance work uses the unified `.github/ISSUE_TEMPLATE/change_request.yml` form. Select exactly one request type: `Feature`, `Enhancement`, or `Maintenance`.
+- Bug fixes continue to use the structured `.github/ISSUE_TEMPLATE/bug_report.yml` form.
+- Maintainers apply the existing issue type labels after triage: `feature-request`, `enhancement`, `bug`, or `type: chore`. Feature, enhancement, and bug work also requires its existing typed approval label (`approved-feature`, `approved-enhancement`, or `confirmed-bug`) on that same issue.
+- `ready-for-pr` is a manual issue-side gate. Every linked closing issue must carry it before a PR is opened; a PR label or a label on another issue cannot substitute for it.
+- The forms use fixed `change-request` and `needs-review` labels only. No workflow creates a new remote label for a request type.
 
 Maintainers may close or request revisions for issues that skip required fields.
 
 ## Pull Requests
 
-Use the typed PR template that matches the linked issue:
-
-- Feature PR: `.github/PULL_REQUEST_TEMPLATE/feature.md`
-- Enhancement PR: `.github/PULL_REQUEST_TEMPLATE/enhancement.md`
-- Fix PR: `.github/PULL_REQUEST_TEMPLATE/fix.md`
-
-GitHub does not automatically choose among multiple PR templates. Use the matching template query parameter when opening a PR from the browser, for example:
-
-```text
-?template=feature.md
-?template=enhancement.md
-?template=fix.md
-```
+Use the single generic `.github/PULL_REQUEST_TEMPLATE.md`. Set exactly one request marker in the template: `[Feature]`, `[Enhancement]`, `[Bug]`, or `[Chore]`. `Maintenance` requests use `[Chore]` with the existing `type: chore` issue label.
 
 Every PR must:
 
-- Link the approved issue with `Closes #NNN`, `Fixes #NNN`, or `Resolves #NNN`.
+- Link one or more ready issues with `Closes #NNN`, `Fixes #NNN`, or `Resolves #NNN`.
 - Target `main` from a GSD work branch unless the current thread explicitly asks for a different base.
 - Keep one concern per PR.
 - Avoid unrelated formatting churn or cleanup.
 - Describe verification, risk, and breaking-change impact.
+- Update `CHANGELOG.md`, or apply `no-changelog` to the pull request only. An issue-side `no-changelog` label is not a changelog decision.
 - Pass `yarn release:check` locally when practical.
 - Pass CI `Release Check`.
 - Receive review approval before merge.
-- State whether production runtime refresh is out of scope or explicitly approved.
+- State whether source release, merge, tag movement, production runtime refresh, Cloudflare Tunnel changes, and public-domain smoke are out of scope or separately approved. PR readiness is not authority for any of them.
 
 ## Labels
 
