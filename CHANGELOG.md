@@ -10,6 +10,7 @@
 - 修正每日正確性問題（Phase 130）：無年份日期跨閏年解析（#31）、分組 macro 修正的 rounding 殘差不再寫入負值（#37）、Summary Detail 刪除餐點前需確認（#44）、午夜換日 timer 固定以 Asia/Taipei 排程並在載入失敗時正確結算（#47），並限制 meal patch reconciliation 的數值邊界。
 - `loadHistory` 在 `.map` 前先驗證 history response container（Phase 131，#35）；History 週導覽改以驗證過的 `YYYY-MM-DD` 日曆運算，避免宿主時區漂移（Phase 132，#48）。
 - PR policy 的 changelog negative-control 測試改在臨時 git repo 執行，不再受當前分支是否修改 `CHANGELOG.md` 影響。
+- 整合 Dependabot 更新（#136–#142，#145）：`fastify` 5.8.5 → 5.12.1、`@fastify/static` 9.1.3 → 10.1.2（含 GHSA-83w8-p2f5-377r、GHSA-8pvw-jcv7-9cmj 修補；v10 唯一 breaking change `setHeaders` 未被使用）、`sharp` → 0.35.5，並刷新 `find-my-way`、`postcss`、`browserslist`、`baseline-browser-mapping` 的 lockfile 解析。
 
 ### 驗證
 
