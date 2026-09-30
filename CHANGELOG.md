@@ -1,5 +1,11 @@
 # 更新日誌
 
+## Unreleased
+
+### 變更
+
+- 新增 [家用 Server 部署](docs/deploy/home-server-wsl.md) runbook：在 Windows + WSL2 上以 systemd 常駐 app，透過 Cloudflare Tunnel 對外、Cloudflare Access 限制只有自己能使用，並以 SQLite online backup 每日備份到 OneDrive。
+
 ## v3.6 - Unreleased
 
 ### 變更

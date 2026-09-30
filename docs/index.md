@@ -16,6 +16,7 @@
 
 ### 部署與運維
 
+- [家用 Server 部署](deploy/home-server-wsl.md)：個人自用的 Windows + WSL2、Cloudflare Tunnel／Access 與每日備份流程
 - [Production runtime](deploy/production-runtime.md)：目前 local production-mode runtime、Cloudflare Tunnel 與 public smoke
 - [Storage recovery](deploy/storage-recovery.md)：B01 backup、R05 migration 與 B02 restore gate
 - [`deploy/archive/`](deploy/archive/)：Railway baseline 與歷史 postmortem
