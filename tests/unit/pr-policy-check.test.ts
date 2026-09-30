@@ -58,6 +58,8 @@ function policyEnvironment() {
     GITHUB_TOKEN: "",
   };
   delete env.PR_POLICY_OFFLINE_ISSUES;
+  // CI sets RELEASE_BASE_REF to the bare base branch name, which has no local ref in a PR checkout.
+  delete env.RELEASE_BASE_REF;
   return env;
 }
 
