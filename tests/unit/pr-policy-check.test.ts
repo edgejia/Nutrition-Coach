@@ -242,16 +242,21 @@ describe("pr policy gate", () => {
   });
 
   test("does not accept an issue-side no-changelog label", () => {
-    const result = runPrPolicy({
-      title: "[Chore] tidy policy docs",
-      body: "Closes #123",
-      issues: {
-        123: { title: "Maintenance", labels: ["type: chore", "ready-for-pr", "no-changelog"] },
-      },
-    });
+    withTemporaryGitRepo((repoDir) => {
+      const result = runPrPolicy(
+        {
+          title: "[Chore] tidy policy docs",
+          body: "Closes #123",
+          issues: {
+            123: { title: "Maintenance", labels: ["type: chore", "ready-for-pr", "no-changelog"] },
+          },
+        },
+        { cwd: repoDir, args: ["--base=HEAD"] },
+      );
 
-    assert.notEqual(result.status, 0);
-    assert.match(result.output, /must update CHANGELOG\.md or carry the `no-changelog` label/);
+      assert.notEqual(result.status, 0);
+      assert.match(result.output, /must update CHANGELOG\.md or carry the `no-changelog` label/);
+    });
   });
 
   test("maps fixed request markers to their stable PR kinds", () => {
@@ -334,27 +339,36 @@ describe("pr policy gate", () => {
   });
 
   test("accepts no-changelog only from the pull-request label set", () => {
-    const issueOnly = runPrPolicy({
-      title: "[Chore] maintain policy docs",
-      body: "Closes #123",
-      issues: {
-        123: { title: "Maintenance", labels: ["type: chore", "ready-for-pr", "no-changelog"] },
-      },
+    withTemporaryGitRepo((repoDir) => {
+      const fixtureRun = { cwd: repoDir, args: ["--base=HEAD"] };
+      const issueOnly = runPrPolicy(
+        {
+          title: "[Chore] maintain policy docs",
+          body: "Closes #123",
+          issues: {
+            123: { title: "Maintenance", labels: ["type: chore", "ready-for-pr", "no-changelog"] },
+          },
+        },
+        fixtureRun,
+      );
+
+      assert.notEqual(issueOnly.status, 0);
+      assert.match(issueOnly.output, /must update CHANGELOG\.md or carry the `no-changelog` label/);
+
+      const prOnly = runPrPolicy(
+        {
+          title: "[Chore] maintain policy docs",
+          body: "Closes #123",
+          labels: ["no-changelog"],
+          issues: {
+            123: { title: "Maintenance", labels: ["type: chore", "ready-for-pr"] },
+          },
+        },
+        fixtureRun,
+      );
+
+      assert.equal(prOnly.status, 0, prOnly.output);
     });
-
-    assert.notEqual(issueOnly.status, 0);
-    assert.match(issueOnly.output, /must update CHANGELOG\.md or carry the `no-changelog` label/);
-
-    const prOnly = runPrPolicy({
-      title: "[Chore] maintain policy docs",
-      body: "Closes #123",
-      labels: ["no-changelog"],
-      issues: {
-        123: { title: "Maintenance", labels: ["type: chore", "ready-for-pr"] },
-      },
-    });
-
-    assert.equal(prOnly.status, 0, prOnly.output);
   });
 
   test("requires a closing issue even when PR labels claim readiness and approval", () => {

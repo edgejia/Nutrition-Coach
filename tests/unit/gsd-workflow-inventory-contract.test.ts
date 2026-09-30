@@ -1,5 +1,5 @@
 import { deepEqual, equal, match, ok } from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
@@ -136,18 +136,18 @@ test("every skill and workflow row has proof fields and removal evidence", async
   }
 });
 
-test("Remove rows separate committed HEAD state from pre-existing dirty deletions", async () => {
+test("Remove rows are retired from HEAD and guarded by absence", async () => {
   const rows = table(await inventory(), "Logical workflow surfaces");
   for (const row of rows.filter((candidate) => candidate.decision === "Remove")) {
-    equal(row.committedStatus, "retained/live in HEAD");
-    equal(row.observedLocalStatus, "dirty-deleted pre-existing");
-    equal(row.phase129CommitScope, "excluded/future source submission boundary");
-    match(row.replacementProof, /HEAD path|future/i);
-    ok(!/submitted|deleted from HEAD|source removed/i.test(row.replacementProof), `${row.surface} must not claim a dirty deletion was submitted`);
+    equal(row.committedStatus, "absent from HEAD");
+    equal(row.observedLocalStatus, "clean");
+    equal(row.phase129CommitScope, "retired by workflow slimming");
+    match(row.replacementProof, /HEAD absence/);
 
     const files = row.surfaceFiles.split(",").map((file) => file.trim().replaceAll("`", ""));
     for (const file of files) {
-      execFileSync("git", ["cat-file", "-e", `HEAD:${file}`]);
+      const probe = spawnSync("git", ["cat-file", "-e", `HEAD:${file}`]);
+      ok(probe.status !== 0, `${row.surface} retired file ${file} must be absent from HEAD`);
     }
   }
 });
