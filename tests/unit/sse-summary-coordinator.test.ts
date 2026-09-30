@@ -122,6 +122,38 @@ describe("SSE summary coordinator", () => {
     assert.deepEqual(commits, [{ type: "meals", rows }]);
   });
 
+  it("reports a committed day-rollover load only after rows commit", async () => {
+    const { coordinator, pendingMeals, commits } = createHarness();
+    const rows = [meal("rollover", 610)];
+
+    const initialLoad = coordinator.runInitialMealsLoad({ refreshReason: "day_rollover" });
+    pendingMeals[0]?.resolve({ meals: rows });
+
+    assert.equal(await initialLoad, true);
+    assert.deepEqual(commits, [{ type: "meals", rows }]);
+  });
+
+  it("reports a failed day-rollover load without a partial row commit", async () => {
+    const { coordinator, pendingMeals, commits } = createHarness();
+
+    const initialLoad = coordinator.runInitialMealsLoad({ refreshReason: "day_rollover" });
+    pendingMeals[0]?.reject(new Error("network unavailable"));
+
+    assert.equal(await initialLoad, false);
+    assert.deepEqual(commits, []);
+  });
+
+  it("keeps an ordinary failed initial load non-throwing while returning failure", async () => {
+    const { coordinator, pendingMeals, commits } = createHarness();
+
+    const initialLoad = coordinator.runInitialMealsLoad();
+    pendingMeals[0]?.reject(new Error("network unavailable"));
+
+    await assert.doesNotReject(initialLoad);
+    assert.equal(await initialLoad, false);
+    assert.deepEqual(commits, []);
+  });
+
   it("drops same-day mutation summary and rows when row refetch fails silently", async () => {
     const { coordinator, pendingMeals, commits } = createHarness();
     const handling = coordinator.handleSummary(envelopeForDate("2026-05-18", 700, "meal_mutation"));

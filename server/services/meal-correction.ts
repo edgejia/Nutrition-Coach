@@ -36,6 +36,9 @@ import { projectPublicMealItems } from "../lib/public-meal-items.js";
 const PENDING_SELECTION_KIND = "meal_target_selection";
 const PENDING_SELECTION_TTL_MS = 15 * 60 * 1000;
 
+export const MEAL_PATCH_TOTAL_LIMIT = 1_000_000;
+export const MAX_RECONCILIATION_STEPS = 100_000;
+
 export interface MealCorrectionCandidate {
   mealId: string;
   mealRevisionId: string;
@@ -391,6 +394,90 @@ function hasLikelyFoodReference(query: string): boolean {
     || /[a-z]{2,}/.test(targetText);
 }
 
+function reconcilePatchedResidual(
+  roundedAllocations: number[],
+  sourceValues: number[],
+  currentTotal: number,
+  targetTotal: number,
+): number[] {
+  const reconciled = [...roundedAllocations];
+  if (
+    !Number.isFinite(currentTotal)
+    || currentTotal < 0
+    || !Number.isFinite(targetTotal)
+    || targetTotal < 0
+    || !reconciled.every((value) => Number.isFinite(value) && value >= 0)
+  ) {
+    throw new Error("MEAL_NUMERIC_RECONCILIATION_UNSAFE");
+  }
+
+  const residual = roundPatchValue(
+    targetTotal - reconciled.reduce((sum, value) => sum + value, 0),
+  );
+  if (!Number.isFinite(residual)) {
+    throw new Error("MEAL_NUMERIC_RECONCILIATION_UNSAFE");
+  }
+
+  const remainingSteps = Math.round(Math.abs(residual) * 1000);
+  if (!Number.isSafeInteger(remainingSteps) || remainingSteps > MAX_RECONCILIATION_STEPS) {
+    throw new Error("MEAL_NUMERIC_RECONCILIATION_UNSAFE");
+  }
+  let stepsLeft = remainingSteps;
+  if (remainingSteps === 0) {
+    return reconciled;
+  }
+
+  const eligibleIndexes = reconciled
+    .map((value, index) => {
+      if (residual < 0) {
+        return value >= 0.001 ? index : -1;
+      }
+      if (currentTotal > 0) {
+        return sourceValues[index]! > 0 || value > 0 ? index : -1;
+      }
+      return index;
+    })
+    .filter((index) => index >= 0);
+
+  if (eligibleIndexes.length === 0) {
+    throw new Error("MEAL_NUMERIC_RECONCILIATION_UNSAFE");
+  }
+
+  let cursor = 0;
+  let idleSteps = 0;
+  while (stepsLeft > 0 && idleSteps < eligibleIndexes.length) {
+    const index = eligibleIndexes[cursor % eligibleIndexes.length]!;
+    if (residual < 0) {
+      if (reconciled[index]! >= 0.001) {
+        const nextValue = roundPatchValue(reconciled[index]! - 0.001);
+        if (!Number.isFinite(nextValue) || nextValue < 0) {
+          throw new Error("MEAL_NUMERIC_RECONCILIATION_UNSAFE");
+        }
+        reconciled[index] = nextValue;
+        stepsLeft -= 1;
+        idleSteps = 0;
+      } else {
+        idleSteps += 1;
+      }
+    } else {
+      const nextValue = roundPatchValue(reconciled[index]! + 0.001);
+      if (!Number.isFinite(nextValue) || nextValue < 0) {
+        throw new Error("MEAL_NUMERIC_RECONCILIATION_UNSAFE");
+      }
+      reconciled[index] = nextValue;
+      stepsLeft -= 1;
+      idleSteps = 0;
+    }
+    cursor += 1;
+  }
+
+  if (stepsLeft !== 0 || !reconciled.every((value) => Number.isFinite(value) && value >= 0)) {
+    throw new Error("MEAL_NUMERIC_RECONCILIATION_UNSAFE");
+  }
+
+  return reconciled;
+}
+
 function distributePatchedTotal(
   items: MealTransactionItemInput[],
   field: NumericItemField,
@@ -400,30 +487,24 @@ function distributePatchedTotal(
     return [{ ...items[0]!, [field]: targetTotal }];
   }
 
+  if (!items.every((item) => Number.isFinite(item[field]) && item[field] >= 0)) {
+    throw new Error("MEAL_NUMERIC_RECONCILIATION_UNSAFE");
+  }
   const currentTotal = items.reduce((sum, item) => sum + item[field], 0);
-  let remaining = targetTotal;
+  const roundedAllocations = items.map((item) => currentTotal > 0
+    ? roundPatchValue(targetTotal * (item[field] / currentTotal))
+    : roundPatchValue(targetTotal / items.length));
+  const reconciledAllocations = reconcilePatchedResidual(
+    roundedAllocations,
+    items.map((item) => item[field]),
+    currentTotal,
+    targetTotal,
+  );
 
-  return items.map((item, index) => {
-    if (index === items.length - 1) {
-      return {
-        ...item,
-        [field]: roundPatchValue(remaining),
-      };
-    }
-
-    let nextValue: number;
-    if (currentTotal > 0) {
-      nextValue = roundPatchValue(targetTotal * (item[field] / currentTotal));
-    } else {
-      nextValue = roundPatchValue(targetTotal / items.length);
-    }
-
-    remaining -= nextValue;
-    return {
-      ...item,
-      [field]: nextValue,
-    };
-  });
+  return items.map((item, index) => ({
+    ...item,
+    [field]: reconciledAllocations[index]!,
+  }));
 }
 
 function applyMealPatch(
@@ -446,6 +527,13 @@ function applyMealPatch(
     const nextValue = patch[field];
     if (nextValue === undefined) {
       continue;
+    }
+    if (
+      !Number.isFinite(nextValue)
+      || nextValue < 0
+      || nextValue > MEAL_PATCH_TOTAL_LIMIT
+    ) {
+      throw new Error("MEAL_NUMERIC_PATCH_OUT_OF_RANGE");
     }
     nextItems = distributePatchedTotal(nextItems, field, nextValue);
   }

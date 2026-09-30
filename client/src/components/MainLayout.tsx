@@ -157,7 +157,10 @@ export function MainLayout() {
       onDailySummaryEnvelope: sseSummaryCoordinator.handleSummary,
       onGoalsUpdate: setDailyTargets,
     });
-    await sseSummaryCoordinator.runInitialMealsLoad({ refreshReason: "day_rollover" });
+    const committed = await sseSummaryCoordinator.runInitialMealsLoad({ refreshReason: "day_rollover" });
+    if (!committed) {
+      throw new Error("ROLLOVER_REFRESH_FAILED");
+    }
   }, [deviceId, setDailyTargets, sseSummaryCoordinator]);
 
   const refreshHomeManually = useCallback(async () => {

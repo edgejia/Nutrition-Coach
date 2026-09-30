@@ -498,6 +498,9 @@ export function SummaryDetailScreen() {
       alert("刪除失敗，請再試一次。");
       return;
     }
+    if (!window.confirm("刪除這筆餐點？系統會保留歷史紀錄。")) {
+      return;
+    }
     const previousSnapshot = snapshot;
     setDeletingMealId(mealId);
     setSnapshot((currentSnapshot) =>

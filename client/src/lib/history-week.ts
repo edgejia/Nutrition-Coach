@@ -1,5 +1,4 @@
 import type { DailyTargets } from "../types.js";
-import { formatLocalDate } from "./time.js";
 
 export type HistoryCalorieStatus =
   | "empty"
@@ -72,11 +71,11 @@ export function isRealDateKey(dateKey: string): boolean {
   const year = Number(match[1]);
   const month = Number(match[2]);
   const day = Number(match[3]);
-  const date = new Date(year, month - 1, day);
+  const date = new Date(Date.UTC(year, month - 1, day));
   if (
-    date.getFullYear() !== year ||
-    date.getMonth() !== month - 1 ||
-    date.getDate() !== day
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
   ) {
     return false;
   }
@@ -90,17 +89,25 @@ function parseDateKey(dateKey: string): Date {
   }
 
   const [year, month, day] = dateKey.split("-").map(Number);
-  return new Date(year, month - 1, day);
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function formatDateKey(date: Date): string {
+  const dateKey = date.toISOString().slice(0, 10);
+  if (!isRealDateKey(dateKey)) {
+    throw new Error("INVALID_DATE_KEY");
+  }
+  return dateKey;
 }
 
 function addDays(dateKey: string, deltaDays: number): string {
   const date = parseDateKey(dateKey);
-  date.setDate(date.getDate() + deltaDays);
-  return formatLocalDate(date);
+  date.setUTCDate(date.getUTCDate() + deltaDays);
+  return formatDateKey(date);
 }
 
 function dayOffsetFromMonday(date: Date): number {
-  return (date.getDay() + 6) % 7;
+  return (date.getUTCDay() + 6) % 7;
 }
 
 export function getHistoryCalorieStatus(input: {
@@ -147,8 +154,8 @@ export function getHistoryCalorieStatus(input: {
 
 export function getMondayWeekStart(dateKey: string): string {
   const date = parseDateKey(dateKey);
-  date.setDate(date.getDate() - dayOffsetFromMonday(date));
-  return formatLocalDate(date);
+  date.setUTCDate(date.getUTCDate() - dayOffsetFromMonday(date));
+  return formatDateKey(date);
 }
 
 export function shiftHistoryWeek(weekStartKey: string, deltaWeeks: -1 | 1): string {
@@ -189,7 +196,7 @@ export function buildHistoryWeek(input: {
     const sharedDayState = {
       dateKey,
       weekday,
-      dayNumber: date.getDate(),
+      dayNumber: date.getUTCDate(),
       isSelected: dateKey === input.selectedDateKey,
       isToday: dateKey === input.todayKey,
       isFuture: dateKey > input.todayKey,

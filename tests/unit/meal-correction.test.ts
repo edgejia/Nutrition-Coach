@@ -7,12 +7,16 @@ import { eq } from "drizzle-orm";
 import { mealRevisions, mealTransactions } from "../../server/db/schema.js";
 import { createDeviceService } from "../../server/services/device.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
-import { createMealCorrectionService } from "../../server/services/meal-correction.js";
+import {
+  createMealCorrectionService,
+  MAX_RECONCILIATION_STEPS,
+} from "../../server/services/meal-correction.js";
 import { DEFAULT_SESSION_ID } from "../../server/services/turn-state.js";
 import { MealRevisionPreconditionError } from "../../server/services/meal-transactions.js";
 
 const REAL_DATE = Date;
 const FIXED_NOW = new REAL_DATE("2026-04-19T12:00:00+08:00");
+const MACRO_ROUNDING_TOLERANCE = 0.001;
 
 class FixedDate extends REAL_DATE {
   constructor(...args: any[]) {
@@ -270,6 +274,398 @@ describe("meal correction service", () => {
     assert.equal(result.updatedMeal.protein, 22);
     assert.equal(result.updatedMeal.carbs, 48);
     assert.equal(result.updatedMeal.fat, 6);
+  });
+
+  it("rejects non-finite, negative, and finite-huge numeric patches before revision writes", async () => {
+    const grouped = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T12:00:00.000Z",
+      items: [
+        { foodName: "數值邊界一", calories: 220, protein: 30, carbs: 40, fat: 5 },
+        { foodName: "數值邊界二", calories: 180, protein: 4, carbs: 8, fat: 1 },
+      ],
+    });
+    const initialRevisions = await db.select().from(mealRevisions);
+
+    for (const value of [Number.MAX_VALUE, Infinity, NaN, -1]) {
+      await assert.rejects(
+        () => mealCorrectionService.updateMeal(
+          deviceId,
+          grouped.id,
+          { patch: { protein: value } },
+          grouped.mealRevisionId,
+        ),
+        /MEAL_NUMERIC_PATCH_OUT_OF_RANGE/,
+        `numeric patch ${String(value)} must fail closed`,
+      );
+    }
+
+    const transaction = (await db
+      .select()
+      .from(mealTransactions)
+      .where(eq(mealTransactions.id, grouped.id)))[0];
+    const revisions = await db.select().from(mealRevisions);
+    assert.equal(revisions.length, initialRevisions.length);
+    assert.equal(transaction?.currentRevisionId, grouped.mealRevisionId);
+  });
+
+  it("rejects unsafe residual arithmetic before reconciliation can persist non-finite values", async () => {
+    const grouped = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T12:00:00.000Z",
+      items: [
+        { foodName: "極大來源一", calories: 220, protein: Number.MAX_VALUE, carbs: 40, fat: 5 },
+        { foodName: "極大來源二", calories: 180, protein: Number.MAX_VALUE, carbs: 8, fat: 1 },
+      ],
+    });
+    const initialRevisions = await db.select().from(mealRevisions);
+
+    await assert.rejects(
+      () => mealCorrectionService.updateMeal(
+        deviceId,
+        grouped.id,
+        { patch: { protein: 48 } },
+        grouped.mealRevisionId,
+      ),
+      /MEAL_NUMERIC_RECONCILIATION_UNSAFE/,
+    );
+
+    const transaction = (await db
+      .select()
+      .from(mealTransactions)
+      .where(eq(mealTransactions.id, grouped.id)))[0];
+    const revisions = await db.select().from(mealRevisions);
+    assert.equal(revisions.length, initialRevisions.length);
+    assert.equal(transaction?.currentRevisionId, grouped.mealRevisionId);
+  });
+
+  it("fails closed when residual reconciliation would exceed the step ceiling", async () => {
+    const itemCount = 200_003;
+    const targetProtein = 100.001;
+    const mealId = "reconciliation-ceiling-meal";
+    const revisionId = `${mealId}:r1`;
+    const createdAt = FIXED_NOW.toISOString();
+    const loggedAt = "2026-04-19T12:00:00.000Z";
+    const roundedPerItem = Math.round((targetProtein / itemCount) * 1000) / 1000;
+    const expectedResidual = Math.round((targetProtein - roundedPerItem * itemCount) * 1000) / 1000;
+
+    assert.equal(roundedPerItem, 0);
+    assert.equal(expectedResidual, targetProtein);
+    assert.ok(Math.round(Math.abs(expectedResidual) * 1000) > MAX_RECONCILIATION_STEPS);
+
+    const insertFixture = db.$client.transaction(() => {
+      db.$client
+        .prepare(
+          `INSERT INTO meal_transactions
+             (id, device_id, logged_at, meal_period, current_revision_id, current_revision_number, deleted_at, created_at)
+           VALUES (?, ?, ?, NULL, ?, 1, NULL, ?)`,
+        )
+        .run(mealId, deviceId, loggedAt, revisionId, createdAt);
+      db.$client
+        .prepare(
+          `INSERT INTO meal_revisions
+             (id, transaction_id, revision_number, supersedes_revision_id, image_asset_id, change_type, created_at)
+           VALUES (?, ?, 1, NULL, NULL, 'create', ?)`,
+        )
+        .run(revisionId, mealId, createdAt);
+
+      const insertItem = db.$client.prepare(
+        `INSERT INTO meal_revision_items
+           (revision_id, position, food_name, calories, protein, carbs, fat)
+         VALUES (?, ?, ?, 0, 0, 0, 0)`,
+      );
+      for (let position = 0; position < itemCount; position += 1) {
+        insertItem.run(revisionId, position, "ceiling fixture");
+      }
+    });
+    insertFixture();
+
+    const initialRevisions = await db.select().from(mealRevisions);
+    const initialPersistedValues = db.$client
+      .prepare(
+        `SELECT position, food_name AS foodName, protein
+           FROM meal_revision_items
+          WHERE revision_id = ? AND position IN (0, ?)
+          ORDER BY position`,
+      )
+      .all(revisionId, itemCount - 1);
+
+    await assert.rejects(
+      () => mealCorrectionService.updateMeal(
+        deviceId,
+        mealId,
+        { patch: { protein: targetProtein } },
+        revisionId,
+      ),
+      /MEAL_NUMERIC_RECONCILIATION_UNSAFE/,
+    );
+
+    const transaction = (await db
+      .select()
+      .from(mealTransactions)
+      .where(eq(mealTransactions.id, mealId)))[0];
+    const revisions = await db.select().from(mealRevisions);
+    const persistedValues = db.$client
+      .prepare(
+        `SELECT position, food_name AS foodName, protein
+           FROM meal_revision_items
+          WHERE revision_id = ? AND position IN (0, ?)
+          ORDER BY position`,
+      )
+      .all(revisionId, itemCount - 1);
+
+    assert.equal(revisions.length, initialRevisions.length);
+    assert.equal(transaction?.currentRevisionId, revisionId);
+    assert.deepEqual(persistedValues, initialPersistedValues);
+  });
+
+  it("persists a tiny grouped target without negative residuals or final-slot catch-all", async () => {
+    const grouped = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T12:00:00.000Z",
+      items: [
+        { foodName: "雞胸肉", calories: 100, protein: 1, carbs: 10, fat: 1 },
+        { foodName: "白飯", calories: 100, protein: 1, carbs: 10, fat: 1 },
+        { foodName: "花椰菜", calories: 100, protein: 1, carbs: 10, fat: 1 },
+        { foodName: "滷蛋", calories: 100, protein: 1, carbs: 10, fat: 1 },
+        { foodName: "豆腐", calories: 100, protein: 1, carbs: 10, fat: 1 },
+        { foodName: "海帶", calories: 100, protein: 1, carbs: 10, fat: 1 },
+      ],
+    });
+
+    const result = await mealCorrectionService.updateMeal(
+      deviceId,
+      grouped.id,
+      { patch: { protein: 0.003 } },
+      grouped.mealRevisionId,
+    );
+    const proteins = result.updatedMeal.items.map((item) => item.protein);
+
+    assert.deepEqual(result.updatedMeal.items.map((item) => item.name), [
+      "雞胸肉",
+      "白飯",
+      "花椰菜",
+      "滷蛋",
+      "豆腐",
+      "海帶",
+    ]);
+    assert.ok(proteins.every((value) => Number.isFinite(value) && value >= 0));
+    assert.ok(Math.abs(proteins.reduce((sum, value) => sum + value, 0) - 0.003) <= MACRO_ROUNDING_TOLERANCE);
+    assert.ok(proteins.filter((value) => value > 0).length >= 2);
+    assert.notEqual(proteins.at(-1), 0.003);
+    assert.equal(result.updatedMeal.protein, 0.003);
+  });
+
+  it("keeps exact zero grouped targets finite and non-negative", async () => {
+    const grouped = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T12:00:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 220, protein: 24, carbs: 0, fat: 9 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+        { foodName: "滷蛋", calories: 90, protein: 7, carbs: 2, fat: 6 },
+      ],
+    });
+
+    const result = await mealCorrectionService.updateMeal(
+      deviceId,
+      grouped.id,
+      { patch: { protein: 0 } },
+      grouped.mealRevisionId,
+    );
+
+    assert.deepEqual(result.updatedMeal.items.map((item) => item.protein), [0, 0, 0]);
+    assert.equal(result.updatedMeal.protein, 0);
+  });
+
+  it("keeps a mixed-zero source item at zero while reconciling positive weights", async () => {
+    const grouped = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T12:00:00.000Z",
+      items: [
+        { foodName: "零蛋白菜", calories: 50, protein: 0, carbs: 8, fat: 1 },
+        { foodName: "豆腐", calories: 100, protein: 1, carbs: 4, fat: 3 },
+        { foodName: "雞胸肉", calories: 200, protein: 3, carbs: 0, fat: 5 },
+      ],
+    });
+
+    const result = await mealCorrectionService.updateMeal(
+      deviceId,
+      grouped.id,
+      { patch: { protein: 1.01 } },
+      grouped.mealRevisionId,
+    );
+    const proteins = result.updatedMeal.items.map((item) => item.protein);
+
+    assert.deepEqual(result.updatedMeal.items.map((item) => item.name), [
+      "零蛋白菜",
+      "豆腐",
+      "雞胸肉",
+    ]);
+    assert.equal(proteins[0], 0);
+    assert.ok(proteins.slice(1).every((value) => value >= 0));
+    assert.ok(Math.abs(proteins.reduce((sum, value) => sum + value, 0) - 1.01) <= MACRO_ROUNDING_TOLERANCE);
+    assert.equal(result.updatedMeal.protein, 1.01);
+  });
+
+  it("retains proportional weighting for positive source totals through persistence", async () => {
+    const grouped = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T12:00:00.000Z",
+      items: [
+        { foodName: "比例一", calories: 100, protein: 1, carbs: 10, fat: 1 },
+        { foodName: "比例二", calories: 100, protein: 3, carbs: 10, fat: 1 },
+        { foodName: "比例三", calories: 100, protein: 6, carbs: 10, fat: 1 },
+      ],
+    });
+
+    const result = await mealCorrectionService.updateMeal(
+      deviceId,
+      grouped.id,
+      { patch: { protein: 2.001 } },
+      grouped.mealRevisionId,
+    );
+    const proteins = result.updatedMeal.items.map((item) => item.protein);
+
+    assert.deepEqual(result.updatedMeal.items.map((item) => item.name), ["比例一", "比例二", "比例三"]);
+    assert.deepEqual(proteins, [0.2, 0.6, 1.201]);
+    assert.ok(proteins.every((value) => Number.isFinite(value) && value >= 0));
+    assert.ok(Math.abs(proteins.reduce((sum, value) => sum + value, 0) - 2.001) <= MACRO_ROUNDING_TOLERANCE);
+    assert.ok(Math.abs(proteins[0]! - (2.001 * 1) / 10) <= MACRO_ROUNDING_TOLERANCE);
+    assert.ok(Math.abs(proteins[1]! - (2.001 * 3) / 10) <= MACRO_ROUNDING_TOLERANCE);
+    assert.ok(Math.abs(proteins[2]! - (2.001 * 6) / 10) <= MACRO_ROUNDING_TOLERANCE);
+  });
+
+  it("uses equal fallback only for all-zero source totals and reconciles one step stably", async () => {
+    const grouped = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T12:00:00.000Z",
+      items: [
+        { foodName: "零一", calories: 100, protein: 0, carbs: 10, fat: 1 },
+        { foodName: "零二", calories: 100, protein: 0, carbs: 10, fat: 1 },
+        { foodName: "零三", calories: 100, protein: 0, carbs: 10, fat: 1 },
+      ],
+    });
+
+    const result = await mealCorrectionService.updateMeal(
+      deviceId,
+      grouped.id,
+      { patch: { protein: 1.001 } },
+      grouped.mealRevisionId,
+    );
+    const proteins = result.updatedMeal.items.map((item) => item.protein);
+
+    assert.deepEqual(result.updatedMeal.items.map((item) => item.name), ["零一", "零二", "零三"]);
+    assert.deepEqual(proteins, [0.333, 0.334, 0.334]);
+    assert.ok(proteins.every((value) => Number.isFinite(value) && value >= 0));
+    assert.ok(Math.abs(proteins.reduce((sum, value) => sum + value, 0) - 1.001) <= MACRO_ROUNDING_TOLERANCE);
+    assert.ok(Math.round((Math.max(...proteins) - Math.min(...proteins)) * 1000) / 1000 <= MACRO_ROUNDING_TOLERANCE);
+  });
+
+  it("keeps single-item targets exact and handles zero and adjacent rounding boundaries", async () => {
+    const single = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T12:00:00.000Z",
+      items: [{ foodName: "單項", calories: 100, protein: 9, carbs: 10, fat: 1 }],
+    });
+    const singleResult = await mealCorrectionService.updateMeal(
+      deviceId,
+      single.id,
+      { patch: { protein: 1.234 } },
+      single.mealRevisionId,
+    );
+    assert.deepEqual(singleResult.updatedMeal.items.map((item) => item.protein), [1.234]);
+    assert.equal(singleResult.updatedMeal.protein, 1.234);
+
+    const expectedByTarget = new Map<number, number[]>([
+      [0, [0, 0, 0]],
+      [0.002, [0, 0.001, 0.001]],
+      [0.003, [0.001, 0.001, 0.001]],
+      [0.004, [0.002, 0.001, 0.001]],
+    ]);
+    for (const [target, expected] of expectedByTarget) {
+      const grouped = await foodLoggingService.logGroupedMeal(deviceId, {
+        loggedAt: "2026-04-19T12:00:00.000Z",
+        items: [
+          { foodName: `邊界${target}-一`, calories: 100, protein: 1, carbs: 10, fat: 1 },
+          { foodName: `邊界${target}-二`, calories: 100, protein: 1, carbs: 10, fat: 1 },
+          { foodName: `邊界${target}-三`, calories: 100, protein: 1, carbs: 10, fat: 1 },
+        ],
+      });
+      const result = await mealCorrectionService.updateMeal(
+        deviceId,
+        grouped.id,
+        { patch: { protein: target } },
+        grouped.mealRevisionId,
+      );
+      const proteins = result.updatedMeal.items.map((item) => item.protein);
+
+      assert.deepEqual(proteins, expected);
+      assert.ok(proteins.every((value) => Number.isFinite(value) && value >= 0));
+      assert.ok(Math.abs(proteins.reduce((sum, value) => sum + value, 0) - target) <= MACRO_ROUNDING_TOLERANCE);
+    }
+  });
+
+  it("adjusts equal candidates in insertion order instead of assigning the residual to the final item", async () => {
+    const grouped = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T12:00:00.000Z",
+      items: [
+        { foodName: "平手一", calories: 100, protein: 1, carbs: 10, fat: 1 },
+        { foodName: "平手二", calories: 100, protein: 1, carbs: 10, fat: 1 },
+        { foodName: "平手三", calories: 100, protein: 1, carbs: 10, fat: 1 },
+        { foodName: "平手四", calories: 100, protein: 1, carbs: 10, fat: 1 },
+      ],
+    });
+
+    const result = await mealCorrectionService.updateMeal(
+      deviceId,
+      grouped.id,
+      { patch: { protein: 0.002 } },
+      grouped.mealRevisionId,
+    );
+    const proteins = result.updatedMeal.items.map((item) => item.protein);
+
+    assert.deepEqual(result.updatedMeal.items.map((item) => item.name), ["平手一", "平手二", "平手三", "平手四"]);
+    assert.deepEqual(proteins, [0, 0, 0.001, 0.001]);
+    assert.notEqual(proteins.at(-1), 0.002);
+    assert.ok(Math.abs(proteins.reduce((sum, value) => sum + value, 0) - 0.002) <= MACRO_ROUNDING_TOLERANCE);
+  });
+
+  it("executes the prior final-slot negative control against the persisted residual fixture", async () => {
+    const sourceValues = [1, 1, 1, 1, 1, 1];
+    const target = 0.003;
+    const sourceTotal = sourceValues.reduce((sum, value) => sum + value, 0);
+    const rounded = sourceValues.map((value) => Math.round(target * (value / sourceTotal) * 1000) / 1000);
+    const oldFinalSlot = Math.round((target - rounded.slice(0, -1).reduce((sum, value) => sum + value, 0)) * 1000) / 1000;
+
+    assert.equal(oldFinalSlot, -0.002);
+    assert.ok(oldFinalSlot < 0, "the old final-slot-only algorithm violates non-negative values");
+
+    const grouped = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T12:00:00.000Z",
+      items: sourceValues.map((protein, index) => ({
+        foodName: `負值控制${index + 1}`,
+        calories: 100,
+        protein,
+        carbs: 10,
+        fat: 1,
+      })),
+    });
+    const result = await mealCorrectionService.updateMeal(
+      deviceId,
+      grouped.id,
+      { patch: { protein: target } },
+      grouped.mealRevisionId,
+    );
+    const proteins = result.updatedMeal.items.map((item) => item.protein);
+
+    assert.deepEqual(proteins, [0, 0, 0, 0.001, 0.001, 0.001]);
+    assert.ok(proteins.every((value) => Number.isFinite(value) && value >= 0));
+    assert.ok(Math.abs(proteins.reduce((sum, value) => sum + value, 0) - target) <= MACRO_ROUNDING_TOLERANCE);
+  });
+
+  it("keeps empty grouped replacements on the existing MEAL_ITEMS_REQUIRED backstop", async () => {
+    const grouped = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T12:00:00.000Z",
+      items: [{ foodName: "保留項目", calories: 100, protein: 1, carbs: 10, fat: 1 }],
+    });
+
+    await assert.rejects(
+      () => mealCorrectionService.updateMeal(deviceId, grouped.id, { items: [] }, grouped.mealRevisionId),
+      /MEAL_ITEMS_REQUIRED/,
+    );
   });
 
   it("resolves a named grouped item instead of an unrelated meal-period-only candidate", async () => {
