@@ -11,6 +11,7 @@
 - `loadHistory` 在 `.map` 前先驗證 history response container（Phase 131，#35）；History 週導覽改以驗證過的 `YYYY-MM-DD` 日曆運算，避免宿主時區漂移（Phase 132，#48）。
 - PR policy 的 changelog negative-control 測試改在臨時 git repo 執行，不再受當前分支是否修改 `CHANGELOG.md` 影響。
 - 整合 Dependabot 更新（#136–#142，#145）：`fastify` 5.8.5 → 5.12.1、`@fastify/static` 9.1.3 → 10.1.2（含 GHSA-83w8-p2f5-377r、GHSA-8pvw-jcv7-9cmj 修補；v10 唯一 breaking change `setHeaders` 未被使用）、`sharp` → 0.35.5，並刷新 `find-my-way`、`postcss`、`browserslist`、`baseline-browser-mapping` 的 lockfile 解析。
+- 移除過時的 `fast-uri`、`brace-expansion` security resolutions（#147）：各 parent range 現在自然解析到已修補版本（`fast-uri` 3.1.8／4.2.1、`brace-expansion` 5.0.12），關閉 12 個 runtime Dependabot alerts，並修正 `fast-json-stringify@7` 的 `^4` 範圍被強制降到 3.x；`yarn deps:audit` 為 clean，ADR 0009 同步更新。
 
 ### 驗證
 
