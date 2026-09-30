@@ -33,7 +33,6 @@ tests/harness/tmp/
 
 # Local research, personal notes, and project-level agent habits
 docs/research
-docs/codex.md
 docs/codex-pr-ci.md
 docs/codex-release.md
 docs/issues

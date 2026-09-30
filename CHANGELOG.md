@@ -10,14 +10,17 @@
 - 保留 PR-ready → maintainer merge → post-merge local archive → separately approved runtime refresh 的發布順序；本次收尾不包含 `main` merge、tag、production runtime、Cloudflare Tunnel 或 public smoke。
 - 將 direct runtime dependency `drizzle-orm` 從 resolved `0.39.3` 升級至修補 `GHSA-gpj5-g38j-94v9` 的 `0.45.2`；ADR 0009 以專屬 ORM 相容性證據將原先 deferral 更新為 source/PR review acceptance，且不擴張為 merge 或 production runtime 授權。
 - 將 OpenAI 傳遞 runtime 路徑 `openai > @types/node-fetch > form-data` 的 lockfile 解析由 `form-data@4.0.5` 更新至已修補的 `4.0.6`，關閉 `GHSA-hmw2-7cc7-3qxx` 的 CRLF injection advisory；未變更 OpenAI SDK 版本或 provider API surface。
+- 完成 workflow slimming：GSD 回復為唯一 development lifecycle，local overlay 只保留薄的 planning evidence guidance、planning-tree safety、harness/security/verification delta、SQLite safety/recovery 與 runtime approval 邊界；移除 side-project 日常路徑不需要的 plan-proof parser、exact wiring checker、lease、command receipt、artifact provenance、verification seal、repo-native closeout transaction、tree fingerprint、host normalization、四個 legacy skill binding shims 與重複 routing 文件。
+- 修正 workflow contract 的 clean-clone reproducibility：DB-query safety test 直接呼叫 tracked helper，worktree sync test 在 disposable fixture 生成 hook shim並恢復 stale-parent、重複執行與 primary regular-file negative controls，不再依賴 ignored 本機檔案。
 
 ### 驗證
 
 - Runtime advisory refresh：frozen install 與 dependency-path review 通過；`yarn native:check` 6/6、Fastify static／chat upload targeted integration 97/97 通過；`yarn deps:audit` 從 12 個 high rows 收斂至 ADR 0009 既有的 Drizzle／`form-data` 2 個 high defer。
 - Phase 126：6/6 requirements verified；Phase 127：15/15 success criteria passed；Phase 128：16/16 executed-scope criteria passed，25-entry disposition map 為 20 CLOSED / 3 DEFERRED / 2 OUT-OF-SCOPE。
-- `yarn workflow:state-check`、active planning artifact provenance/seal checks，以及 source wrap 後重新執行的 `yarn release:check` 共同綁定最終 committed source SHA；測試僅使用 mocked 或 harness providers，不宣稱 live-provider、Docker、production 或主觀視覺品質 readiness。
+- `yarn workflow:state-check` 與 source wrap 後重新執行的 `yarn release:check` 共同綁定最終 committed source SHA；測試僅使用 mocked 或 harness providers，不宣稱 live-provider、Docker、production 或主觀視覺品質 readiness。
 - Drizzle 升級驗證通過 frozen install、無高風險／跨 minor API surface 使用的 source scan、`drizzle-kit@0.31.10` 與 ORM compatibility API version `10` 配對、`yarn native:check` `6/6` file-backed migration/persistence roundtrip、`yarn db:generate` `13` tables／no schema drift，以及 `yarn release:check --base=origin/main`；fresh `yarn deps:audit` 已不再回報 Drizzle advisory，且只剩 `form-data` 一個 high finding，因此尚不宣稱 audit clean。
 - `form-data` 升級驗證通過 frozen install、唯一 lock path、OpenAI files/audio multipart negative scan、provider `22/22`、`yarn native:check` `6/6` 與 `yarn release:check --base=origin/main`；fresh `yarn deps:audit` 回報 `Clean: yes`、所有 severity 均為 `0`。
+- Workflow slimming 以 Luna xhigh 子代理完成 callers/bindings/guards/negative-controls 盤點與 scoped implementation；唯一 `.planning` 變更透過 GSD 官方 config interface 遷移 `agent_skills`，沒有建立、推進或修復 planning artifacts。Planning guidance、planning evidence、release/PR、worktree、DB、harness targeted suites、clean-clone reproduction 與 reference scan 驗證替代承接。
 
 ## v3.4 - Unreleased
 

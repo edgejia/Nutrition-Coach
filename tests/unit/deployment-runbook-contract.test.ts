@@ -49,14 +49,15 @@ describe("tracked deployment ordering", () => {
       "Work reaches PR-ready source state on a non-`main` branch",
       "A PR targets `main`",
       "maintainer separately decides whether to merge",
-      "After merge, local post-merge planning archive/closeout runs from updated `main`",
+      "After merge, an explicitly approved local post-merge planning archive/closeout runs from updated `main`",
       "maintainer separately selects the merged source SHA",
       "approved B01 recovery gate quiesces writes",
       "Separately approved R05 migration and R06 build/start gates",
       "Cloudflare Tunnel change and the public-domain smoke retain their own separate approvals",
     ]);
     assert.doesNotMatch(runbook, /GSD milestone branch is verified and closed out/);
-    assert.match(runbook, /If that workflow is paused, stop instead of inventing or skipping the archive/);
+    assert.match(runbook, /explicitly approved local post-merge planning archive\/closeout/);
+    assert.doesNotMatch(runbook, /workflow is paused|Temporary GSD Maintenance Pause/);
     assert.match(runbook, /never run it in the checkout serving the active production runtime/);
     assert.match(runbook, /Only a later R06 approval may build `dist\/client` in that runtime checkout/);
     const smokeSection = runbook.slice(runbook.indexOf("## Manual Smoke Checklist"), runbook.indexOf("## Stop Conditions"));
@@ -181,7 +182,8 @@ describe("tracked deployment ordering", () => {
       "post-merge planning archive/closeout runs from updated `main`",
       "explicitly approves production runtime refresh",
     ]);
-    assert.match(runtime, /If that workflow is paused, stop instead of inventing or skipping the archive/);
+    assert.match(runtime, /do not invent or skip that archive/);
+    assert.doesNotMatch(runtime, /workflow is paused|Temporary GSD Maintenance Pause/);
 
     const build = release.slice(release.indexOf("## Build and Start"), release.indexOf("## Cloudflare Tunnel"));
     assertOrdered(build, [

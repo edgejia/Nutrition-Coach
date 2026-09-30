@@ -20,16 +20,10 @@
 - [Storage recovery](deploy/storage-recovery.md)：B01 backup、R05 migration 與 B02 restore gate
 - [`deploy/archive/`](deploy/archive/)：Railway baseline 與歷史 postmortem
 
-### Workflow contracts
-
-- [Planning proof](workflow/planning-proof.md)：planner／checker proof contract
-- [Runtime governance](workflow/runtime-governance.md)：lease、provenance、receipt 與 verification-seal contract
-
 ## 本機 workflow 文件
 
 以下文件服務 agent 工作流，依 boot contract 保留原檔名與路徑；它們被 `.gitignore` 排除，不是乾淨 checkout 的 source-visible 文件：
 
-- [`codex.md`](codex.md)：Codex routing、GSD 與 just-in-time skills
 - [`codex-pr-ci.md`](codex-pr-ci.md)：GitHub issue、PR policy 與 CI runbook
 - [`codex-release.md`](codex-release.md)：source release、runtime refresh、smoke 與 closeout guardrails
 
