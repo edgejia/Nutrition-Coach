@@ -30,15 +30,15 @@ describe("PR Check workflow enforcement contract", () => {
     assert.equal(sources.match(/yarn release:check --base="origin\/\$\{RELEASE_BASE_REF\}"/g)?.length, 2);
   });
 
-  it("documents timeout observability without weakening release proof", async () => {
+  it("documents timeout and workspace observability without a receipt subsystem", async () => {
     const releaseCheck = await fs.readFile(releaseCheckUrl, "utf8");
     assert.match(releaseCheck, /MAX_RELEASE_DURATION_MS = 18 \* 60 \* 1000/);
     assert.match(releaseCheck, /signalChildGroup\(child, "SIGTERM"\)/);
     assert.match(releaseCheck, /signalChildGroup\(child, "SIGKILL"\)/);
     assert.match(releaseCheck, /completed child left a live process group/);
-    assert.match(releaseCheck, /publishPassedCommandReceipt/);
-    assert.match(releaseCheck, /testHook: \(stage\) => \{\n\s+if \(stage === "before_receipt_commit_cas"\) assertWithinReleaseDeadline\(\);/);
+    assert.match(releaseCheck, /stableWorkspaceFingerprint/);
+    assert.match(releaseCheck, /workspaceAfterSha256 !== workspaceBeforeSha256/);
+    assert.doesNotMatch(releaseCheck, /publishPassedCommandReceipt|workflow-lease|command-receipt/);
     assert.match(releaseCheck, /console\.log\("\\n\[release-check\] PASS"\)/);
-
   });
 });

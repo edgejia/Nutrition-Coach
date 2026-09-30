@@ -8,7 +8,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const wrapperPath = path.resolve(".codex/skills/nutrition-db-query/db-query.sh");
+const helperPath = path.resolve("scripts/workflow/safe-db-query.mjs");
 
 function digest(filePath: string) {
   return createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
@@ -27,8 +27,8 @@ function createFixture() {
 }
 
 function runQuery(databasePath: string, query: string, ...extraArgs: string[]) {
-  return spawnSync("bash", [wrapperPath, query, ...extraArgs], {
-    env: { ...process.env, DB_QUERY_PATH: databasePath, TZ: "Asia/Taipei" },
+  return spawnSync(process.execPath, [helperPath, `--db=${databasePath}`, query, ...extraArgs], {
+    env: { ...process.env, TZ: "Asia/Taipei" },
     encoding: "utf8",
   });
 }
