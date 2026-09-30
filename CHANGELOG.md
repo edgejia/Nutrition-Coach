@@ -5,6 +5,7 @@
 ### 變更
 
 - 新增 [家用 Server 部署](docs/deploy/home-server-wsl.md) runbook：在 Windows + WSL2 上以 systemd 常駐 app，透過 Cloudflare Tunnel 對外、Cloudflare Access 限制只有自己能使用，並以 SQLite online backup 每日備份到 OneDrive。
+- 支援安裝到手機主畫面（PWA）：新增 web app manifest（standalone、`start_url: /`）、192／512 滿版 icon（含 maskable）與 apple-touch-icon；manifest 以 `crossorigin="use-credentials"` 載入，放在 Cloudflare Access 後面也能正常安裝。未加入 service worker，避免快取干擾 API 與 SSE。
 
 ## v3.6 - Unreleased
 
